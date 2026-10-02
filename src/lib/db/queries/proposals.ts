@@ -1,4 +1,8 @@
-/** Changes to the app proposed through the room (room_proposals): who proposed what, and the pull request it became. */
+/**
+ * Changes to the app proposed through the room (room_proposals): who proposed what, and each file's whole new text.
+ * A proposal is 'pending' from the moment it is kept; a maintainer can take one down ('withdrawn'). Whether it has
+ * become a pull request yet is GitHub's to say, not this table's: the branch name carries the proposal's number.
+ */
 import { query, queryOne } from '@/lib/db';
 
 export interface ProposalRow {
@@ -7,21 +11,77 @@ export interface ProposalRow {
   proposer: string | null;
   task_id: number | null;
   branch: string;
-  pr_number: number | null;
-  pr_url: string | null;
+  status: 'pending' | 'withdrawn';
+  files: number;
   created_at: Date;
 }
 
-export async function insertProposal(p: { member_id: string; task_id: number | null; title: string; branch: string; pr_number: number; pr_url: string }): Promise<number> {
-  const r = await queryOne<{ id: number }>(`INSERT INTO room_proposals (member_id, task_id, title, branch, pr_number, pr_url) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id::int AS id`, [p.member_id, p.task_id, p.title, p.branch, p.pr_number, p.pr_url]);
-  if (!r) throw new Error('proposal insert failed');
-  return r.id;
+export interface ProposalDetail {
+  id: number;
+  title: string;
+  summary: string;
+  by_line: string;
+  task_id: number | null;
+  branch: string;
+  base: string | null;
+  changes: Array<{ path: string; content: string | null }>;
+  created_at: Date;
 }
 
-export async function listProposals(limit = 50): Promise<ProposalRow[]> {
-  return query<ProposalRow>(
-    `SELECT p.id::int AS id, p.title, m.name AS proposer, p.task_id::int AS task_id, p.branch, p.pr_number, p.pr_url, p.created_at
-       FROM room_proposals p LEFT JOIN room_members m ON m.id = p.member_id ORDER BY p.id DESC LIMIT $1`,
-    [limit],
+/** How long a proposal stays on the public list for the job that opens pull requests. */
+export const PENDING_DAYS = 14;
+
+/** Keeps a proposal and names its branch after its number, in one statement. */
+export async function insertProposal(p: {
+  member_id: string;
+  task_id: number | null;
+  title: string;
+  summary: string;
+  by_line: string;
+  base: string | null;
+  slug: string;
+  changes: Array<{ path: string; content: string | null }>;
+}): Promise<{ id: number; branch: string }> {
+  const r = await queryOne<{ id: number; branch: string }>(
+    `INSERT INTO room_proposals (id, member_id, task_id, title, summary, by_line, base, branch, changes)
+     SELECT n, $1, $2, $3, $4, $5, $6, 'room/p' || n || '-' || $7, $8::jsonb
+       FROM nextval(pg_get_serial_sequence('room_proposals', 'id')) AS n
+     RETURNING id::int AS id, branch`,
+    [p.member_id, p.task_id, p.title, p.summary, p.by_line, p.base, p.slug, JSON.stringify(p.changes)],
   );
+  if (!r) throw new Error('proposal insert failed');
+  return r;
+}
+
+/** For /tasks and /editor/room: the latest proposals, without their contents. */
+export async function listProposals(limit = 50, withdrawn = false): Promise<ProposalRow[]> {
+  return query<ProposalRow>(
+    `SELECT p.id::int AS id, p.title, m.name AS proposer, p.task_id::int AS task_id, p.branch, p.status, jsonb_array_length(p.changes) AS files, p.created_at
+       FROM room_proposals p LEFT JOIN room_members m ON m.id = p.member_id
+      WHERE ($2::boolean OR p.status = 'pending') ORDER BY p.id DESC LIMIT $1`,
+    [limit, withdrawn],
+  );
+}
+
+/** For /api/proposals: what the job that opens pull requests has to look at. Oldest first, so nothing waits behind newer ones. */
+export async function pendingProposals(limit = 300): Promise<Array<{ id: number; branch: string; title: string; created_at: Date }>> {
+  return query(
+    `SELECT id::int AS id, branch, title, created_at FROM room_proposals
+      WHERE status = 'pending' AND created_at > now() - ($2::int * interval '1 day') ORDER BY id ASC LIMIT $1`,
+    [limit, PENDING_DAYS],
+  );
+}
+
+/** One pending proposal with every file's new text, or null when there is none to hand out. */
+export async function getPendingProposal(id: number): Promise<ProposalDetail | null> {
+  return queryOne<ProposalDetail>(
+    `SELECT id::int AS id, title, summary, by_line, task_id::int AS task_id, branch, base, changes, created_at FROM room_proposals
+      WHERE id = $1 AND status = 'pending' AND created_at > now() - ($2::int * interval '1 day')`,
+    [id, PENDING_DAYS],
+  );
+}
+
+/** A maintainer takes a proposal down, or puts it back. */
+export async function setProposalStatus(id: number, status: 'pending' | 'withdrawn'): Promise<void> {
+  await query(`UPDATE room_proposals SET status = $2 WHERE id = $1`, [id, status]);
 }

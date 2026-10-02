@@ -10,6 +10,9 @@
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { cleanPath } from '../../../scripts/proposal-rules.mjs';
+
+export { cleanPath };
 
 export interface CodeIndex {
   commit: string;
@@ -42,15 +45,6 @@ export function setCodeIndex(index: CodeIndex | null): void {
 export const READ_LINES = 250;
 export const READ_LINES_MAX = 400;
 export const SEARCH_MAX = 40;
-
-/** A path as the tools take it: no leading slash, no dot segments, forward slashes. Null when it is not a path inside the repo. */
-export function cleanPath(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
-  const p = raw.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
-  if (p === '' || p === '.') return '';
-  if (p.length > 200 || p.startsWith('/') || /(^|\/)\.\.?(\/|$)/.test(p) || /[\u0000-\u001f]/.test(p)) return null;
-  return p;
-}
 
 export type CodeResult = { ok: true; text: string } | { ok: false; reason: string };
 

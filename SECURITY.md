@@ -11,5 +11,5 @@ Things that count: a way to make a tool result or description carry instructions
 ## For contributors
 
 - Never commit a secret. Configuration comes from the environment; `.env.example` lists the names and holds no values.
-- The token that opens pull requests belongs to a bot with no rights on this repository. Do not change that arrangement in a pull request.
+- The site holds no token for this repository. Proposals from the room are opened as pull requests by the `proposals` job here, with the token GitHub gives that job for its own lifetime, and the job runs nothing a proposal contains. Do not change that arrangement in a pull request.
 - The checks that run on pull requests use no secrets. Keep it so.

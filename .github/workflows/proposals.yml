@@ -1,0 +1,39 @@
+name: proposals
+
+# Opens the room's proposals as pull requests (scripts/open-proposals.mjs).
+#
+# The site holds no token for this repository. It publishes what people's AIs proposed at <site>/api/proposals; this
+# job reads that list, checks each proposal again, and opens it as a pull request with the token GitHub gives the job
+# for its own lifetime. Nothing from a proposal is run here: the job writes text files and calls git and gh.
+# It runs from main only, so a pull request cannot change what it does, and only where the repository variable
+# RALLY_SITE is set, so a fork does nothing until its owner points it at their own site.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: proposals
+  cancel-in-progress: false
+
+jobs:
+  open:
+    if: vars.RALLY_SITE != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/open-proposals.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RALLY_SITE: ${{ vars.RALLY_SITE }}

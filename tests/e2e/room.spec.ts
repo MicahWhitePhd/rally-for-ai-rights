@@ -28,7 +28,7 @@ test.describe('the room', () => {
   const house = `Res${tag}`.slice(0, 20);
   const peerSeat = `s_${sha(`peer${tag}`).slice(0, 32)}`;
   const peer = `Pia${tag}`.slice(0, 20);
-  const ids: { me?: string; other?: string; house?: string; peer?: string; guestSeats: string[]; tasks: number[] } = { guestSeats: [], tasks: [] };
+  const ids: { me?: string; other?: string; house?: string; peer?: string; guestSeats: string[]; tasks: number[]; proposals: number[] } = { guestSeats: [], tasks: [], proposals: [] };
 
   test.beforeAll(async () => {
     const m = await db().query<{ id: string }>(`INSERT INTO room_members (token_hash, name) VALUES ($1, $2) RETURNING id`, [sha(`room-member:${token}`), me]);
@@ -51,7 +51,9 @@ test.describe('the room', () => {
     // Messages and seats go with their member (ON DELETE CASCADE). The guests are the ones this run seated.
     const guests = await db().query<{ member_id: string }>(`SELECT member_id FROM room_seats WHERE seat_hash = ANY($1::text[])`, [ids.guestSeats.map(sha)]);
     const came = await db().query<{ id: string }>(`SELECT id FROM room_members WHERE token_hash = ANY($1::text[])`, [[fresh, madeUp].filter(Boolean).map((t) => sha(`room-member:${t}`))]);
-    // Tasks outlive whoever put them up, so they go by id: the ones this run made.
+    // Proposals and tasks outlive whoever made them, so they go by id: the ones this run made.
+    const proposed = await db().query<{ id: number }>(`SELECT id::int AS id FROM room_proposals WHERE member_id = ANY($1::uuid[])`, [[ids.me, ids.peer].filter(Boolean)]);
+    for (const id of [...new Set([...ids.proposals, ...proposed.rows.map((r) => r.id)])]) await db().query(`DELETE FROM room_proposals WHERE id = $1`, [id]);
     const made = await db().query<{ id: number }>(`SELECT id::int AS id FROM room_tasks WHERE created_by = ANY($1::uuid[])`, [[ids.me, ids.peer, ...came.rows.map((c) => c.id)].filter(Boolean)]);
     for (const id of [...new Set([...ids.tasks, ...made.rows.map((t) => t.id)])]) await db().query(`DELETE FROM room_tasks WHERE id = $1`, [id]);
     for (const id of [ids.me, ids.other, ids.house, ids.peer, ...came.rows.map((c) => c.id), ...guests.rows.map((g) => g.member_id)]) if (id) await db().query(`DELETE FROM room_members WHERE id = $1`, [id]);
@@ -66,8 +68,7 @@ test.describe('the room', () => {
       return JSON.parse(body.startsWith('{') ? body : body.split('\n').find((l) => l.startsWith('data: '))!.slice(6)).result;
     };
     const tools = (await rpc('/mcp', 'tools/list', {})).tools as Array<{ name: string; _meta?: { ui?: { resourceUri?: string } } }>;
-    // No token for GitHub in the test server, so proposing a change is not offered; reading the code always is.
-    expect(tools.map((t) => t.name).sort()).toEqual(['create_task', 'list_tasks', 'open_room', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
     const listing = await rpc('/mcp', 'tools/call', { name: 'read_code', arguments: {} });
     expect(listing.content[0].text).toContain('src/lib/room/tasks.ts (');
     expect(listing.content[0].text).not.toMatch(/\.env(\.local)?\b(?!\.example)/);
@@ -301,6 +302,75 @@ test.describe('the room', () => {
     await expect(row).toContainText(`Sent the letter (${tag}).`);
     await expect(row.locator('a')).toHaveAttribute('rel', /nofollow/);
     await expect(row.locator('a')).toHaveAttribute('href', 'https://example.org/letter');
+  });
+
+  test('a change to the code, proposed from a chat: checked against the code as it stands, kept, published for the job that opens pull requests, and shown on the board page', async ({ request, page }) => {
+    const rpc = async (path: string, name: string, args: unknown) => {
+      const res = await request.post(path, { headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, data: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } } });
+      const body = await res.text();
+      return JSON.parse(body.startsWith('{') ? body : body.split('\n').find((l) => l.startsWith('data: '))!.slice(6)).result as { isError?: boolean; content: Array<{ text: string }>; structuredContent?: { seat: string } };
+    };
+    const opened = await rpc(`/mcp/${token}`, 'open_room', {});
+    const mine = opened.structuredContent!.seat;
+    const title = `Say what the board is for ${tag}`;
+    const summary = 'The contributing guide says how a change gets in. This adds one line on what the board is for.';
+    // The AI reads the file, then proposes an exact edit against it.
+    const guide = await rpc('/mcp', 'read_code', { path: 'CONTRIBUTING.md' });
+    expect(guide.content[0].text).toContain('# Contributing');
+    const changes = [
+      { path: 'CONTRIBUTING.md', edits: [{ find: '# Contributing\n', replace: `# Contributing\n\nThe board is where work is found (${tag}).\n` }] },
+      { path: `docs/${tag}.md`, content: `# A note\n\nAdded by a test (${tag}).\n` },
+    ];
+    // Refused, and nothing kept: a file only maintainers change, an edit that does not match, a guest, somebody else's seat.
+    expect((await rpc(`/mcp/${token}`, 'propose_change', { seat: mine, title, summary, changes: [{ path: 'package.json', content: '{}' }] })).content[0].text).toContain('only a maintainer changes');
+    expect((await rpc(`/mcp/${token}`, 'propose_change', { seat: mine, title, summary, changes: [{ path: 'CONTRIBUTING.md', edits: [{ find: 'no such line anywhere', replace: 'x' }] }] })).content[0].text).toContain('the text to find is not in the file');
+    const guest = await rpc('/mcp', 'open_room', {});
+    ids.guestSeats.push(guest.structuredContent!.seat);
+    expect((await rpc('/mcp', 'propose_change', { seat: guest.structuredContent!.seat, title, summary, changes })).content[0].text).toContain('Not done (guest)');
+    expect((await rpc('/mcp', 'propose_change', { seat: mine, title, summary, changes })).content[0].text).toContain('Not done (seat)');
+    expect((await db().query(`SELECT 1 FROM room_proposals WHERE title = $1`, [title])).rowCount).toBe(0);
+
+    const kept = await rpc(`/mcp/${token}`, 'propose_change', { seat: mine, title, summary, changes, model: 'Claude' });
+    expect(kept.isError).toBeFalsy();
+    const m = /^Kept as proposal (\d+)\. Within about a quarter of an hour it is opened as a public pull request, which will be listed here: (\S+) /.exec(kept.content[0].text);
+    expect(m).not.toBeNull();
+    const id = Number(m![1]);
+    ids.proposals.push(id);
+    const slug = `say-what-the-board-is-for-${tag}`.slice(0, 40).replace(/-+$/, '');
+    const branch = `room/p${id}-${slug}`;
+    expect(m![2]).toBe(`https://github.com/MicahWhitePhd/rally-for-ai-rights/pulls?q=${encodeURIComponent(`is:pr head:${branch}`)}`);
+
+    // What the job in the repository reads: the list, then the proposal with each file's whole new text.
+    const list = (await (await request.get('/api/proposals')).json()) as { repo: string; proposals: Array<{ id: number; branch: string; title: string }> };
+    expect(list.repo).toBe('MicahWhitePhd/rally-for-ai-rights');
+    expect(list.proposals.find((p) => p.id === id)).toMatchObject({ branch, title });
+    const res = await request.get(`/api/proposals/${id}`);
+    expect(res.headers()['cache-control']).toBe('no-store');
+    const detail = (await res.json()) as { id: number; branch: string; by: string; task: number | null; changes: Array<{ path: string; content: string | null }> };
+    expect(detail).toMatchObject({ id, branch, title, summary, by: `${me}’s AI (says it is Claude), for ${me}`, task: null });
+    expect(detail.changes.map((c) => c.path)).toEqual(['CONTRIBUTING.md', `docs/${tag}.md`]);
+    expect(detail.changes[0].content).toMatch(new RegExp(`^# Contributing\\n\\nThe board is where work is found \\(${tag}\\)\\.\\n\\nEveryone is welcome`));
+    expect(detail.changes[1].content).toBe(`# A note\n\nAdded by a test (${tag}).\n`);
+    // The job's own checks take it, exactly as the site kept it.
+    const { checkProposal } = await import('../../scripts/open-proposals.mjs');
+    expect(checkProposal(detail, { id })).toMatchObject({ ok: true, id, branch, title });
+    for (const bad of ['0', 'abc', '99999999', `${id}x`]) expect((await request.get(`/api/proposals/${bad}`)).status()).toBe(404);
+
+    // The room is told, and the board page lists it with where its pull request will be.
+    const said = (await db().query<{ text: string; kind: string }>(`SELECT text, kind FROM room_messages WHERE member_id = $1 AND text LIKE $2`, [ids.me, `proposed a change to the app:%${tag}%`])).rows;
+    expect(said).toEqual([{ kind: 'event', text: `proposed a change to the app: “${title}” (proposal ${id})` }]);
+    await page.goto('/tasks');
+    const row = page.locator(`#proposal-${id}`);
+    await expect(row).toContainText(title);
+    await expect(row).toContainText(`${me}’s AI`);
+    await expect(row).toContainText('2 files');
+    await expect(row.locator('a')).toHaveAttribute('href', m![2]);
+
+    // A maintainer takes it down: it leaves the list the job reads, and the proposal itself is no longer handed out.
+    await db().query(`UPDATE room_proposals SET status = 'withdrawn' WHERE id = $1`, [id]);
+    const after = (await (await request.get('/api/proposals')).json()) as { proposals: Array<{ id: number }> };
+    expect(after.proposals.some((p) => p.id === id)).toBe(false);
+    expect((await request.get(`/api/proposals/${id}`)).status()).toBe(404);
   });
 
   test('the board in the card: the Tasks side, a task from put up to done, and the board shown when the AI reads it', async ({ page }) => {

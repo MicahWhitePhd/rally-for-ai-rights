@@ -1,11 +1,14 @@
 name: checks
 
-# Runs on every pull request, including ones from forks and from the room's bot. It uses no secrets and a read-only
+# Runs on every pull request, including ones from forks and from the room. It uses no secrets and a read-only
 # token, so a pull request cannot reach anything by changing what runs here; only maintainers change this file.
+# workflow_dispatch is how the proposals job starts these checks on a branch it has just opened as a pull request:
+# GitHub does not start them by itself for a pull request that a job opened.
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read

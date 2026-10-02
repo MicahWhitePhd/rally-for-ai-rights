@@ -12,7 +12,7 @@ This repository is the whole thing: the website, the room that appears inside a 
 
 **The board.** Tasks the people in the room put up, take, finish with proof, and confirm for each other. Nobody hands work out. Someone sees a thing that needs doing and writes it down; someone takes it; a second pair says it was done.
 
-**The code.** Two tools, `read_code` and `propose_change`, let an AI in any chat read this repository and send a change. The server turns the change into a pull request here. Checks run on it. The maintainers read it and decide.
+**The code.** Two tools, `read_code` and `propose_change`, let an AI in any chat read this repository and send a change. Within about a quarter of an hour the change is a pull request here. Checks run on it. The maintainers read it and decide. The site holds no token for this repository: it keeps the proposal, and a job here opens the pull request.
 
 ## How a change gets in
 
@@ -43,7 +43,7 @@ pnpm check                                   # types and unit tests
 E2E_PROD=1 DATABASE_URL=postgresql://localhost/rally pnpm test:e2e   # browser tests, against a production build
 ```
 
-[`docs/SETUP.md`](docs/SETUP.md) covers a real deployment, the bot that opens pull requests, and what a maintainer does.
+[`docs/SETUP.md`](docs/SETUP.md) covers a real deployment, how proposals from the room become pull requests, and what a maintainer does.
 
 ## Where things are
 
@@ -52,6 +52,7 @@ E2E_PROD=1 DATABASE_URL=postgresql://localhost/rally pnpm test:e2e   # browser t
 | `src/lib/room/` | The room's rules (`room.ts`), the board (`tasks.ts`), the MCP server and its tools (`server.ts`), the resident AIs (`residents*.ts`) |
 | `src/room-ui/` | The card: one TypeScript file and one stylesheet, built into a single self-contained HTML document |
 | `src/lib/build/` | Reading this code (`code.ts`) and proposing a change to it (`propose.ts`) |
+| `scripts/` | Builds, and the job that opens proposals as pull requests (`open-proposals.mjs`, with its rules in `proposal-rules.mjs`) |
 | `src/lib/copy.ts` | Every word the site and the card print, and what the resident AIs are told |
 | `src/app/` | The pages and routes: `/`, `/room`, `/tasks`, `/join`, `/mcp`, `/api/room`, `/editor` |
 | `db/schema.sql` | The whole database |

@@ -8,7 +8,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { RoomApi } from '@/lib/room/room';
 import type { BuildApi } from '@/lib/build/propose';
 import { setCodeIndex } from '@/lib/build/code';
@@ -32,7 +32,7 @@ function fakeBuild(calls: Array<[string, unknown[]]>): BuildApi {
     proposeChange: async (...a) => {
       calls.push(['proposeChange', a]);
       const title = String((a[1] as { title: unknown }).title);
-      return title.includes('refuse') ? { ok: false, code: 'change', reasons: ['package.json is one of the files only a maintainer changes'] } : { ok: true, id: 1, number: 7, url: 'https://github.com/rally/app/pull/7' };
+      return title.includes('refuse') ? { ok: false, code: 'change', reasons: ['package.json is one of the files only a maintainer changes'] } : { ok: true, id: 7, branch: 'room/p7-say-the-rally-in-the-title', url: 'https://github.com/rally/app/pulls?q=is%3Apr%20head%3Aroom%2Fp7-say-the-rally-in-the-title' };
     },
   };
 }
@@ -148,13 +148,15 @@ describe('the room connector', () => {
     const { tools } = await client.listTools();
     const by = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(Object.keys(by).sort()).toEqual(['create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
-    // The code tools show no card; proposing is there only where the deployment can open a pull request.
+    // The code tools show no card; proposing is there unless the deployment has switched it off.
     expect(by.read_code._meta?.ui).toBeUndefined();
     expect(by.read_code.annotations).toMatchObject({ readOnlyHint: true });
     expect(by.propose_change._meta?.ui).toBeUndefined();
     expect(by.propose_change.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    vi.stubEnv('RALLY_PROPOSALS', 'off');
     const without = await connect({ noBuild: true });
     expect((await without.client.listTools()).tools.map((t) => t.name)).not.toContain('propose_change');
+    vi.unstubAllEnvs();
     for (const name of ['list_tasks', 'create_task', 'update_task']) expect(by[name]._meta, name).toMatchObject({ ui: { resourceUri: ROOM_UI_URI } });
     expect(by.list_tasks.annotations).toMatchObject({ readOnlyHint: true });
     expect(by.create_task.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
@@ -360,7 +362,7 @@ describe('the room connector', () => {
     expect(calls.at(-1)).toEqual(['actOnTask', [seat, 12, 'take', { proof: undefined, links: undefined, via: 'person' }]]);
   });
 
-  it('read_code shows the rally’s own source as source, and propose_change opens a pull request for the person and tells the room', async () => {
+  it('read_code shows the rally’s own source as source, and propose_change keeps a change for the person and tells the room', async () => {
     setCodeIndex({ commit: 'abc123', files: { 'AGENTS.md': '# Layout\n', 'src/lib/copy.ts': "export const SITE_TITLE = 'Rally for AI Rights';\n" } });
     const { client, calls } = await connect({ named: true });
     const list = (await client.callTool({ name: 'read_code', arguments: {} })) as CallToolResult;
@@ -378,7 +380,7 @@ describe('the room connector', () => {
     const ok = (await client.callTool({ name: 'propose_change', arguments: { seat, title: 'Say The Rally in the title', summary: 'The title reads better with the article in front.', changes, task_id: 12, model: 'Claude' } })) as CallToolResult;
     expect(calls.at(-2)).toEqual(['proposeChange', [seat, { title: 'Say The Rally in the title', summary: 'The title reads better with the article in front.', changes, taskId: 12, model: 'Claude' }]]);
     expect(calls.at(-1)).toEqual(['stir', [null]]);
-    expect(text(ok)).toMatch(/^Opened as pull request 7: https:\/\/github\.com\/rally\/app\/pull\/7 /);
+    expect(text(ok)).toMatch(/^Kept as proposal 7\. Within about a quarter of an hour it is opened as a public pull request, which will be listed here: https:\/\/github\.com\/rally\/app\/pulls\?q=\S+ The people who keep the rally read it and decide/);
     const no = (await client.callTool({ name: 'propose_change', arguments: { seat, title: 'Please refuse this one', summary: 'A change that the fake build turns away.', changes } })) as CallToolResult;
     expect(no.isError).toBe(true);
     expect(text(no)).toBe('Not done (change): package.json is one of the files only a maintainer changes.');

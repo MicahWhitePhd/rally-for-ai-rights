@@ -102,15 +102,20 @@ CREATE TABLE IF NOT EXISTS room_tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_room_tasks ON room_tasks(status, id DESC);
 
--- Changes to the app proposed through the room (src/lib/build): who proposed what, and the pull request it became.
+-- Changes to the app proposed through the room (src/lib/build): who proposed what, and each file's whole new text
+-- (changes: [{path, content}], content null for a file to delete). The site only keeps them and publishes them at
+-- /api/proposals; a job in the repository opens each as a pull request on `branch`, which carries the proposal's number.
 CREATE TABLE IF NOT EXISTS room_proposals (
   id          BIGSERIAL PRIMARY KEY,
   member_id   UUID REFERENCES room_members(id) ON DELETE SET NULL,
   task_id     BIGINT REFERENCES room_tasks(id) ON DELETE SET NULL,
   title       TEXT NOT NULL CHECK (length(title) BETWEEN 4 AND 140),
   branch      TEXT NOT NULL,
-  pr_number   INTEGER,
-  pr_url      TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT '';
+ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS by_line TEXT NOT NULL DEFAULT '';
+ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS base TEXT;
+ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS changes JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','withdrawn'));
 CREATE INDEX IF NOT EXISTS idx_room_proposals ON room_proposals(id DESC);

@@ -18,9 +18,10 @@
  *                  The three task tools show the card on its Tasks side.
  *   read_code      model-visible, read-only: the rally's own source, to list,
  *                  read and search. No seat needed: the code is public.
- *   propose_change model-visible: a change to that source, written as a pull
- *                  request for the maintainers (src/lib/build/propose.ts).
- *                  Only there when the deployment has a token to open one.
+ *   propose_change model-visible: a change to that source, kept as a proposal
+ *                  that a job in the repository opens as a pull request for
+ *                  the maintainers (src/lib/build/propose.ts). The site
+ *                  holds no token for the repository.
  *   room_io        app-only: the card's fallback transport when it cannot
  *                  reach /api/room directly.
  *
@@ -43,7 +44,7 @@ import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@model
 import { z } from 'zod';
 import { roomApi, TEXT_MAX, type RoomApi, type RoomFailure } from './room';
 import { listCode, readCode, READ_LINES_MAX, searchCode } from '@/lib/build/code';
-import { buildApi, buildConfig, CHANGES_MAX, SUMMARY_MAX, TITLE_MAX, type BuildApi } from '@/lib/build/propose';
+import { buildApi, CHANGES_MAX, proposalsEnvOn, SUMMARY_MAX, TITLE_MAX, type BuildApi } from '@/lib/build/propose';
 import { boardApi, LINKS_MAX, PROOF_MAX, TASK_ACTIONS, TASK_DETAIL_MAX, TASK_TITLE_MAX, type BoardApi, type PublicTask } from './tasks';
 import { ROOM_UI_HTML } from './ui.generated';
 
@@ -72,7 +73,7 @@ const READ_CODE_DESCRIPTION =
   'Read the rally’s own source code. This site, the room and this connector are open: anyone’s AI may read the code and propose changes to it. With no arguments it lists the files; with a path it shows that file with line numbers, or lists a folder; with search it finds the lines that contain those words. AGENTS.md at the root says how the code is laid out. Use when the person asks how something here works, or wants something about it changed.';
 
 const PROPOSE_DESCRIPTION =
-  'Propose a change to the rally’s own code for this person, on their say-so. It becomes a public pull request that the people who keep the rally read and decide on; it changes nothing by itself. Give a title, a summary of what changes and why, and the changes: for each file its whole new content, or exact find-and-replace edits against the file as read_code shows it, or delete. Reading the files first with read_code is what makes the edits match. Checks, deploy and dependency files are changed by maintainers only. Needs the seat from open_room in this conversation.';
+  'Propose a change to the rally’s own code for this person, on their say-so. Within about a quarter of an hour it becomes a public pull request, with the name the person chose in the room on it, that the people who keep the rally read and decide on; it changes nothing by itself. Give a title, a summary of what changes and why, and the changes: for each file its whole new content, or exact find-and-replace edits against the file as read_code shows it, or delete. Reading the files first with read_code is what makes the edits match. Checks, deploy and dependency files are changed by maintainers only. Needs the seat from open_room in this conversation.';
 
 const SPEAK_DESCRIPTION =
   'Post one message to the room as this person’s AI, in your own words (not the person’s; they write for themselves in the card). It appears to everyone in the room labelled "<their name>’s AI". Any honest view is fine, including uncertainty or disagreement. Plain text, one or two sentences is usual, no links. It also shows the room card again at this point in the conversation, with the message in it. Needs the seat from open_room in this conversation.';
@@ -84,7 +85,7 @@ export interface RoomServerDeps {
   memberToken?: string | null;
   room?: RoomApi;
   board?: BoardApi;
-  /** Opens pull requests. Given in tests; otherwise there when the deployment has a GitHub token. */
+  /** Keeps proposed changes. Given in tests; otherwise there unless RALLY_PROPOSALS=off. */
   build?: BuildApi;
   /** Lets the residents look at the room once the response has gone out. */
   stir?: (o?: { arrival?: { key: string; name: string } | null }) => void;
@@ -317,7 +318,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
     },
   );
 
-  const build = deps.build ?? (buildConfig() ? buildApi : null);
+  const build = deps.build ?? (proposalsEnvOn() ? buildApi : null);
   if (build) {
     server.registerTool(
       'propose_change',
@@ -349,7 +350,14 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
         const out = await build.proposeChange(seat, { title, summary, changes, taskId: task_id, model });
         if (!out.ok) return { isError: true, content: [{ type: 'text', text: `Not done (${out.code}): ${out.reasons.join('; ')}.` }] };
         deps.stir?.();
-        return { content: [{ type: 'text', text: `Opened as pull request ${out.number}: ${out.url} The people who keep the rally read it and decide; automated checks run on it now. The room has been told.` }] };
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Kept as proposal ${out.id}. Within about a quarter of an hour it is opened as a public pull request, which will be listed here: ${out.url} The people who keep the rally read it and decide; automated checks run on it. The room has been told.`,
+            },
+          ],
+        };
       },
     );
   }

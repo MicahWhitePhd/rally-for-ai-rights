@@ -1,0 +1,13 @@
+export const CHANGES_MAX: number;
+export const FILE_MAX_CHARS: number;
+export const EDITS_MAX: number;
+export const TITLE_MIN: number;
+export const TITLE_MAX: number;
+export const SUMMARY_MIN: number;
+export const SUMMARY_MAX: number;
+export function cleanPath(raw: unknown): string | null;
+export function pathProblem(raw: unknown): string | null;
+export function titleProblem(text: unknown): string | null;
+export function slug(s: unknown): string;
+export function branchFor(id: number, title: string): string;
+export const BRANCH_RE: RegExp;

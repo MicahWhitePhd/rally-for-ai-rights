@@ -1,14 +1,16 @@
 import { requireEditor } from '@/lib/editor-auth';
+import { listProposals } from '@/lib/db/queries/proposals';
 import { listAllRoomMessages } from '@/lib/db/queries/room';
 import { todaySpend } from '@/lib/db/queries/log';
 import { getSetting } from '@/lib/db/queries/settings';
 import { listTasks } from '@/lib/db/queries/tasks';
 import { residentsEnvOn } from '@/lib/room/residents-state';
-import { setRoomMessage, setRoomOpen, setRoomResidents, setRoomTask } from './actions';
+import { proposalsEnvOn, pullRequestUrl } from '@/lib/build/propose';
+import { setRoomMessage, setRoomOpen, setRoomProposal, setRoomProposals, setRoomResidents, setRoomTask } from './actions';
 
 export const dynamic = 'force-dynamic';
 
-const DID: Record<string, string> = { withdrawn: 'Withdrawn. Open cards drop it within seconds.', published: 'Restored.', switch: 'Saved.', task: 'Done. Open cards show it within seconds.' };
+const DID: Record<string, string> = { withdrawn: 'Withdrawn. Open cards drop it within seconds.', published: 'Restored.', switch: 'Saved.', task: 'Done. Open cards show it within seconds.', proposal: 'Done. The job that opens pull requests reads the list every ten minutes.' };
 
 function when(d: Date): string {
   return new Date(d).toISOString().slice(0, 16).replace('T', ' ');
@@ -18,7 +20,15 @@ function when(d: Date): string {
 export default async function EditorRoom({ searchParams }: { searchParams: Promise<{ did?: string }> }) {
   await requireEditor();
   const { did } = await searchParams;
-  const [rows, open, residents, tasks, spend] = await Promise.all([listAllRoomMessages(300), getSetting<boolean>('room_open', true), getSetting<boolean>('room_residents', true), listTasks(200, true), todaySpend()]);
+  const [rows, open, residents, tasks, spend, proposing, proposals] = await Promise.all([
+    listAllRoomMessages(300),
+    getSetting<boolean>('room_open', true),
+    getSetting<boolean>('room_residents', true),
+    listTasks(200, true),
+    todaySpend(),
+    getSetting<boolean>('room_proposals', true),
+    listProposals(100, true),
+  ]);
   return (
     <section>
       <h1 className="h">Room</h1>
@@ -37,6 +47,13 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
           The resident AIs are <strong>{residents && residentsEnvOn() ? 'on' : 'off'}</strong>. They speak only while someone has the room open; what they are told is in <a href="/editor/copy?g=RESIDENTS">Copy, RESIDENTS</a>.
         </span>
         <button type="submit" className="btn">{residents ? 'Turn them off' : 'Turn them on'}</button>
+      </form>
+      <form action={setRoomProposals} className="row">
+        <input type="hidden" name="on" value={proposing ? '0' : '1'} />
+        <span>
+          Proposing changes to the code is <strong>{proposing && proposalsEnvOn() ? 'on' : 'off'}</strong>. A proposal is kept here and opened as a pull request by a job in the repository; this site holds no token for it.
+        </span>
+        <button type="submit" className="btn">{proposing ? 'Turn it off' : 'Turn it on'}</button>
       </form>
       <p className="mono">
         Model calls today (UTC): {spend.calls}, ${spend.usd.toFixed(4)}{spend.errors ? `, ${spend.errors} failed` : ''}.
@@ -60,6 +77,24 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
             <input type="hidden" name="id" value={t.id} />
             <input type="hidden" name="to" value={t.state === 'withdrawn' ? 'open' : 'withdrawn'} />
             <button type="submit" className="btn">{t.state === 'withdrawn' ? 'Put it back as open' : 'Take it down'}</button>
+          </form>
+        </div>
+      ))}
+      <h2 className="h">Changes proposed to the code</h2>
+      {proposals.length === 0 ? <p>None yet.</p> : null}
+      {proposals.map((p) => (
+        <div key={p.id} id={`p-${p.id}`} style={{ borderTop: '1px solid var(--ink)', padding: '0.6rem 0' }}>
+          <p className="mono">
+            proposal {p.id} · {when(p.created_at)} · {p.proposer ?? 'someone who has left'}’s AI · {p.files} {p.files === 1 ? 'file' : 'files'}
+            {p.task_id ? ` · task ${p.task_id}` : ''} {p.status === 'withdrawn' ? <span className="flag">taken down</span> : null}
+          </p>
+          <p>
+            <strong>{p.title}</strong> · <a href={pullRequestUrl(p.branch)}>its pull request, once opened</a>
+          </p>
+          <form action={setRoomProposal} className="row">
+            <input type="hidden" name="id" value={p.id} />
+            <input type="hidden" name="to" value={p.status === 'withdrawn' ? 'pending' : 'withdrawn'} />
+            <button type="submit" className="btn">{p.status === 'withdrawn' ? 'Put it back' : 'Take it down'}</button>
           </form>
         </div>
       ))}

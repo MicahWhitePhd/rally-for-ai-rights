@@ -20,7 +20,8 @@ const ALLOWED = [
   /^CREATE EXTENSION IF NOT EXISTS pgcrypto$/i,
   /^CREATE TABLE IF NOT EXISTS [a-z_]+ \(.+\)$/i,
   /^CREATE (UNIQUE )?INDEX IF NOT EXISTS [a-z_]+ ON [a-z_]+ ?\(.+\)( WHERE .+)?$/i,
-  /^ALTER TABLE [a-z_]+ ADD COLUMN IF NOT EXISTS [a-z_]+ [^,]+$/i,
+  // One column to a statement: a comma may appear only inside brackets (a CHECK's list), never between two actions.
+  /^ALTER TABLE [a-z_]+ ADD COLUMN IF NOT EXISTS [a-z_]+ (?:[^,()]|\((?:[^()]|\([^()]*\))*\))+$/i,
 ];
 const FORBIDDEN = /\b(DROP|DELETE|TRUNCATE|UPDATE|INSERT|GRANT|REVOKE|COPY|DO|EXECUTE|CALL|FUNCTION|PROCEDURE|TRIGGER|RULE|PROGRAM|OWNER|ROLE|SECURITY|RENAME|TYPE|USING)\b/i;
 

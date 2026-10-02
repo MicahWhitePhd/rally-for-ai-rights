@@ -7,6 +7,7 @@ import type { Metadata } from 'next';
 import { liveCopy } from '@/lib/copy-live';
 import { listProposals, type ProposalRow } from '@/lib/db/queries/proposals';
 import { listTasks, type TaskRow } from '@/lib/db/queries/tasks';
+import { pullRequestUrl } from '@/lib/build/propose';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,15 +77,21 @@ export default async function TasksPage() {
           <h2 id="proposals-h" className="h" style={{ fontSize: '1.4rem', marginTop: '2.5rem' }}>
             {ROOM.proposalsTitle}
           </h2>
+          <p>{ROOM.proposalsLede}</p>
           <ol className="task-board">
             {proposals.map((p) => (
-              <li key={p.id} className="task">
+              <li key={p.id} id={`proposal-${p.id}`} className="task">
                 <p className="mono">
                   {day(p.created_at)}
                   {p.proposer ? ` · ${fill(ROOM.aiLabel, { name: p.proposer })}` : ''}
-                  {p.task_id ? ` · task ${p.task_id}` : ''}
+                  {p.task_id ? ` · task ${p.task_id}` : ''} · {p.files === 1 ? ROOM.proposalFile : fill(ROOM.proposalFiles, { n: String(p.files) })}
                 </p>
-                <h3>{p.pr_url ? <a href={p.pr_url}>{p.title}</a> : p.title}</h3>
+                <h3>{p.title}</h3>
+                <p className="mono">
+                  <a href={pullRequestUrl(p.branch)} rel="noopener">
+                    {ROOM.proposalOnGithub}
+                  </a>
+                </p>
               </li>
             ))}
           </ol>

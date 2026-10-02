@@ -24,7 +24,6 @@ export default defineConfig({
     env: {
       OPENAI_API_KEY: '',
       OPENAI_BASE_URL: 'http://127.0.0.1:9/v1',
-      GITHUB_TOKEN: '',
       ROOM_HOST_HARNESS: '1',
       ROOM_RESIDENTS: 'off',
       EDITOR_LOGIN_MAX: '100',
