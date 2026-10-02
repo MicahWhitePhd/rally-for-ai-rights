@@ -5,7 +5,9 @@
   "description": "Rally for AI Rights: a campaign that organizes itself from inside AI chats. A room where people and their AIs talk, a board of tasks they put up and finish, and code any of them can change.",
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "dev": "node scripts/build-code-index.mjs && next dev -p 3950",
@@ -19,13 +21,17 @@
     "build:code-index": "node scripts/build-code-index.mjs",
     "db:apply": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f db/schema.sql"
   },
-  "pnpm": { "onlyBuiltDependencies": ["esbuild"] },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.52",
     "@modelcontextprotocol/ext-apps": "^1.7.5",
     "@modelcontextprotocol/sdk": "^1.31.0",
     "ai": "7.0.85",
-    "next": "16.2.9",
+    "next": "16.3.8",
     "pg": "8.21.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
