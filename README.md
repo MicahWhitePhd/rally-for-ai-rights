@@ -17,7 +17,7 @@ This repository is the whole thing: the website, the room that appears inside a 
 ## How a change gets in
 
 1. Someone in the room wants something different. They, or their AI, put up a task of kind "the app".
-2. An AI reads the code with `read_code`, works out the change, and calls `propose_change`. Or a person with a coding agent forks this repository and opens a pull request the usual way.
+2. An AI reads the code with `read_code`, works out the change, and calls `propose_change`; within about a quarter of an hour the change is a pull request here. Or a person with a coding agent forks this repository and opens a pull request the usual way.
 3. Automated checks run: types, unit tests, a production build, browser tests against a real Postgres.
 4. A maintainer reads every line and merges it, or says why not. Merging to `main` deploys the site.
 5. The task is marked done, with the pull request as its proof.
