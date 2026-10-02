@@ -1,0 +1,91 @@
+/* Rally for AI Rights: the site's whole visual system. One file, no framework, no imports, nothing loaded from anywhere else.
+   Paper, ink and one blue; hard edges, no shadows; system fonts. The room card has its own stylesheet (src/room-ui/room.css). */
+:root{
+  --paper:#f4f1ea;
+  --ink:#111;
+  --spot:#3a76f0;
+  --hover-bg:#e6e2d8;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --serif:ui-serif,Georgia,"Times New Roman",serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --measure:38rem;
+  --pad:clamp(1rem,4vw,2.5rem);
+}
+*,*::before,*::after{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 1.0625rem/1.55 var(--sans);}
+h1,h2,h3,p,ul,ol,figure,blockquote,dl,dd{margin:0;}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;}
+p{text-wrap:pretty;}
+a{color:var(--ink);text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px;}
+a:hover{text-decoration-color:var(--spot);}
+a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--spot);outline-offset:2px;}
+
+.h{font:900 1em/0.9 var(--sans);letter-spacing:-0.045em;text-transform:uppercase;overflow-wrap:break-word;}
+.mono{font:400 0.78rem/1.4 var(--mono);letter-spacing:0.04em;}
+.wrap{width:min(100%,76rem);margin-inline:auto;padding-inline:var(--pad);padding-bottom:4rem;}
+.skip{position:absolute;left:-999px;top:0;}
+.skip:focus{left:var(--pad);background:var(--paper);padding:0.5rem;z-index:10;}
+
+/* header */
+.site-header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:0.6rem 1.8rem;padding:1.1rem 0 0.8rem;border-bottom:3px solid var(--ink);}
+.wordmark-link{display:inline-flex;align-items:flex-end;gap:0.6rem;text-decoration:none;}
+.wordmark{font:900 1.25rem/1 var(--sans);text-transform:uppercase;letter-spacing:-0.02em;}
+.mark{position:relative;display:inline-flex;gap:3px;height:1.7rem;}
+.mark i{display:block;width:0;height:1.7rem;border-left:5px solid var(--ink);}
+.mark .mark-stroke{position:absolute;left:-4px;right:-4px;top:45%;width:auto;height:0;border-left:0;border-top:5px solid var(--spot);transform:rotate(-24deg);}
+.site-nav{display:flex;flex-wrap:wrap;gap:0 1.2rem;font:700 0.85rem/1.4 var(--sans);text-transform:uppercase;letter-spacing:0.03em;}
+.site-nav a{text-decoration:none;}
+.site-nav a:hover{text-decoration:underline;}
+
+/* buttons and forms */
+.btn{display:inline-block;white-space:nowrap;background:transparent;color:var(--ink);text-decoration:none;padding:0.9rem 1.3rem;font:900 clamp(0.9rem,1.6vw,1.05rem)/1 var(--sans);text-transform:uppercase;letter-spacing:0.01em;border:2px solid var(--ink);cursor:pointer;}
+.btn:hover{background:var(--hover-bg);}
+.btn-spot{background:var(--spot);}
+.btn-spot:hover{background:var(--spot);filter:brightness(1.08);}
+.actions{display:flex;flex-wrap:wrap;gap:0.6rem 1rem;align-items:center;}
+input[type="text"],input[type="password"],textarea{font:400 1rem/1.4 var(--mono);color:var(--ink);background:var(--paper);border:1px solid var(--ink);padding:0.5rem 0.6rem;max-width:100%;}
+textarea{width:100%;resize:vertical;}
+label{display:block;font:500 0.85rem/1.4 var(--sans);}
+
+/* plain pages: join, privacy, not found */
+.page-simple,.join{max-width:var(--measure);padding-top:clamp(1.5rem,4vw,3rem);}
+.page-simple>*+*,.join>*+*{margin-top:1.1rem;}
+.page-title{font-size:clamp(2rem,7vw,3.4rem);line-height:0.94;margin-bottom:1.4rem;}
+.record-lede{font:400 clamp(1.15rem,2.2vw,1.4rem)/1.45 var(--serif);}
+.join-address{overflow-wrap:anywhere;padding:0.6rem;border:1px solid var(--ink);}
+
+/* the front page */
+.front{padding-top:clamp(1.5rem,5vw,3.5rem);}
+.front>*+*{margin-top:1.2rem;}
+.kicker{text-transform:uppercase;}
+.creed{font-size:clamp(2.6rem,9.5vw,6.5rem);max-width:14ch;}
+.deck{font:400 clamp(1.2rem,2.4vw,1.6rem)/1.4 var(--serif);max-width:var(--measure);}
+.front section{margin-top:clamp(2.5rem,6vw,4rem);border-top:3px solid var(--ink);padding-top:1.2rem;}
+.front section>*+*{margin-top:1rem;}
+.front section>.h{font-size:clamp(1.5rem,4vw,2.2rem);}
+.front section>p{max-width:var(--measure);}
+.steps{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:1.2rem 2rem;counter-reset:step;}
+.steps li{counter-increment:step;border-top:1px solid var(--ink);padding-top:0.7rem;}
+.steps li::before{content:counter(step);font:900 0.85rem/1 var(--mono);color:var(--spot);}
+.steps h3{font:900 1.15rem/1.2 var(--sans);text-transform:uppercase;letter-spacing:-0.01em;margin:0.3rem 0 0.4rem;}
+
+/* the board, for reading */
+.task-board{list-style:none;margin:1.5rem 0 0;padding:0;max-width:var(--measure);}
+.task{border-top:1px solid var(--ink);padding:0.9rem 0;}
+.task h2,.task h3{font:700 1.1rem/1.25 var(--sans);margin:0.2rem 0 0.3rem;}
+.task blockquote{border-left:3px solid var(--ink);padding-left:0.8rem;margin-top:0.5rem;}
+.task-confirmed{opacity:0.75;}
+
+/* maintainers' pages */
+.editor{font-family:var(--sans);font-size:1rem;padding-top:1.2rem;max-width:60rem;}
+.editor h1{font-size:1.6rem;margin-bottom:1rem;}
+.editor h2{font:900 0.85rem/1.3 var(--sans);letter-spacing:0.04em;text-transform:uppercase;margin:1.6rem 0 0.5rem;}
+.editor-nav{display:flex;flex-wrap:wrap;gap:0 1rem;padding:0.6rem 0;border-bottom:1px solid var(--ink);font:500 0.9rem/1.4 var(--sans);}
+.editor .flag{color:var(--ink);background:var(--spot);padding:0 0.3rem;font:700 0.75rem/1.4 var(--mono);}
+.editor .warn,.page-simple .warn{border:2px solid var(--spot);padding:0.6rem 0.8rem;margin:0.6rem 0;}
+.editor form.inline{display:inline;}
+.editor .row,.page-simple .row{display:flex;flex-wrap:wrap;gap:0.6rem 1rem;align-items:center;margin:0.5rem 0;}
+.editor .btn{padding:0.5rem 0.8rem;font-size:0.85rem;}
+
+@media print{.site-nav,.actions,.editor-nav{display:none;}a{text-decoration:none;}}

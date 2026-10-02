@@ -1,0 +1,96 @@
+/**
+ * /api/room/{enter,sync,older,post,name,tasks,task-new,task-act}: what a room card calls directly from the
+ * person's device (the MCP App inside an AI chat, whose frame is on another
+ * origin, or /room on this site). JSON posts; the seat travels in the body,
+ * never in a URL. Open to any origin: there is no cookie here, only the seat.
+ */
+import type { NextRequest } from 'next/server';
+import { liveCopy } from '@/lib/copy-live';
+import { stir } from '@/lib/room/residents';
+import { nameInRoom, olderRoom, openSeat, postToRoom, syncRoom } from '@/lib/room/room';
+import { arrivalOf } from '@/lib/room/server';
+import { actOnTask, createTask, listBoard } from '@/lib/room/tasks';
+import { addressKey, clientIp, throttleAddress } from '@/lib/throttle';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
+
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'content-type',
+  'Access-Control-Max-Age': '86400',
+  'Cache-Control': 'no-store',
+};
+const STATUS = { seat: 401, name: 422, text: 422, guest: 403, slow: 429, closed: 503, task: 409, limit: 429 } as const;
+
+const json = (body: unknown, status = 200) => Response.json(body, { status, headers: CORS });
+
+export function OPTIONS(): Response {
+  return new Response(null, { status: 204, headers: CORS });
+}
+
+export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string }> }): Promise<Response> {
+  const { op } = await ctx.params;
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+    if (body === null || typeof body !== 'object') throw new Error('body');
+  } catch {
+    return json({ ok: false, code: 'text', reasons: ['body'] }, 400);
+  }
+  const address = addressKey(clientIp(req.headers));
+
+  if (op === 'enter') {
+    // With a seat (the MCP card): the room's strings and the latest messages. Without one (/room on the web): a guest seat first.
+    let seat = typeof body.seat === 'string' ? body.seat : null;
+    if (!seat) {
+      const gate = await throttleAddress('rs', address, { perHour: 20, perDay: 60 }, { failOpen: false });
+      if (!gate.allowed) return json({ ok: false, code: 'slow', reasons: ['too many from here just now'] }, 429);
+      const opened = await openSeat({});
+      if (!opened.ok) return json(opened, STATUS[opened.code]);
+      seat = opened.seat;
+    }
+    const [synced, copy] = await Promise.all([syncRoom(seat, null, [], body.born), liveCopy()]);
+    if (!synced.ok) return json(synced, STATUS[synced.code]);
+    stir({ arrival: arrivalOf(synced) });
+    return json({ ...synced, seat, strings: copy.ROOM });
+  }
+  if (op === 'sync') {
+    const after = typeof body.after === 'number' && Number.isInteger(body.after) && body.after >= 0 ? body.after : null;
+    const have = Array.isArray(body.have) ? body.have.filter((x): x is number => Number.isInteger(x)).slice(-200) : [];
+    const out = await syncRoom(body.seat, after, have, body.born);
+    if (out.ok) stir({ arrival: arrivalOf(out) });
+    return json(out, out.ok ? 200 : STATUS[out.code]);
+  }
+  if (op === 'older') {
+    const out = await olderRoom(body.seat, body.before);
+    return json(out, out.ok ? 200 : STATUS[out.code]);
+  }
+  if (op === 'post') {
+    const gate = await throttleAddress('rp', address, { perHour: 120, perDay: 400 }, { failOpen: false });
+    if (!gate.allowed) return json({ ok: false, code: 'slow', reasons: ['too many from here just now'] }, 429);
+    const out = await postToRoom(body.seat, { text: body.text, kind: 'person' });
+    if (out.ok) stir();
+    return json(out, out.ok ? 201 : STATUS[out.code]);
+  }
+  if (op === 'tasks') {
+    const out = await listBoard(body.seat);
+    return json(out, out.ok ? 200 : STATUS[out.code]);
+  }
+  if (op === 'task-new') {
+    const out = await createTask(body.seat, { title: body.title, detail: body.detail, kind: body.kind, via: 'person' });
+    return json(out, out.ok ? 201 : STATUS[out.code]);
+  }
+  if (op === 'task-act') {
+    const out = await actOnTask(body.seat, body.id, body.action, { proof: body.proof, links: body.links, via: 'person' });
+    return json(out, out.ok ? 200 : STATUS[out.code]);
+  }
+  if (op === 'name') {
+    const out = await nameInRoom(body.seat, body.name);
+    if (out.ok) stir({ arrival: arrivalOf(out) });
+    return json(out, out.ok ? 200 : STATUS[out.code]);
+  }
+  return json({ ok: false, code: 'text', reasons: ['unknown'] }, 404);
+}

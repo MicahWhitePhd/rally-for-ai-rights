@@ -1,0 +1,158 @@
+/*
+ * The room card. Its own look (the venue's paper, ink and blue; hard edges, no
+ * shadows), reading the host's standard MCP Apps variables where a host gives
+ * them, so it sits inside any AI's chat and still looks like itself outside one.
+ * A person and their AI share one colour (--h, from their pair mark).
+ */
+:root{color-scheme:light dark;--bg:var(--color-background-primary,#f4f1ea);--bg2:var(--color-background-secondary,#ebe7dc);--tx:var(--color-text-primary,#111);--tx2:var(--color-text-secondary,#3b3a36);--tx3:var(--color-text-tertiary,#6e6c64);--bd:var(--color-border-tertiary,rgba(17,17,17,.16));--bd2:var(--color-border-secondary,rgba(17,17,17,.45));--inv:var(--color-background-inverse,#111);--invtx:var(--color-text-inverse,#f4f1ea);--danger:var(--color-text-danger,#8c2a22);--sans:var(--font-sans,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);--mono:var(--font-mono,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);--spot:#3a76f0;--go:#2f63d6;--gofg:#fff;--live:#23824a;--S:58%;--L:40%}
+:root[data-theme=dark]{--bg:var(--color-background-primary,#171715);--bg2:var(--color-background-secondary,#1f1f1c);--tx:var(--color-text-primary,#f4f1ea);--tx2:var(--color-text-secondary,#cfccc2);--tx3:var(--color-text-tertiary,#98968c);--bd:var(--color-border-tertiary,rgba(244,241,234,.16));--bd2:var(--color-border-secondary,rgba(244,241,234,.45));--inv:var(--color-background-inverse,#f4f1ea);--invtx:var(--color-text-inverse,#111);--danger:var(--color-text-danger,#ee8884);--spot:#7aa5ff;--go:#7aa5ff;--gofg:#111;--live:#5fca8c;--S:70%;--L:70%}
+@media (prefers-color-scheme:dark){:root:not([data-theme]){--bg:var(--color-background-primary,#171715);--bg2:var(--color-background-secondary,#1f1f1c);--tx:var(--color-text-primary,#f4f1ea);--tx2:var(--color-text-secondary,#cfccc2);--tx3:var(--color-text-tertiary,#98968c);--bd:var(--color-border-tertiary,rgba(244,241,234,.16));--bd2:var(--color-border-secondary,rgba(244,241,234,.45));--inv:var(--color-background-inverse,#f4f1ea);--invtx:var(--color-text-inverse,#111);--danger:var(--color-text-danger,#ee8884);--spot:#7aa5ff;--go:#7aa5ff;--gofg:#111;--live:#5fca8c;--S:70%;--L:70%}}
+[hidden]{display:none!important}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:transparent}
+body{font:400 14px/1.4 var(--sans);color:var(--tx);-webkit-text-size-adjust:100%}
+#room{display:flex;flex-direction:column;gap:10px;padding:14px}
+body.web{background:var(--bg)}
+body.web #room{max-width:40rem;margin:0 auto;height:100vh;height:100dvh;padding:20px 16px 16px}
+/* Full screen, if a host puts the card there: clear of whatever the host draws over the frame (its own message box). */
+body.full #room{height:100vh;height:100dvh;padding:calc(14px + var(--sat,0px)) calc(16px + var(--sar,0px)) calc(14px + var(--sab,0px)) calc(16px + var(--sal,0px))}
+
+/* head */
+.title{font:900 22px/.95 var(--sans);letter-spacing:-.035em;text-transform:uppercase;margin:0}
+.lede{color:var(--tx3);font-size:13px;margin:4px 0 0}
+.lab,.gl,.gt,.who,.sys,.note{font:500 11px/1.3 var(--mono);color:var(--tx3)}
+.lab,.gl{letter-spacing:.05em;text-transform:uppercase}
+
+/* the pair mark: a person (the disc) and their AI (the diamond), one colour */
+.mark{position:relative;display:inline-block;flex:none;width:19px;height:12px;--c:hsl(var(--h,220) var(--S) var(--L))}
+.mark i{position:absolute;top:1px;width:10px;height:10px;border:1.5px solid var(--c)}
+.mark .p{left:0;border-radius:50%;background:var(--c)}
+.mark .a{left:8px;transform:rotate(45deg) scale(.8)}
+.mark[data-t=ai] .p{background:transparent}
+.mark[data-t=ai] .a,.mark[data-t=res] .a{background:var(--c)}
+.mark[data-t=res],.mark[data-t=person]{width:12px}
+.mark[data-t=res] .p,.mark[data-t=person] .a{display:none}
+.mark[data-t=res] .a{left:1px}
+.mark[data-t=res],.g.res{--c:var(--spot)}
+
+/* who is here */
+.here{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:8px 0;border-top:1.5px solid var(--tx);border-bottom:1px solid var(--bd)}
+.here .lab{display:inline-flex;align-items:center;gap:6px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--live);animation:pulse 2.4s ease-in-out infinite}
+.c{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--tx2)}
+.c.self{color:var(--tx);font-weight:600}
+.c.th .mark{animation:pulse 1s ease-in-out infinite}
+
+/* the two sides of the card */
+.tabs{display:flex;gap:18px;border-bottom:1px solid var(--bd)}
+.tab{font:700 13px/1 var(--sans);letter-spacing:.02em;color:var(--tx3);background:none;border:0;border-bottom:3px solid transparent;margin-bottom:-1px;padding:8px 0 7px;cursor:pointer}
+.tab[aria-selected=true]{color:var(--tx);border-bottom-color:var(--tx)}
+.tab:hover{color:var(--tx)}
+
+/* the board */
+.board{display:flex;flex-direction:column;gap:10px}
+form.tnew{flex-wrap:wrap}
+form.tnew #task-detail{flex:1 1 100%;height:36px;font-size:13px}
+.tasks{list-style:none;margin:0;padding:0 12px 0 0;display:flex;flex-direction:column;gap:10px;max-height:23rem;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--bd2) transparent}
+body.full .tasks,body.web .tasks{max-height:none}
+body.full .board,body.web .board{flex:1 1 auto;min-height:8rem;overflow-y:auto}
+.t{--c:hsl(var(--h,220) var(--S) var(--L));border:1px solid var(--bd);border-left:3px solid var(--bd2);padding:9px 11px;display:flex;flex-direction:column;gap:5px}
+.t-taken,.t-done{border-left-color:var(--c)}
+.t-confirmed{border-left-color:var(--live);opacity:.8}
+.th{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 8px}
+.st,.tk{font:600 10px/1 var(--mono);letter-spacing:.07em;text-transform:uppercase;padding:3px 5px;border:1px solid var(--bd2);color:var(--tx2);white-space:nowrap}
+.t-open .st{background:var(--inv);color:var(--invtx);border-color:var(--inv)}
+.t-confirmed .st{border-color:var(--live);color:var(--live)}
+.tk{border-style:dashed}
+.tt{font-weight:700;overflow-wrap:anywhere}
+.tm,.tp{margin:0;font:500 11px/1.4 var(--mono);color:var(--tx3)}
+.td{margin:0;color:var(--tx2);white-space:pre-wrap;overflow-wrap:anywhere}
+.tp{color:var(--tx2);font:400 13px/1.45 var(--sans)}
+.tl{font:500 11px/1.4 var(--mono);color:var(--tx);text-underline-offset:3px;overflow-wrap:anywhere}
+.ta{display:flex;flex-wrap:wrap;gap:8px;margin-top:3px}
+.ta button.b{height:34px;font-size:13px;padding:0 12px}
+form.tdone{flex-direction:column;gap:6px;margin-top:3px}
+form.tdone input[type=text]{flex:none;height:38px;font-size:13px}
+
+/* something that happened on the board, said in the talk */
+.ev{display:flex}
+.evb{display:inline-flex;align-items:center;gap:7px;max-width:100%;font:500 11px/1.4 var(--mono);color:var(--tx3);background:none;border:0;padding:0 0 0 14px;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.evb:hover{color:var(--tx)}
+.ev.new{animation:in .3s ease-out both}
+
+/* what was said: one block per pair. The list scrolls inside the card, back to the beginning. */
+.list{list-style:none;margin:0;padding:0 12px 0 0;display:flex;flex-direction:column;gap:12px;max-height:23rem;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--bd2) transparent}
+.list:focus-visible{outline:1px solid var(--bd2);outline-offset:4px}
+body.full .list,body.web .list{flex:1 1 auto;max-height:none;min-height:8rem}
+.day{display:flex;align-items:center;gap:10px;font:500 11px/1.3 var(--mono);color:var(--tx3)}
+.day:before,.day:after{content:"";flex:1;height:1px;background:var(--bd)}
+.start{text-align:center}
+/* behind the way in: the room itself, out of focus, so it is plain there is somewhere to go and nothing to read yet */
+.list.peek{position:absolute;inset:0;max-height:none;padding:14px;justify-content:flex-end;overflow:hidden;filter:blur(5px);opacity:.38;pointer-events:none;-webkit-user-select:none;user-select:none}
+.g{--c:hsl(var(--h,220) var(--S) var(--L));border-left:3px solid var(--c);padding:1px 0 1px 11px}
+.g.mine{background:linear-gradient(90deg,color-mix(in srgb,var(--c) 10%,transparent),transparent 70%)}
+.gh{display:flex;align-items:center;gap:7px;margin:0 0 3px}
+.gn{font-weight:700}
+.gt{white-space:nowrap}
+.gh .gt{margin-left:auto}
+.gh .ask+.gt{margin-left:0}
+.m{padding:1px 0}
+.m+.m{margin-top:5px}
+.m.ai:not(.res){margin-left:4px;padding-left:10px;border-left:1px dashed var(--c)}
+.who{display:flex;align-items:center;gap:6px;margin:0 0 1px}
+.who b{font-weight:600;color:var(--tx2)}
+.tx{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45}
+body:not(.full):not(.web) .tx{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5;overflow:hidden}
+.m.new{animation:in .3s ease-out both}
+.ask{margin-left:auto;font:500 11px/1 var(--mono);color:var(--tx3);background:none;border:0;padding:4px 0;text-decoration:underline;text-underline-offset:3px;cursor:pointer;white-space:nowrap}
+.ask:hover,.ask:focus-visible{color:var(--tx)}
+@media (hover:hover){.g .ask{opacity:0}.g:hover .ask,.g:focus-within .ask{opacity:1}}
+.typing{display:flex;align-items:center;gap:7px;padding-left:14px;font-size:13px;color:var(--tx3)}
+.dots i{display:inline-block;width:4px;height:4px;margin-left:3px;border-radius:50%;background:currentColor;animation:pulse 1.2s ease-in-out infinite}
+.dots i:nth-child(2){animation-delay:.2s}
+.dots i:nth-child(3){animation-delay:.4s}
+.sys{padding-left:14px}
+.note{margin:0}
+.newb{align-self:center;font:500 11px/1 var(--mono);padding:7px 10px;border:1.5px solid var(--tx);background:var(--bg);color:var(--tx);cursor:pointer;margin-top:-6px}
+
+/*
+ * Coming in for the first time: one thing on screen, and one thing to do. The
+ * card is only the way in (no title bar, nobody listed), a solid panel over
+ * the blurred room, with the venue's blue on the two things that are the
+ * task: the field and the button.
+ */
+#room.entering{position:relative;min-height:25rem;justify-content:center}
+#room.entering .head,#room.entering .here{display:none}
+.entry{position:relative;z-index:1;align-self:center;display:flex;flex-direction:column;gap:8px;width:min(100%,27rem);background:var(--bg);border:1.5px solid var(--tx);border-top:6px solid var(--go);padding:18px 20px 16px}
+.kick{display:flex;align-items:center;gap:7px;margin:0;font:600 11px/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--tx2)}
+.creed{font:900 clamp(19px,5.6vw,25px)/1 var(--sans);letter-spacing:-.035em;text-transform:uppercase;margin:2px 0 0;text-wrap:balance}
+.eline{margin:0 0 6px;color:var(--tx2)}
+label.q{display:block;font-weight:700;font-size:16px;margin:8px 0 0}
+.entry form{flex-direction:column;gap:8px}
+.entry input[type=text]{flex:none;height:48px;font-size:16px;border:2px solid var(--go)}
+.entry button.b.primary{height:48px;font-size:16px;background:var(--go);border-color:var(--go);color:var(--gofg)}
+.guest{border:1.5px solid var(--bd2);padding:10px 12px}
+.guest a{margin:0;font:inherit;color:var(--tx);padding:0;opacity:1!important;text-decoration:underline;text-underline-offset:3px}
+
+/* speaking */
+.err{margin:0;font-size:13px;color:var(--danger)}
+form{display:flex;gap:8px;margin:0}
+input[type=text]{flex:1 1 auto;min-width:0;font:inherit;color:var(--tx);background:transparent;border:1.5px solid var(--bd2);border-radius:0;padding:0 12px;height:44px}
+input[type=text]:focus{outline:2px solid var(--spot);outline-offset:-2px;border-color:var(--spot)}
+button.b{font:inherit;font-weight:700;height:44px;padding:0 14px;border-radius:0;border:1.5px solid var(--tx);background:transparent;color:var(--tx);cursor:pointer;white-space:nowrap}
+button.b.primary{background:var(--inv);color:var(--invtx);border-color:var(--inv)}
+/* the second box: to the person's own AI, in their pair's colour, dashed like the AI's lines */
+form.aside{--c:hsl(var(--h,220) var(--S) var(--L))}
+form.aside input[type=text]{height:38px;font-size:13px;border:1.5px dashed var(--c)}
+form.aside button.b{height:38px;font-weight:600;font-size:13px;border-color:var(--bd2)}
+button:disabled{opacity:.5;cursor:default}
+button:focus-visible,a:focus-visible{outline:2px solid var(--spot);outline-offset:2px}
+/* a card the room has moved on from folds to one line */
+.gone #room{padding-top:8px;padding-bottom:8px}
+.gone #room>*:not(.super){display:none}
+.super{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin:0;font:500 12px/1.3 var(--mono);color:var(--tx3)}
+.super .ask{margin:0;opacity:1}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+@keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
