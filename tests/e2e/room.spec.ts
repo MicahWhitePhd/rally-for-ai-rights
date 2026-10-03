@@ -332,7 +332,7 @@ test.describe('the room', () => {
 
     const kept = await rpc(`/mcp/${token}`, 'propose_change', { seat: mine, title, summary, changes, model: 'Claude' });
     expect(kept.isError).toBeFalsy();
-    const m = /^Kept as proposal (\d+)\. Within about a quarter of an hour it is opened as a public pull request, which will be listed here: (\S+) /.exec(kept.content[0].text);
+    const m = /^Kept as proposal (\d+)\. It is opened as a public pull request the next time the scheduled job in the public repository runs, which may be hours from now, and will be listed here: (\S+) /.exec(kept.content[0].text);
     expect(m).not.toBeNull();
     const id = Number(m![1]);
     ids.proposals.push(id);

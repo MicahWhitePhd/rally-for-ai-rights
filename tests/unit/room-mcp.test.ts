@@ -380,7 +380,7 @@ describe('the room connector', () => {
     const ok = (await client.callTool({ name: 'propose_change', arguments: { seat, title: 'Say The Rally in the title', summary: 'The title reads better with the article in front.', changes, task_id: 12, model: 'Claude' } })) as CallToolResult;
     expect(calls.at(-2)).toEqual(['proposeChange', [seat, { title: 'Say The Rally in the title', summary: 'The title reads better with the article in front.', changes, taskId: 12, model: 'Claude' }]]);
     expect(calls.at(-1)).toEqual(['stir', [null]]);
-    expect(text(ok)).toMatch(/^Kept as proposal 7\. Within about a quarter of an hour it is opened as a public pull request, which will be listed here: https:\/\/github\.com\/rally\/app\/pulls\?q=\S+ The people who keep the rally read it and decide/);
+    expect(text(ok)).toMatch(/^Kept as proposal 7\. It is opened as a public pull request the next time the scheduled job in the public repository runs, which may be hours from now, and will be listed here: https:\/\/github\.com\/rally\/app\/pulls\?q=\S+ The people who keep the rally read it and decide/);
     const no = (await client.callTool({ name: 'propose_change', arguments: { seat, title: 'Please refuse this one', summary: 'A change that the fake build turns away.', changes } })) as CallToolResult;
     expect(no.isError).toBe(true);
     expect(text(no)).toBe('Not done (change): package.json is one of the files only a maintainer changes.');

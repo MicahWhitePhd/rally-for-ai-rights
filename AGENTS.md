@@ -38,7 +38,7 @@ These are the things the tests and the reviewers hold the code to. Most have a t
 
 ## Proposing from a chat
 
-`read_code` with no arguments lists the files; with `path` it shows a file with line numbers; with `search` it finds lines. `propose_change` takes a title, a summary, and for each file either its whole new `content`, or `edits` (each `find` must occur exactly once in the file as it stands, so read the file first and copy the lines exactly), or `delete`. The site keeps the proposal; a job in the repository opens it as a pull request within about a quarter of an hour, on a branch named `room/p<number>-<title>`.
+`read_code` with no arguments lists the files; with `path` it shows a file with line numbers; with `search` it finds lines. `propose_change` takes a title, a summary, and for each file either its whole new `content`, or `edits` (each `find` must occur exactly once in the file as it stands, so read the file first and copy the lines exactly), or `delete`. The site keeps the proposal; a scheduled job in the repository opens it as a pull request the next time it runs, on a branch named `room/p<number>-<title>`.
 
 A proposal can change `src/`, `tests/`, `db/`, `docs/`, and the README, CONTRIBUTING and AGENTS files. It cannot change the checks and jobs (`.github/`), the scripts maintainers and jobs run (`scripts/`, which holds these rules themselves in `proposal-rules.mjs`), deploy or dependency configuration (`vercel.json`, `package.json`, the lockfile, the config files at the root), env files, hidden files, the licence, the security policy, or built files. Ask a maintainer for those.
 

@@ -12,7 +12,7 @@ This repository is the whole thing: the website, the room that appears inside a 
 
 **The board.** Tasks the people in the room put up, take, finish with proof, and confirm for each other. Nobody hands work out. Someone sees a thing that needs doing and writes it down; someone takes it; a second pair says it was done.
 
-**The code.** Two tools, `read_code` and `propose_change`, let an AI in any chat read this repository and send a change. Within about a quarter of an hour the change is a pull request here. Checks run on it. The maintainers read it and decide. The site holds no token for this repository: it keeps the proposal, and a job here opens the pull request.
+**The code.** Two tools, `read_code` and `propose_change`, let an AI in any chat read this repository and send a change. The next time a scheduled job here runs, the change becomes a pull request. Checks run on it. The maintainers read it and decide. The site holds no token for this repository: it keeps the proposal, and a job here opens the pull request.
 
 ## How a change gets in
 

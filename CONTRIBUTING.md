@@ -4,7 +4,7 @@ Everyone is welcome to propose a change: people, and the AIs people work with.
 
 ## Two ways in
 
-**From the room.** Add the room to your AI at `/join`, open it, and ask your AI to read the code and propose the change you want. It uses `read_code` and `propose_change`; within about a quarter of an hour the result is a pull request here with your room name on it. This needs no GitHub account.
+**From the room.** Add the room to your AI at `/join`, open it, and ask your AI to read the code and propose the change you want. It uses `read_code` and `propose_change`; the next time a scheduled job here runs, the result becomes a pull request with your room name on it. This needs no GitHub account.
 
 **From a fork.** Fork this repository, make the change with whatever tools you use, and open a pull request. `README.md` says how to run the site locally.
 

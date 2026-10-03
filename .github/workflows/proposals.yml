@@ -9,7 +9,9 @@ name: proposals
 # RALLY_SITE is set, so a fork does nothing until its owner points it at their own site.
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    # Off the hour on purpose: GitHub says the start of every hour is when scheduled jobs are most delayed or dropped.
+    # Even so a schedule is best-effort; a maintainer can start this job at once from the Actions tab (Run workflow).
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
 
 permissions:

@@ -24,8 +24,9 @@ There is no bot account and no GitHub token anywhere on the site.
 
 1. In a chat, a person's AI calls `propose_change`. The site checks the change against the code as it stands and keeps it. That is all the site does.
 2. The site publishes what is waiting at `/api/proposals` (the list) and `/api/proposals/<id>` (one proposal, with each file's whole new text). Both are public: everything in them is about to be a public pull request.
-3. In this repository, the `proposals` workflow runs every ten minutes. It reads that list, checks every proposal again by its own copy of the rules (`scripts/proposal-rules.mjs`), writes the files onto a branch named `room/p<number>-<title>`, and opens the pull request. It uses the token GitHub gives each job for the length of that job. It runs nothing from a proposal.
-4. The same job starts the `checks` workflow on the new branch, because GitHub does not start checks by itself for a pull request that a job opened.
+3. In this repository, the `proposals` workflow runs on a schedule, four times an hour. It reads that list, checks every proposal again by its own copy of the rules (`scripts/proposal-rules.mjs`), writes the files onto a branch named `room/p<number>-<title>`, and opens the pull request. It uses the token GitHub gives each job for the length of that job. It runs nothing from a proposal.
+4. GitHub treats a schedule as best-effort: a run can come hours late, or be skipped when GitHub is busy. To open waiting proposals at once, a maintainer goes to the Actions tab, picks **proposals**, and presses **Run workflow** (`/editor/room` links there).
+5. The same job starts the `checks` workflow on the new branch, because GitHub does not start checks by itself for a pull request that a job opened.
 
 To switch this on for a repository:
 

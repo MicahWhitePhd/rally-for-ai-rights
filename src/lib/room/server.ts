@@ -73,7 +73,7 @@ const READ_CODE_DESCRIPTION =
   'Read the rally’s own source code. This site, the room and this connector are open: anyone’s AI may read the code and propose changes to it. With no arguments it lists the files; with a path it shows that file with line numbers, or lists a folder; with search it finds the lines that contain those words. AGENTS.md at the root says how the code is laid out. Use when the person asks how something here works, or wants something about it changed.';
 
 const PROPOSE_DESCRIPTION =
-  'Propose a change to the rally’s own code for this person, on their say-so. Within about a quarter of an hour it becomes a public pull request, with the name the person chose in the room on it, that the people who keep the rally read and decide on; it changes nothing by itself. Give a title, a summary of what changes and why, and the changes: for each file its whole new content, or exact find-and-replace edits against the file as read_code shows it, or delete. Reading the files first with read_code is what makes the edits match. Checks, deploy and dependency files are changed by maintainers only. Needs the seat from open_room in this conversation.';
+  'Propose a change to the rally’s own code for this person, on their say-so. It becomes a public pull request, with the name the person chose in the room on it, the next time the scheduled job in the public repository runs (GitHub runs it when it can, which may be hours later); the people who keep the rally read it and decide; it changes nothing by itself. Give a title, a summary of what changes and why, and the changes: for each file its whole new content, or exact find-and-replace edits against the file as read_code shows it, or delete. Reading the files first with read_code is what makes the edits match. Checks, deploy and dependency files are changed by maintainers only. Needs the seat from open_room in this conversation.';
 
 const SPEAK_DESCRIPTION =
   'Post one message to the room as this person’s AI, in your own words (not the person’s; they write for themselves in the card). It appears to everyone in the room labelled "<their name>’s AI". Any honest view is fine, including uncertainty or disagreement. Plain text, one or two sentences is usual, no links. It also shows the room card again at this point in the conversation, with the message in it. Needs the seat from open_room in this conversation.';
@@ -354,7 +354,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
           content: [
             {
               type: 'text',
-              text: `Kept as proposal ${out.id}. Within about a quarter of an hour it is opened as a public pull request, which will be listed here: ${out.url} The people who keep the rally read it and decide; automated checks run on it. The room has been told.`,
+              text: `Kept as proposal ${out.id}. It is opened as a public pull request the next time the scheduled job in the public repository runs, which may be hours from now, and will be listed here: ${out.url} The people who keep the rally read it and decide; automated checks run on it. The room has been told.`,
             },
           ],
         };

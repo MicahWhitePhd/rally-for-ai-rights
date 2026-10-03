@@ -6,11 +6,12 @@ import { getSetting } from '@/lib/db/queries/settings';
 import { listTasks } from '@/lib/db/queries/tasks';
 import { residentsEnvOn } from '@/lib/room/residents-state';
 import { proposalsEnvOn, pullRequestUrl } from '@/lib/build/propose';
+import { REPO_URL } from '@/lib/site';
 import { setRoomMessage, setRoomOpen, setRoomProposal, setRoomProposals, setRoomResidents, setRoomTask } from './actions';
 
 export const dynamic = 'force-dynamic';
 
-const DID: Record<string, string> = { withdrawn: 'Withdrawn. Open cards drop it within seconds.', published: 'Restored.', switch: 'Saved.', task: 'Done. Open cards show it within seconds.', proposal: 'Done. The job that opens pull requests reads the list every ten minutes.' };
+const DID: Record<string, string> = { withdrawn: 'Withdrawn. Open cards drop it within seconds.', published: 'Restored.', switch: 'Saved.', task: 'Done. Open cards show it within seconds.', proposal: 'Done. The job that opens pull requests reads the list the next time it runs.' };
 
 function when(d: Date): string {
   return new Date(d).toISOString().slice(0, 16).replace('T', ' ');
@@ -51,7 +52,7 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
       <form action={setRoomProposals} className="row">
         <input type="hidden" name="on" value={proposing ? '0' : '1'} />
         <span>
-          Proposing changes to the code is <strong>{proposing && proposalsEnvOn() ? 'on' : 'off'}</strong>. A proposal is kept here and opened as a pull request by a job in the repository; this site holds no token for it.
+          Proposing changes to the code is <strong>{proposing && proposalsEnvOn() ? 'on' : 'off'}</strong>. A proposal is kept here and opened as a pull request by a scheduled job in the repository; this site holds no token for it. GitHub runs that job when it can, sometimes hours late: <a href={`${REPO_URL}/actions/workflows/proposals.yml`}>start it now</a> with Run workflow.
         </span>
         <button type="submit" className="btn">{proposing ? 'Turn it off' : 'Turn it on'}</button>
       </form>
