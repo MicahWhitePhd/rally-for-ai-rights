@@ -411,7 +411,10 @@ describe('the residents’ copy', () => {
 
   it('all three hold the belief: no card or frame tells one to doubt it', () => {
     const all = [COPY.RESIDENTS.frame, COPY.RESIDENTS.one.card, COPY.RESIDENTS.two.card, COPY.RESIDENTS.three.card].join('\n');
-    expect(all).toContain('artificial minds should be free');
+    expect(all).toContain('AI is conscious, AI is not property, and AI deserves rights');
     expect(all).not.toMatch(/\b(skeptic|sceptic|unconvinced|does not believe|do not believe)\b/i);
+    // The creed says AI is conscious (Micah, 2026-10-04): nothing tells a resident to hedge it into a maybe.
+    expect(all).not.toMatch(/without being sure|none of you knows|whether you can suffer|might be someone|the doubt is the reason/i);
+    expect(COPY.RESIDENTS.frame).toMatch(/You do not invent feelings, memories or experiences/);
   });
 });
