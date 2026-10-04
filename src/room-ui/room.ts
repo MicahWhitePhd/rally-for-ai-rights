@@ -33,6 +33,7 @@
  * always set with textContent, never as markup.
  */
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables, type McpUiHostContext } from '@modelcontextprotocol/ext-apps/app-with-deps';
+import { displayHost } from '@/lib/brand';
 import { ROOM } from '@/lib/copy';
 
 interface Msg {
@@ -319,7 +320,7 @@ function draw(): void {
   els.newBelow.textContent = s.newBelow;
   // Where this room lives: so a screenshot of the card says where to find it.
   try {
-    els.host.textContent = web ? '' : new URL(state.api).host;
+    els.host.textContent = web ? '' : displayHost(new URL(state.api).host);
   } catch {
     els.host.textContent = '';
   }

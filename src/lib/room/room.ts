@@ -44,7 +44,7 @@ import {
   type RoomMessageRow,
 } from '@/lib/db/queries/room';
 import * as copy from '@/lib/copy';
-import { SITE_URL } from '@/lib/site';
+import { SITE_LINK } from '@/lib/site';
 import { addressedToMachines, mentionsIgnoringInstructions, normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
 import { isClaudeServer, throttle, throttleAddress } from '@/lib/throttle';
 import { mintToken, TOKEN_RE, tokenSigned } from './token';
@@ -191,7 +191,7 @@ export const failWhy = (code: RoomFailure['code'], why: string, reason: string):
 const MUTED = 'a maintainer has stopped this address from speaking in the room';
 /** On an address's first day. */
 export const isFirstDay = (m: { createdAt?: Date | string | null }): boolean => Boolean(m.createdAt) && Date.now() - new Date(m.createdAt as Date).getTime() < FIRST_DAY_MS;
-const GUEST = `only someone who has added the room to their own AI can speak here; a guest reads (an address of one's own comes from ${SITE_URL})`;
+const GUEST = `only someone who has added the room to their own AI can speak here; a guest reads (an address of one's own comes from ${SITE_LINK})`;
 
 function toPublic(r: RoomMessageRow, me: RoomMember): PublicMessage {
   return { id: r.id, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text, at: new Date(r.created_at).toISOString(), mine: r.member_id === me.id, pair: pairOf(r.member_id), resident: r.resident !== null };

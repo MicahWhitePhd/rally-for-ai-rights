@@ -21,7 +21,7 @@
 import { getSetting } from '@/lib/db/queries/settings';
 import { insertRoomMessage } from '@/lib/db/queries/room';
 import { claimTask, completeTask, confirmTask, getTask, insertTask, listTasks, releaseTask, withdrawOwnTask, type TaskRow } from '@/lib/db/queries/tasks';
-import { SITE_URL } from '@/lib/site';
+import { SITE_LINK } from '@/lib/site';
 import { mentionsIgnoringInstructions, normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
 import { throttle } from '@/lib/throttle';
 import { fail, failWhy, isFirstDay, pairOf, seatedMember, type Me, type RoomFailure } from './room';
@@ -76,7 +76,7 @@ export interface PublicTask {
 export type BoardResult = { ok: true; me: Me; tasks: PublicTask[] } | RoomFailure;
 export type TaskResult = { ok: true; task: PublicTask } | RoomFailure;
 
-const GUEST = `only someone who has added the room to their own AI can use the board; a guest reads (an address of one's own comes from ${SITE_URL})`;
+const GUEST = `only someone who has added the room to their own AI can use the board; a guest reads (an address of one's own comes from ${SITE_LINK})`;
 const CHANGED = 'that task has changed since it was read; read the board again';
 
 function toPublic(t: TaskRow, me: { id: string; name: string | null; member: boolean }): PublicTask {

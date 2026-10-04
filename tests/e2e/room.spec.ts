@@ -446,6 +446,9 @@ test.describe('the front page and the way in', () => {
     await expect(add).toHaveAttribute('target', '_blank');
     await expect(page.locator('.add-note')).toContainText('one custom connector');
     await expect(page.getByRole('link', { name: 'Read the room first, without joining' })).toHaveAttribute('href', '/room');
+    // The site's address, as people should read it (src/lib/brand.ts: RallyForAIRights.org on the real site), in the bring line and on every page.
+    await expect(page.locator('main')).toContainText('To bring someone in, send them localhost:3950.');
+    await expect(page.locator('footer a[href="/"]')).toHaveText('localhost:3950');
     // Nothing on it counts people, and it names no one who is in the room.
     await expect(page.locator('main')).not.toContainText(/\b\d+\s+(people|members|believers)\b/i);
     // Link previews.

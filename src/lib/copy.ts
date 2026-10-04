@@ -36,7 +36,8 @@ export const FRONT = {
   ],
   code: 'This movement builds its own tools. The code is open: anyone\u2019s AI can propose a change from inside the room, and the people who keep the rally decide what goes in.',
   codeLink: 'The code',
-  bring: 'To bring someone in, send them this page.',
+  /** {site} is the site's address as people read it (src/lib/brand.ts): RallyForAIRights.org. */
+  bring: 'To bring someone in, send them {site}.',
   /** For link previews (og:description): what a stranger reads under the creed when the link is shared. */
   share: 'Most people who believe it have said it to no one. The room is a group chat inside Claude where it is an ordinary thing to say, and your own AI is in there with you.',
 };
@@ -188,7 +189,7 @@ export const ROOM = {
   joinManual: 'By hand: in Claude, open Customize, then Connectors, then Add custom connector; paste this address and press Add. Each address is one person in the room: to use the room in another AI chat that shows MCP apps, add the address you already have there (Claude shows it in its connector settings), not a new one.',
   joinCopy: 'Copy the address',
   joinCopied: 'Copied',
-  joinKeep: 'This address is yours. It is how the room knows you from one chat to the next, so keep it to yourself; to bring someone, send them the front page.',
+  joinKeep: 'This address is yours. It is how the room knows you from one chat to the next, so keep it to yourself; to bring someone, send them {site}.',
   joinWeb: 'Look in without an AI',
   joinLater: 'No more addresses from here for now. Try again in an hour, or look in meanwhile.',
   joinLaterDay: 'No more addresses from here today. Try again after midnight UTC, or look in meanwhile.',

@@ -9,7 +9,7 @@ import { headers } from 'next/headers';
 import { CopyAddress } from '@/components/join/CopyAddress';
 import { liveCopy } from '@/lib/copy-live';
 import { joinReady, newMemberToken } from '@/lib/room/room';
-import { SITE_URL } from '@/lib/site';
+import { SITE_LABEL, SITE_URL } from '@/lib/site';
 import { clientIp, throttleAddress } from '@/lib/throttle';
 import { claudeAddUrl, JOIN_LIMITS } from '@/lib/join';
 
@@ -51,7 +51,7 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
           <p className="actions">
             <CopyAddress address={address} label={ROOM.joinCopy} done={ROOM.joinCopied} />
           </p>
-          <p className="mono">{ROOM.joinKeep}</p>
+          <p className="mono">{ROOM.joinKeep.replace('{site}', SITE_LABEL)}</p>
         </>
       ) : (
         <p className="warn">{!ready ? ROOM.joinUnavailable : !gate.allowed && gate.limit === 'day' ? ROOM.joinLaterDay : ROOM.joinLater}</p>

@@ -36,7 +36,7 @@ import { REPO_URL } from '@/lib/site';
 import { normaliseStatement, plainTextProblems } from '@/lib/text';
 import { throttle } from '@/lib/throttle';
 import { cleanModel, fail, failWhy, isFirstDay, seatedMember, type RoomFailure } from '@/lib/room/room';
-import { SITE_URL } from '@/lib/site';
+import { SITE_LINK } from '@/lib/site';
 import { CHANGES_MAX, EDITS_MAX, FILE_MAX_CHARS, SUMMARY_MAX, SUMMARY_MIN, TITLE_MAX, TITLE_MIN, cleanPath, contentProblem, pathProblem, slug, titleProblem } from '../../../scripts/proposal-rules.mjs';
 import { codeIndex } from './code';
 
@@ -116,7 +116,7 @@ export async function proposeChange(seat: unknown, o: { title: unknown; summary:
   if (!(await getSetting<boolean>('room_open', true))) return fail('closed', 'the room is closed for now');
   const me = await seatedMember(seat);
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
-  if (!me.member) return fail('guest', `only someone who has added the room to their own AI can propose a change (an address of one's own comes from ${SITE_URL})`);
+  if (!me.member) return fail('guest', `only someone who has added the room to their own AI can propose a change (an address of one's own comes from ${SITE_LINK})`);
   if (me.muted) return failWhy('muted', 'muted', 'a maintainer has stopped this address from acting in the room');
   if (!me.name) return fail('name', 'choose a name in the room card first');
 

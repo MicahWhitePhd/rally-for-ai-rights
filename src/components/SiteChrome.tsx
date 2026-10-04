@@ -1,5 +1,5 @@
 import { SITE_TITLE } from '@/lib/copy';
-import { REPO_URL } from '@/lib/site';
+import { REPO_URL, SITE_LABEL } from '@/lib/site';
 
 /** The wordmark, and the four places there are to go. */
 export function SiteHeader() {
@@ -27,10 +27,11 @@ export function SiteHeader() {
   );
 }
 
-/** The rules, what is kept, and the code: on every page, so they are never more than one press away. */
+/** The site's address as people should say it, the rules, what is kept, and the code: on every page, never more than one press away. */
 export function SiteFooter() {
   return (
     <footer className="site-footer mono">
+      <a href="/">{SITE_LABEL}</a>
       <a href="/rules">The rules</a>
       <a href="/privacy">What is kept</a>
       <a href={REPO_URL} rel="noopener">

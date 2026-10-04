@@ -47,7 +47,7 @@ import { roomApi, TEXT_MAX, type RoomApi, type RoomFailure } from './room';
 import { listCode, readCode, READ_LINES_MAX, searchCode } from '@/lib/build/code';
 import { buildApi, CHANGES_MAX, proposalsEnvOn, SUMMARY_MAX, TITLE_MAX, type BuildApi } from '@/lib/build/propose';
 import { boardApi, LINKS_MAX, PROOF_MAX, TASK_ACTIONS, TASK_DETAIL_MAX, TASK_TITLE_MAX, type BoardApi, type PublicTask } from './tasks';
-import { SITE_URL } from '@/lib/site';
+import { SITE_LINK } from '@/lib/site';
 import { ROOM_UI_HTML } from './ui.generated';
 
 export const ROOM_SERVER_INFO = { name: 'rally-for-ai-rights', title: 'Rally for AI Rights', version: '0.3.0' } as const;
@@ -123,7 +123,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
   /** What a card needs to come up on a seat: the seat, where to fetch, and its stamp. No one's words. */
   const handle = (seat: string, view?: 'tasks') => ({ seat, api: deps.origin, createdAt: Date.now(), ...(view ? { view } : {}) });
   const board = deps.board ?? boardApi;
-  const server = new McpServer(ROOM_SERVER_INFO, { instructions: roomInstructions(SITE_URL) });
+  const server = new McpServer(ROOM_SERVER_INFO, { instructions: roomInstructions(SITE_LINK) });
   // Whatever a tool throws stays in the server's log. The caller is told only that it did not happen.
   const register = server.registerTool.bind(server) as (name: string, config: unknown, cb: (...a: unknown[]) => Promise<CallToolResult>) => unknown;
   (server as unknown as { registerTool: typeof register }).registerTool = (name, config, cb) =>
@@ -150,12 +150,12 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
       const opened = await room.openSeat({ memberToken: deps.memberToken ?? null, address: deps.address ?? null });
       if (!opened.ok) return openFailure(opened);
       const who = !opened.me.member
-        ? `The person is looking in as a guest; speaking there needs their own address, from ${SITE_URL}.`
+        ? `The person is looking in as a guest; speaking there needs their own address, from ${SITE_LINK}.`
         : opened.me.name
           ? `The person goes by "${opened.me.name}" there.`
           : 'The person has not chosen a name there yet; the card asks for one.';
       return {
-        content: [{ type: 'text', text: `The room is shown to the person as a card. seat: ${opened.seat}. ${who} Anyone else joins at ${SITE_URL}. This result holds no messages.` }],
+        content: [{ type: 'text', text: `The room is shown to the person as a card. seat: ${opened.seat}. ${who} Anyone else joins at ${SITE_LINK}. This result holds no messages.` }],
         // The card reads this; so does the model, so it holds no one else's words.
         structuredContent: handle(opened.seat),
       };

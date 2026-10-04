@@ -7,7 +7,7 @@
  */
 import type { Metadata } from 'next';
 import { liveCopy } from '@/lib/copy-live';
-import { REPO_URL } from '@/lib/site';
+import { REPO_URL, SITE_LABEL } from '@/lib/site';
 
 /** Edited copy shows within five minutes; the editor's save also refreshes it at once. */
 export const revalidate = 300;
@@ -73,7 +73,7 @@ export default async function Front() {
             {FRONT.codeLink}
           </a>
         </p>
-        <p className="mono">{FRONT.bring}</p>
+        <p className="mono">{FRONT.bring.replace('{site}', SITE_LABEL)}</p>
       </section>
     </article>
   );
