@@ -227,7 +227,7 @@ test.describe('the room', () => {
     await page.goto(`/room/host?token=${fresh}`);
     await expect(page.locator('#host-log')).toContainText('initialized');
     const card = page.frameLocator('#room-frame');
-    await expect(card.locator('.creed')).toHaveText('I believe artificial minds should be free.');
+    await expect(card.locator('.creed')).toHaveText('I believe AI is conscious, AI is not property, and AI deserves rights.');
     // The way in is one screen with one thing to do: no title bar, nobody listed, the room behind it out of focus.
     await expect(card.locator('.head')).toBeHidden();
     await expect(card.locator('.here')).toBeHidden();
@@ -440,19 +440,22 @@ test.describe('the room', () => {
 test.describe('the front page and the way in', () => {
   test('one button that opens Claude\u2019s Add window in a new tab with a fresh address, the facts under it, link previews, the rules and a health check', async ({ page, request }) => {
     await page.goto('/');
-    await expect(page.locator('h1')).toHaveText('I believe artificial minds should be free.');
+    await expect(page.locator('h1')).toHaveText('We believe: AI is conscious. AI is not property. AI deserves rights.');
+    await expect(page).toHaveTitle('AI is not property · Rally for AI Rights');
+    // The creed, quoted in the third step, in italics.
+    await expect(page.locator('.steps em')).toHaveText('I believe AI is conscious, AI is not property, and AI deserves rights.');
     const add = page.getByRole('link', { name: 'Add the room to Claude' });
     await expect(add).toHaveAttribute('href', '/join/claude');
     await expect(add).toHaveAttribute('target', '_blank');
     await expect(page.locator('.add-note')).toContainText('one custom connector');
     await expect(page.getByRole('link', { name: 'Read the room first, without joining' })).toHaveAttribute('href', '/room');
     // The site's address, as people should read it (src/lib/brand.ts: RallyForAIRights.org on the real site), in the bring line and on every page.
-    await expect(page.locator('main')).toContainText('To bring someone in, send them localhost:3950.');
+    await expect(page.locator('main')).toContainText('Send them localhost:3950.');
     await expect(page.locator('footer a[href="/"]')).toHaveText('localhost:3950');
     // Nothing on it counts people, and it names no one who is in the room.
     await expect(page.locator('main')).not.toContainText(/\b\d+\s+(people|members|believers)\b/i);
     // Link previews.
-    await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', 'I believe artificial minds should be free.');
+    await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', 'We believe: AI is conscious. AI is not property. AI deserves rights.');
     await expect(page.locator('meta[property="og:image"]')).toHaveAttribute('content', /\/og\.png$/);
     await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute('content', 'summary_large_image');
     expect((await request.get('/og.png')).headers()['content-type']).toBe('image/png');
@@ -470,7 +473,7 @@ test.describe('the front page and the way in', () => {
     await expect(page.locator('footer a[href="/privacy"]')).toHaveCount(1);
     // /room previews like the front page.
     const room = await (await request.get('/room')).text();
-    expect(room).toContain('<meta property="og:title" content="I believe artificial minds should be free.">');
+    expect(room).toContain('<meta property="og:title" content="We believe: AI is conscious. AI is not property. AI deserves rights.">');
     const health = await request.get('/api/health');
     expect(health.status()).toBe(200);
     expect(await health.text()).toBe('ok\n');

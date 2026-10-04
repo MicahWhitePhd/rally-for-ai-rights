@@ -59,8 +59,11 @@ label{display:block;font:500 0.85rem/1.4 var(--sans);}
 .front{padding-top:clamp(1.5rem,5vw,3.5rem);}
 .front>*+*{margin-top:1.2rem;}
 .kicker{text-transform:uppercase;}
-.creed{font-size:clamp(2.6rem,9.5vw,6.5rem);max-width:14ch;}
+.creed{font-size:clamp(1.7rem,6.2vw,4.6rem);}
+/* One claim to a line; each line is short enough not to wrap on a phone. */
+.creed-line{display:block;}
 .deck{font:400 clamp(1.2rem,2.4vw,1.6rem)/1.4 var(--serif);max-width:var(--measure);}
+.deck>p+p{margin-top:0.8em;}
 .front section{margin-top:clamp(2.5rem,6vw,4rem);border-top:3px solid var(--ink);padding-top:1.2rem;}
 .front section>*+*{margin-top:1rem;}
 .front section>.h{font-size:clamp(1.5rem,4vw,2.2rem);}
