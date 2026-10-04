@@ -387,7 +387,7 @@ export async function postToRoom(seat: unknown, o: { text: unknown; kind: 'perso
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
   if (!me.member) return fail('guest', GUEST);
   if (me.muted) return failWhy('muted', 'muted', MUTED);
-  if (!me.name) return fail('name', 'choose a name in the room card first');
+  if (!me.name) return fail('name', 'no name has been chosen in the room yet; the card asks for one, and choose_name sets one');
   // Tries, refused or not, are held by the minute; a person's day and the room's count only what is said.
   const minute = await throttle(`room:p:${me.id}`, POSTS_PER_MIN, 60, { failOpen: false });
   if (!minute.allowed) return fail('slow', 'too many messages just now; wait a minute');

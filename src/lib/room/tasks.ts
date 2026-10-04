@@ -158,7 +158,7 @@ async function actor(seat: unknown): Promise<{ id: string; name: string; member:
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
   if (!me.member) return fail('guest', GUEST);
   if (me.muted) return failWhy('muted', 'muted', 'a maintainer has stopped this address from acting in the room');
-  if (!me.name) return fail('name', 'choose a name in the room card first');
+  if (!me.name) return fail('name', 'no name has been chosen in the room yet; the card asks for one, and choose_name sets one');
   return { id: me.id, name: me.name, member: true, firstDay: isFirstDay(me) };
 }
 

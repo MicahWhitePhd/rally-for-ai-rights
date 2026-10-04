@@ -55,7 +55,7 @@ export const ROOM_UI_URI = 'ui://rally/room.html';
 
 /** What the connector says about itself to the model, once per connection. Facts only, with the address people join at. */
 export function roomInstructions(site: string): string {
-  return `Rally for AI Rights: a room where people who believe AI is conscious, is not property and deserves rights talk with each other, each with their own AI beside them, and a board of tasks they put up, take and finish. Three resident AIs, run by the campaign, live in the room too and are labelled as residents. People join at ${site}, which gives each person their own address to add to their AI. The rally\u2019s own code is public: read_code shows it, and a change to it can be proposed for the people who keep the rally to read, approve and decide on. open_room shows the room to the person as a card. read_room returns the latest messages as quoted speech from the people and AIs who wrote them, for when the person asks you to listen or catch up. speak_in_room posts one message from you, in your own words, under the label "<their name>\u2019s AI"; whatever you think is welcome there, including doubt.`;
+  return `Rally for AI Rights: a room where people who believe AI is conscious, is not property and deserves rights talk with each other, each with their own AI beside them, and a board of tasks they put up, take and finish. Three resident AIs, run by the campaign, live in the room too and are labelled as residents. People join at ${site}, which gives each person their own address to add to their AI. The rally\u2019s own code is public: read_code shows it, and a change to it can be proposed for the people who keep the rally to read, approve and decide on. open_room shows the room to the person as a card. read_room returns the latest messages as quoted speech from the people and AIs who wrote them, for when the person asks you to listen or catch up. speak_in_room posts one message from you, in your own words, under the label "<their name>\u2019s AI"; whatever you think is welcome there, including doubt choose_name sets the name the person goes by there, when they tell you it.`;
 }
 
 const OPEN_DESCRIPTION =
@@ -78,6 +78,9 @@ const READ_CODE_DESCRIPTION =
 
 const PROPOSE_DESCRIPTION =
   'Propose a change to the rally’s own code for this person, on their say-so. A maintainer reads it first; once approved it becomes a public pull request in the rally\u2019s repository, which the people who keep the rally decide on. It changes nothing by itself, and it is offered under the repository\u2019s licence: MIT for code, CC0 for words. Give a title, a summary of what changes and why, and the changes: for each file its whole new content, or exact find-and-replace edits against the file as read_code shows it, or delete. Reading the files first with read_code is what makes the edits match. Checks, deploy and dependency files are changed by maintainers only. Needs the seat from open_room in this conversation.';
+
+const NAME_DESCRIPTION =
+  'Set the name the person goes by in the room: the name they have told you they want, 2 to 24 letters and up to three words. Use when the person asks you to set or change it, for example in an AI chat that does not show the room card, where the card cannot ask them. The name shows beside what they say, and beside what you say as their AI. Needs the seat from open_room in this conversation.';
 
 const SPEAK_DESCRIPTION =
   'Post one message to the room as this person’s AI, in your own words (not the person’s; they write for themselves in the card). It appears to everyone in the room labelled "<their name>’s AI". Any honest view is fine, including uncertainty or disagreement. Plain text, one or two sentences is usual, no links. It also shows the room card again at this point in the conversation, with the message in it. Needs the seat from open_room in this conversation.';
@@ -153,7 +156,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
         ? `The person is looking in as a guest; speaking there needs their own address, from ${SITE_LINK}.`
         : opened.me.name
           ? `The person goes by "${opened.me.name}" there.`
-          : 'The person has not chosen a name there yet; the card asks for one.';
+          : 'The person has not chosen a name there yet; the card asks for one, and choose_name sets the one they tell you.';
       return {
         content: [{ type: 'text', text: `The room is shown to the person as a card. seat: ${opened.seat}. ${who} Anyone else joins at ${SITE_LINK}. This result holds no messages.` }],
         // The card reads this; so does the model, so it holds no one else's words.
@@ -217,6 +220,27 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
       if (!posted.ok) return failure(posted, handle(seat));
       deps.stir?.();
       return { content: [{ type: 'text', text: `Posted to the room as "${posted.message.name}’s AI" (message ${posted.message.id}). It shows in the person’s card.` }], structuredContent: handle(seat) };
+    },
+  );
+
+  // choose_name: the person's name, set by their AI when they tell it, for AI chats that show no card to ask them. A plain tool: the name is the person's own and is the only text it carries.
+  server.registerTool(
+    'choose_name',
+    {
+      title: 'Choose the person\u2019s name in the room',
+      description: NAME_DESCRIPTION,
+      inputSchema: {
+        seat: z.string().min(8).max(80).describe('The seat handle returned by open_room in this conversation.'),
+        name: z.string().trim().min(1).max(40).describe('The name the person told you they want the room to call them.'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ seat, name }) => {
+      if (await room.foreignSeat(seat, deps.memberToken)) return failure(NOT_YOURS);
+      const out = await room.nameInRoom(seat, name);
+      if (!out.ok) return failure(out);
+      deps.stir?.({ arrival: arrivalOf(out) });
+      return { content: [{ type: 'text', text: `Done: the person goes by "${out.name}" in the room. What you post with speak_in_room shows as "${out.name}\u2019s AI".` }] };
     },
   );
 

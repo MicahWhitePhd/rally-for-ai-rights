@@ -143,11 +143,14 @@ async function connect(o: Opts = {}) {
 const text = (r: CallToolResult) => r.content.map((c) => (c.type === 'text' ? c.text : '')).join('\n');
 
 describe('the room connector', () => {
-  it('advertises one card, shown for each of the room’s six tools, two plain tools for the code, and one app-only tool', async () => {
+  it('advertises one card, shown for each of the room’s six tools, a plain tool for the name, two plain tools for the code, and one app-only tool', async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     const by = Object.fromEntries(tools.map((t) => [t.name, t]));
-    expect(Object.keys(by).sort()).toEqual(['create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
+    expect(Object.keys(by).sort()).toEqual(['choose_name', 'create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
+    // Choosing a name through the AI: a plain tool (no card), one that changes something, so the person's AI chat can ask them first.
+    expect(by.choose_name._meta?.ui).toBeUndefined();
+    expect(by.choose_name.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     // The code tools show no card; proposing is there unless the deployment has switched it off.
     expect(by.read_code._meta?.ui).toBeUndefined();
     expect(by.read_code.annotations).toMatchObject({ readOnlyHint: true });
@@ -388,6 +391,23 @@ describe('the room connector', () => {
     const no = (await client.callTool({ name: 'propose_change', arguments: { seat, title: 'Please refuse this one', summary: 'A change that the fake build turns away.', changes } })) as CallToolResult;
     expect(no.isError).toBe(true);
     expect(text(no)).toBe('Not done (change): package.json is one of the files only a maintainer changes.');
+  });
+
+  it('choose_name: the name the person gives their AI, on their own seat only, and the reason when it cannot be one', async () => {
+    const { client, calls } = await connect();
+    const set = (await client.callTool({ name: 'choose_name', arguments: { seat: SEAT, name: 'Dana' } })) as CallToolResult;
+    expect(set.isError).toBeFalsy();
+    expect(text(set)).toBe('Done: the person goes by "Dana" in the room. What you post with speak_in_room shows as "Dana\u2019s AI".');
+    expect(set.structuredContent).toBeUndefined();
+    expect(calls).toContainEqual(['nameInRoom', [SEAT, 'Dana']]);
+    // Someone else's seat, copied from somewhere: refused before the room is asked.
+    const before = calls.length;
+    const theirs = (await client.callTool({ name: 'choose_name', arguments: { seat: THEIRS, name: 'Mal' } })) as CallToolResult;
+    expect(theirs.isError).toBe(true);
+    expect(text(theirs)).toMatch(/^Not done \(seat\): that seat was not opened in this conversation/);
+    expect(calls.length).toBe(before);
+    // An unnamed person's open_room says how a name gets chosen.
+    expect(text((await client.callTool({ name: 'open_room', arguments: {} })) as CallToolResult)).toMatch(/choose_name sets the one they tell you/);
   });
 
   it('says nothing to the model in the imperative', async () => {

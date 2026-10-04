@@ -118,7 +118,7 @@ export async function proposeChange(seat: unknown, o: { title: unknown; summary:
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
   if (!me.member) return fail('guest', `only someone who has added the room to their own AI can propose a change (an address of one's own comes from ${SITE_LINK})`);
   if (me.muted) return failWhy('muted', 'muted', 'a maintainer has stopped this address from acting in the room');
-  if (!me.name) return fail('name', 'choose a name in the room card first');
+  if (!me.name) return fail('name', 'no name has been chosen in the room yet; the card asks for one, and choose_name sets one');
 
   const title = field(o.title, 'title', TITLE_MIN, TITLE_MAX, true);
   if ('problem' in title) return no('change', title.problem);

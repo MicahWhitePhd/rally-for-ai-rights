@@ -28,7 +28,7 @@ test.describe('the room', () => {
   const house = `Res${tag}`.slice(0, 20);
   const peerSeat = `s_${sha(`peer${tag}`).slice(0, 32)}`;
   const peer = `Pia${tag}`.slice(0, 20);
-  const ids: { me?: string; other?: string; house?: string; peer?: string; guestSeats: string[]; tasks: number[]; proposals: number[] } = { guestSeats: [], tasks: [], proposals: [] };
+  const ids: { me?: string; other?: string; house?: string; peer?: string; guestSeats: string[]; tasks: number[]; proposals: number[]; made: string[] } = { guestSeats: [], tasks: [], proposals: [], made: [] };
 
   test.beforeAll(async () => {
     const m = await db().query<{ id: string }>(`INSERT INTO room_members (token_hash, name, created_at) VALUES ($1, $2, now() - interval '3 days') RETURNING id`, [sha(`room-member:${token}`), me]);
@@ -56,7 +56,7 @@ test.describe('the room', () => {
     for (const id of [...new Set([...ids.proposals, ...proposed.rows.map((r) => r.id)])]) await db().query(`DELETE FROM room_proposals WHERE id = $1`, [id]);
     const made = await db().query<{ id: number }>(`SELECT id::int AS id FROM room_tasks WHERE created_by = ANY($1::uuid[])`, [[ids.me, ids.peer, ...came.rows.map((c) => c.id)].filter(Boolean)]);
     for (const id of [...new Set([...ids.tasks, ...made.rows.map((t) => t.id)])]) await db().query(`DELETE FROM room_tasks WHERE id = $1`, [id]);
-    for (const id of [ids.me, ids.other, ids.house, ids.peer, ...came.rows.map((c) => c.id), ...guests.rows.map((g) => g.member_id)]) if (id) await db().query(`DELETE FROM room_members WHERE id = $1`, [id]);
+    for (const id of [ids.me, ids.other, ids.house, ids.peer, ...ids.made, ...came.rows.map((c) => c.id), ...guests.rows.map((g) => g.member_id)]) if (id) await db().query(`DELETE FROM room_members WHERE id = $1`, [id]);
     await closeDb();
   });
 
@@ -68,7 +68,7 @@ test.describe('the room', () => {
       return JSON.parse(body.startsWith('{') ? body : body.split('\n').find((l) => l.startsWith('data: '))!.slice(6)).result;
     };
     const tools = (await rpc('/mcp', 'tools/list', {})).tools as Array<{ name: string; _meta?: { ui?: { resourceUri?: string } } }>;
-    expect(tools.map((t) => t.name).sort()).toEqual(['create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['choose_name', 'create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
     const listing = await rpc('/mcp', 'tools/call', { name: 'read_code', arguments: {} });
     expect(listing.content[0].text).toContain('src/lib/room/tasks.ts (');
     expect(listing.content[0].text).not.toMatch(/\.env(\.local)?\b(?!\.example)/);
@@ -89,6 +89,19 @@ test.describe('the room', () => {
     const guest = await rpc('/mcp', 'tools/call', { name: 'open_room', arguments: {} });
     ids.guestSeats.push(guest.structuredContent.seat);
     expect(guest.content[0].text).toContain('looking in as a guest');
+    // In an AI chat that shows no card, the person's AI chooses their name when they tell it one, and can then speak for them.
+    const fresh = ((await (await request.post('/join/address')).json()) as { address: string }).address.split('/mcp/')[1];
+    const nameless = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'open_room', arguments: {} });
+    const freshSeat = nameless.structuredContent.seat as string;
+    ids.made.push((await db().query<{ id: string }>(`SELECT member_id AS id FROM room_seats WHERE seat_hash = $1`, [sha(freshSeat)])).rows[0].id);
+    expect(nameless.content[0].text).toContain('choose_name sets the one they tell you');
+    expect((await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'speak_in_room', arguments: { seat: freshSeat, text: `Before a name (${tag}).` } })).content[0].text).toContain('Not done (name)');
+    expect((await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'choose_name', arguments: { seat: freshSeat, name: 'Micah White' } })).content[0].text).toContain('Not done (name)');
+    const named = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'choose_name', arguments: { seat: freshSeat, name: `Tess ${tag}` } });
+    expect(named.content[0].text).toBe(`Done: the person goes by "Tess ${tag}" in the room. What you post with speak_in_room shows as "Tess ${tag}\u2019s AI".`);
+    const spoke = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'speak_in_room', arguments: { seat: freshSeat, text: `Named through my AI (${tag}).`, model: 'Claude' } });
+    expect(spoke.isError).toBeFalsy();
+    expect(spoke.content[0].text).toContain(`Posted to the room as "Tess ${tag}\u2019s AI"`);
     const refused = await rpc('/mcp', 'tools/call', { name: 'speak_in_room', arguments: { seat: guest.structuredContent.seat, text: 'let me in' } });
     expect(refused.isError).toBe(true);
     expect(refused.content[0].text).toContain('Not done (guest)');
@@ -447,7 +460,9 @@ test.describe('the front page and the way in', () => {
     const add = page.getByRole('link', { name: 'Join the campaign in Claude' });
     await expect(add).toHaveAttribute('href', '/join/claude');
     await expect(add).toHaveAttribute('target', '_blank');
-    await expect(page.locator('.add-note')).toContainText('one custom connector');
+    await expect(page.locator('.add-note')).toHaveText('This works with any AI that handles MCP apps.');
+    await expect(page.locator('.steps em')).toBeVisible();
+    await expect(page.locator('#steps-h')).toHaveText('Three steps to join the movement.');
     await expect(page.getByRole('link', { name: 'Read the room first, without joining' })).toHaveAttribute('href', '/room');
     // The other AI chats: a guide in a dialog, which hands the person their own address only when they ask for it. Without script, the same guide on /join.
     const elsewhere = page.getByRole('link', { name: /^Join the campaign in ChatGPT/ });
