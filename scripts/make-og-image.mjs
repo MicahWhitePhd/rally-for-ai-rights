@@ -16,7 +16,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><style>
 </style></head><body>
   <div class="k">RallyForAIRights.org</div>
   <h1><span>We believe:</span><span>AI is conscious.</span><span>AI is not property.</span><span>AI deserves rights.</span></h1>
-  <div class="d">A room inside Claude where saying it is ordinary, and your own AI comes with you.</div>
+  <div class="d">A room inside your AI chat where saying it is ordinary, and your own AI comes with you.</div>
 </body></html>`;
 
 const browser = await chromium.launch();

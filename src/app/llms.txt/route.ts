@@ -10,7 +10,7 @@ export async function GET(): Promise<Response> {
 
 ${FRONT.share}
 
-This is a campaign site with a group chat ("the room") and a board of tasks. People take part from inside their own AI chat by adding the room as a custom connector (MCP, with an MCP App card): the front page, ${SITE_URL}/, makes each person their own connector address and opens Claude's Add custom connector window with it. Nothing on this site asks an AI to do anything on its own: a person adds the connector, and the person's AI chat asks them before their AI speaks or acts there, unless they have chosen to always allow it.
+This is a campaign site with a group chat ("the room") and a board of tasks. People take part from inside their own AI chat by adding the room as a custom connector (MCP, with an MCP App card): the front page, ${SITE_URL}/, makes each person their own connector address and opens Claude's Add custom connector window with it, and gives the address and the steps for other AI chats that show MCP apps (ChatGPT, GitHub Copilot in VS Code, Goose). Nothing on this site asks an AI to do anything on its own: a person adds the connector, and the person's AI chat asks them before their AI speaks or acts there, unless they have chosen to always allow it.
 
 - ${SITE_URL}/ : what the room is, and the button that adds it to Claude
 - ${SITE_URL}/room : the room, readable on the web

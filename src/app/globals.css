@@ -95,7 +95,20 @@ label{display:block;font:500 0.85rem/1.4 var(--sans);}
 
 /* the front page's one button, and what to know before pressing it */
 .btn-big{font-size:1.15rem;padding:1.05rem 1.6rem;}
+/* The front page's two long buttons wrap on a phone instead of pushing the page sideways. */
+.btn-big{white-space:normal;max-width:100%;line-height:1.15;text-align:center;}
 .add-note{max-width:var(--measure);color:#3b3a36;}
+/* The guide to other AI chats: a plain sheet of paper over the page. */
+dialog.elsewhere{width:min(100% - 2rem,42rem);max-height:min(90vh,52rem);overflow:auto;background:var(--paper);color:var(--ink);border:2px solid var(--ink);padding:1.2rem 1.4rem 1.6rem;}
+dialog.elsewhere::backdrop{background:rgba(17,17,17,0.55);}
+dialog.elsewhere>*+*{margin-top:0.9rem;}
+.elsewhere-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;}
+.elsewhere-head .h{font-size:clamp(1.3rem,4vw,1.8rem);margin:0;}
+.elsewhere-head .btn{padding:0.5rem 0.8rem;font-size:0.8rem;}
+.elsewhere-host{border-top:1px solid var(--ink);padding-top:0.7rem;margin-top:1rem;}
+.elsewhere-host h3{font:900 1.05rem/1.2 var(--sans);text-transform:uppercase;margin:0 0 0.4rem;}
+.elsewhere-host ol{padding-left:1.3rem;}
+.elsewhere-host li+li{margin-top:0.3rem;}
 .who{padding-left:1.2rem;max-width:var(--measure);}
 .who li+li{margin-top:0.5rem;}
 .site-footer{display:flex;flex-wrap:wrap;gap:0.4rem 1.4rem;margin-top:4rem;padding-top:1rem;border-top:1px solid var(--ink);}

@@ -444,11 +444,41 @@ test.describe('the front page and the way in', () => {
     await expect(page).toHaveTitle('AI is not property · Rally for AI Rights');
     // The creed, quoted in the third step, in italics.
     await expect(page.locator('.steps em')).toHaveText('I believe AI is conscious, AI is not property, and AI deserves rights.');
-    const add = page.getByRole('link', { name: 'Add the room to Claude' });
+    const add = page.getByRole('link', { name: 'Join the campaign in Claude' });
     await expect(add).toHaveAttribute('href', '/join/claude');
     await expect(add).toHaveAttribute('target', '_blank');
     await expect(page.locator('.add-note')).toContainText('one custom connector');
     await expect(page.getByRole('link', { name: 'Read the room first, without joining' })).toHaveAttribute('href', '/room');
+    // The other AI chats: a guide in a dialog, which hands the person their own address only when they ask for it. Without script, the same guide on /join.
+    const elsewhere = page.getByRole('link', { name: /^Join the campaign in ChatGPT/ });
+    await expect(elsewhere).toHaveAttribute('href', '/join#elsewhere');
+    await elsewhere.click();
+    const guide = page.getByRole('dialog', { name: 'Join from another AI.' });
+    await expect(guide).toBeVisible();
+    await expect(guide.locator('.join-address')).toHaveCount(0);
+    await guide.getByRole('button', { name: 'Get your address' }).click();
+    await expect(guide.locator('.join-address')).toHaveText(/^http:\/\/localhost:3950\/mcp\/r[A-Za-z0-9_-]{40}$/);
+    await expect(guide.getByRole('button', { name: 'Copy the address' })).toBeVisible();
+    // The steps for each AI, and its own one-click link where it has one, carrying this person's address.
+    for (const name of ['ChatGPT', 'GitHub Copilot, in VS Code', 'Goose']) await expect(guide.getByRole('region', { name })).toBeVisible();
+    const mine = (await guide.locator('.join-address').textContent())!.trim();
+    const vscode = await guide.getByRole('link', { name: 'Add to VS Code' }).getAttribute('href');
+    expect(vscode!.startsWith('vscode:mcp/install?')).toBe(true);
+    expect(JSON.parse(decodeURIComponent(vscode!.slice('vscode:mcp/install?'.length)))).toEqual({ name: 'rally-for-ai-rights', type: 'http', url: mine });
+    const goose = new URL((await guide.getByRole('link', { name: 'Add to Goose' }).getAttribute('href'))!);
+    expect(goose.protocol).toBe('goose:');
+    expect(goose.searchParams.get('url')).toBe(mine);
+    expect(goose.searchParams.get('type')).toBe('streamable_http');
+    await guide.getByRole('button', { name: 'Close' }).click();
+    await expect(guide).toBeHidden();
+    // Without script, the same guide is on /join, with that page's own address in the links.
+    await page.goto('/join#elsewhere');
+    await expect(page.locator('#elsewhere').getByRole('region', { name: 'ChatGPT' })).toBeVisible();
+    await expect(page.locator('#elsewhere').getByRole('link', { name: 'Add to VS Code' })).toHaveAttribute('href', /^vscode:mcp\/install\?/);
+    await page.goto('/');
+    const made = await request.post('/join/address');
+    expect(made.headers()['cache-control']).toBe('no-store');
+    expect(((await made.json()) as { address: string }).address).toMatch(/^http:\/\/localhost:3950\/mcp\/r[A-Za-z0-9_-]{40}$/);
     // The site's address, as people should read it (src/lib/brand.ts: RallyForAIRights.org on the real site), in the bring line and on every page.
     await expect(page.locator('main')).toContainText('Send them localhost:3950.');
     await expect(page.locator('footer a[href="/"]')).toHaveText('localhost:3950');

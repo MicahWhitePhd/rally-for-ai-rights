@@ -7,6 +7,7 @@
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { CopyAddress } from '@/components/join/CopyAddress';
+import { ElsewhereSteps } from '@/components/join/ElsewhereSteps';
 import { liveCopy } from '@/lib/copy-live';
 import { joinReady, newMemberToken } from '@/lib/room/room';
 import { SITE_LABEL, SITE_URL } from '@/lib/site';
@@ -21,7 +22,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function JoinPage({ searchParams }: { searchParams: Promise<{ later?: string }> }) {
-  const { ROOM, FRONT } = await liveCopy();
+  const { ROOM, FRONT, ELSEWHERE } = await liveCopy();
   const { later } = await searchParams;
   const ready = joinReady();
   const gate = !ready
@@ -52,6 +53,15 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
             <CopyAddress address={address} label={ROOM.joinCopy} done={ROOM.joinCopied} />
           </p>
           <p className="mono">{ROOM.joinKeep.replace('{site}', SITE_LABEL)}</p>
+          {ELSEWHERE.hosts.length ? (
+            <section id="elsewhere" aria-labelledby="elsewhere-h">
+              <h2 id="elsewhere-h" className="h">
+                {ELSEWHERE.title}
+              </h2>
+              <ElsewhereSteps hosts={ELSEWHERE.hosts} address={address} />
+              {ELSEWHERE.noCard ? <p className="mono">{ELSEWHERE.noCard}</p> : null}
+            </section>
+          ) : null}
         </>
       ) : (
         <p className="warn">{!ready ? ROOM.joinUnavailable : !gate.allowed && gate.limit === 'day' ? ROOM.joinLaterDay : ROOM.joinLater}</p>

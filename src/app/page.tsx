@@ -7,6 +7,7 @@
  */
 import type { Metadata } from 'next';
 import { liveCopy } from '@/lib/copy-live';
+import { JoinElsewhere } from '@/components/join/JoinElsewhere';
 import { REPO_URL, SITE_LABEL } from '@/lib/site';
 
 /** Edited copy shows within five minutes; the editor's save also refreshes it at once. */
@@ -28,7 +29,7 @@ function withEm(text: string) {
 }
 
 export default async function Front() {
-  const { FRONT } = await liveCopy();
+  const { FRONT, ELSEWHERE } = await liveCopy();
   return (
     <article className="front" aria-labelledby="front-h">
       <h1 id="front-h" className="h creed">
@@ -50,6 +51,7 @@ export default async function Front() {
         <a className="btn btn-spot btn-big" href="/join/claude" target="_blank" rel="noopener">
           {FRONT.add}
         </a>
+        <JoinElsewhere copy={{ ...ELSEWHERE, addressNote: ELSEWHERE.addressNote.replace('{site}', SITE_LABEL) }} />
       </p>
       <p className="mono add-note">{FRONT.addNote}</p>
       <p>
