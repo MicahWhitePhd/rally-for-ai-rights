@@ -28,17 +28,20 @@ const STATUS = { seat: 401, name: 422, text: 422, guest: 403, slow: 429, closed:
 /**
  * How often one card may ask for news: a card asks every few seconds, so anything much faster is not a card. Kept
  * in this instance's memory, so a flood of asks is turned away before it reaches the database. Bounded in size.
+ * Counted per card, not per seat: when an AI reads the room a new card comes up on the same seat, and the older one
+ * must still get through to learn that it has been moved down the chat. A card is its seat and its stamp.
  */
 const SYNC_GAP_MS = 1200;
 const lastSync = new Map<string, number>();
-function tooSoon(seat: unknown): boolean {
+function tooSoon(seat: unknown, born: unknown): boolean {
   // Only a well-formed seat is remembered: anything else is refused where it is used, and must not fill this map.
   if (!isSeat(seat)) return false;
+  const card = `${seat}|${typeof born === 'number' && Number.isSafeInteger(born) ? born : 0}`;
   const now = Date.now();
-  const prev = lastSync.get(seat);
+  const prev = lastSync.get(card);
   if (prev !== undefined && now - prev < SYNC_GAP_MS) return true;
   if (lastSync.size > 50_000) lastSync.clear();
-  lastSync.set(seat, now);
+  lastSync.set(card, now);
   return false;
 }
 
@@ -84,7 +87,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string
     return json({ ...synced, seat, strings: copy.ROOM });
   }
   if (op === 'sync') {
-    if (tooSoon(body.seat)) return json({ ok: false, code: 'slow', reasons: ['asked again too soon'] }, 429);
+    if (tooSoon(body.seat, body.born)) return json({ ok: false, code: 'slow', reasons: ['asked again too soon'] }, 429);
     const after = typeof body.after === 'number' && Number.isInteger(body.after) && body.after >= 0 ? body.after : null;
     const have = Array.isArray(body.have) ? body.have.filter((x): x is number => Number.isInteger(x)).slice(-200) : [];
     const out = await syncRoom(body.seat, after, have, body.born);
