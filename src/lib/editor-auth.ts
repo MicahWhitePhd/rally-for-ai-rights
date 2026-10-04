@@ -7,20 +7,13 @@
  *   400 ms delay on every attempt so timing reveals nothing.
  * - Session cookie `rally_editor` = `<exp>.<hmac-sha256(exp)>`, Path=/editor,
  *   12 h, httpOnly, SameSite=Lax. Verified with timingSafeEqual as well.
- * - Login attempts are throttled in-process (5 per 10 min per IP). A DB-backed
- *   throttle would survive cold starts; this one is enough for a single-editor
- *   prototype and never fails closed for the editor.
- *
- * Pure functions (no framework) are exported for the unit test; the
- * `requireEditor()` helper wraps them for layouts, pages and actions.
+ * - Sign-in tries are counted in the database per network address (src/app/editor/actions.ts).
  */
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 export const EDITOR_COOKIE = 'rally_editor';
 export const EDITOR_SESSION_MS = 12 * 60 * 60 * 1000;
 export const LOGIN_DELAY_MS = 400;
-export const LOGIN_MAX_ATTEMPTS = 5;
-export const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 
 function sha256(s: string): Buffer {
   return createHash('sha256').update(s, 'utf8').digest();
@@ -68,25 +61,6 @@ export function editorCookieOptions(): {
     path: '/editor',
     maxAge: EDITOR_SESSION_MS / 1000,
   };
-}
-
-/** In-process fixed-window attempt counter. */
-const attempts = new Map<string, { win: number; n: number }>();
-export function loginAllowed(ip: string, now = Date.now()): boolean {
-  const win = Math.floor(now / LOGIN_WINDOW_MS);
-  const cur = attempts.get(ip);
-  if (!cur || cur.win !== win) {
-    attempts.set(ip, { win, n: 1 });
-    return true;
-  }
-  cur.n += 1;
-  if (attempts.size > 1000) attempts.clear();
-  // The e2e suite signs in more often than an editor ever would; it raises the cap for its own server (playwright.config.ts).
-  const max = Number(process.env.EDITOR_LOGIN_MAX) || LOGIN_MAX_ATTEMPTS;
-  return cur.n <= max;
-}
-export function _resetLoginAttempts(): void {
-  attempts.clear();
 }
 
 export const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

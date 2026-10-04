@@ -26,7 +26,7 @@ interface T {
 const db = vi.hoisted(() => ({
   open: true as unknown,
   counts: new Map<string, number>(),
-  members: new Map<string, { id: string; name: string | null; member: boolean }>(),
+  members: new Map<string, { id: string; name: string | null; member: boolean; createdAt?: Date; muted?: boolean }>(),
   tasks: [] as T[],
   said: [] as Array<{ member_id: string; kind: string; model: string | null; text: string }>,
 }));
@@ -83,12 +83,12 @@ vi.mock('@/lib/db/queries/tasks', () => ({
     db.tasks.push({ id, ...t, status: 'open', claimed_by: null, claim_until: null, done_at: null, proof: null, proof_links: [], confirmed_by: null, created_at: new Date() });
     return id;
   },
-  activeClaims: async (memberId: string) => db.tasks.filter((t) => t.claimed_by === memberId && live(t)).length,
-  claimTask: async (id: number, memberId: string, days: number) => {
+  claimTask: async (id: number, memberId: string, days: number, limit: number) => {
+    if (db.tasks.filter((t) => t.claimed_by === memberId && live(t)).length >= limit) return 'limit';
     const t = find(id);
-    if (!t || !(t.status === 'open' || (t.status === 'claimed' && !live(t)))) return false;
+    if (!t || !(t.status === 'open' || (t.status === 'claimed' && !live(t)))) return 'changed';
     Object.assign(t, { status: 'claimed', claimed_by: memberId, claim_until: Date.now() + days * 86_400_000 });
-    return true;
+    return 'ok';
   },
   releaseTask: async (id: number, memberId: string) => {
     const t = find(id);
@@ -120,10 +120,11 @@ const { createHash } = await import('node:crypto');
 const { actOnTask, cleanLinks, CLAIMS_AT_ONCE, createTask, listBoard } = await import('@/lib/room/tasks');
 
 const seatOf = (who: string) => `s_${who.padEnd(26, 'x')}`;
-function seat(who: string, o: { name?: string | null; member?: boolean } = {}): string {
+function seat(who: string, o: { name?: string | null; member?: boolean; firstDay?: boolean; muted?: boolean } = {}): string {
   const s = seatOf(who);
-  db.members.set(createHash('sha256').update(s).digest('hex'), { id: who, name: o.name === undefined ? who : o.name, member: o.member ?? true });
-  db.members.set(who, { id: who, name: o.name === undefined ? who : o.name, member: o.member ?? true });
+  const m = { id: who, name: o.name === undefined ? who : o.name, member: o.member ?? true, createdAt: new Date(Date.now() - (o.firstDay ? 0 : 3 * 86_400_000)), muted: Boolean(o.muted) };
+  db.members.set(createHash('sha256').update(s).digest('hex'), m);
+  db.members.set(who, m);
   return s;
 }
 
@@ -294,5 +295,61 @@ describe('a task from open to confirmed', () => {
     for (const id of [0, -1, 1.5, '1', null, 99]) expect(await actOnTask(dana, id, 'take', { via: 'person' }), String(id)).toMatchObject({ ok: false, code: 'task' });
     await createTask(dana, { title: 'Something real to do', via: 'person' });
     expect(await actOnTask(dana, 1, 'delete', { via: 'person' })).toMatchObject({ ok: false, code: 'task' });
+  });
+});
+
+describe('what the second review found (2026-10-03)', () => {
+  it('a refusal says exactly why: a link in a title, an empty proof, a bad link', async () => {
+    const dana = seat('Dana');
+    expect(await createTask(dana, { title: 'Post our letter on character.ai today', via: 'person' })).toMatchObject({ ok: false, code: 'text', why: 'links' });
+    const made = await createTask(dana, { title: 'Write to one lab about its weights', via: 'person' });
+    if (!made.ok) throw new Error('not made');
+    const sam = seat('Sam');
+    expect(await actOnTask(sam, made.task.id, 'done', { proof: '', via: 'person' })).toMatchObject({ ok: false, code: 'text', why: 'empty' });
+    expect(await actOnTask(sam, made.task.id, 'done', { proof: 'Sent it to them', links: ['http://plain.example'], via: 'person' })).toMatchObject({ ok: false, why: 'proofLinks' });
+  });
+
+  it('an address on its first day cannot confirm, so one person with two new addresses cannot make their own links live', async () => {
+    const owner = seat('Owner');
+    const made = await createTask(owner, { title: 'Write to one lab about its weights', via: 'person' });
+    if (!made.ok) throw new Error('not made');
+    expect(await actOnTask(seat('Robin', { firstDay: true }), made.task.id, 'done', { proof: 'Sent it to them', links: ['https://example.org/my-post'], via: 'person' })).toMatchObject({ ok: true });
+    expect(await actOnTask(seat('Robyn', { firstDay: true }), made.task.id, 'confirm', { via: 'person' })).toMatchObject({ ok: false, code: 'slow', why: 'firstDayConfirm' });
+    expect(await actOnTask(seat('Sam'), made.task.id, 'confirm', { via: 'person' })).toMatchObject({ ok: true, task: { state: 'confirmed', linksLive: true } });
+  });
+
+  it('a board line carries its task, so taking the task down can take the line with it', async () => {
+    const made = await createTask(seat('Dana'), { title: 'Write to one lab about its weights', via: 'person' });
+    if (!made.ok) throw new Error('not made');
+    expect(db.said.at(-1)).toMatchObject({ kind: 'event', ref: `task:${made.task.id}` });
+  });
+});
+
+describe('the board\u2019s own guards', () => {
+  it('proof addresses are plain text until a second person confirms the task; then they may be links', async () => {
+    const dana = seat('Dana');
+    const ali = seat('Ali');
+    await createTask(dana, { title: 'Write to one lab about its weights', via: 'person' });
+    const done = await actOnTask(ali, 1, 'done', { proof: 'Sent the letter today.', links: ['https://example.org/letter'], via: 'person' });
+    expect(done).toMatchObject({ ok: true, task: { state: 'done', links: ['https://example.org/letter'], linksLive: false } });
+    expect(await actOnTask(dana, 1, 'confirm', { via: 'person' })).toMatchObject({ ok: true, task: { state: 'confirmed', linksLive: true } });
+  });
+
+  it('a task taken down reads as taken down, with nothing anyone can do to it', async () => {
+    const dana = seat('Dana');
+    await createTask(dana, { title: 'Write to one lab about its weights', via: 'person' });
+    const out = await actOnTask(dana, 1, 'withdraw', { via: 'person' });
+    expect(out).toMatchObject({ ok: true, task: { state: 'withdrawn' } });
+    expect(out.ok && Object.values(out.task.can).some(Boolean)).toBe(false);
+  });
+
+  it('on its first day an address may put up two tasks; a stopped member can do nothing on the board', async () => {
+    const fresh = seat('Nova', { firstDay: true });
+    expect((await createTask(fresh, { title: 'First thing to do here', via: 'person' })).ok).toBe(true);
+    expect((await createTask(fresh, { title: 'Second thing to do here', via: 'person' })).ok).toBe(true);
+    expect(await createTask(fresh, { title: 'Third thing to do here', via: 'person' })).toMatchObject({ ok: false, code: 'slow', why: 'firstDay' });
+    const stopped = seat('Mal', { muted: true });
+    expect(await createTask(stopped, { title: 'Let me put this up', via: 'person' })).toMatchObject({ ok: false, code: 'muted' });
+    expect(await actOnTask(stopped, 1, 'take', { via: 'person' })).toMatchObject({ ok: false, code: 'muted' });
   });
 });

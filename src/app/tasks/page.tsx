@@ -13,7 +13,8 @@ export const dynamic = 'force-dynamic';
 
 export async function generateMetadata(): Promise<Metadata> {
   const { ROOM } = await liveCopy();
-  return { title: ROOM.tasksTitle, description: ROOM.tasksLede, alternates: { canonical: '/tasks' } };
+  // Names people chose are on the board; it is for reading here, not for search engines.
+  return { title: ROOM.tasksTitle, description: ROOM.tasksLede, alternates: { canonical: '/tasks' }, robots: { index: false } };
 }
 
 const day = (d: Date | null) => (d ? new Date(d).toISOString().slice(0, 10) : '');
@@ -60,11 +61,16 @@ export default async function TasksPage() {
             {t.proof ? (
               <blockquote>
                 <p>{t.proof}</p>
+                {/* Addresses given as proof become links only once a second person has confirmed the task. */}
                 {(Array.isArray(t.proof_links) ? t.proof_links : []).map((url) => (
                   <p key={url} className="mono">
-                    <a href={url} rel="noopener noreferrer nofollow ugc">
-                      {url}
-                    </a>
+                    {t.state === 'confirmed' ? (
+                      <a href={url} rel="noopener noreferrer nofollow ugc">
+                        {url}
+                      </a>
+                    ) : (
+                      url
+                    )}
                   </p>
                 ))}
               </blockquote>
@@ -88,9 +94,13 @@ export default async function TasksPage() {
                 </p>
                 <h3>{p.title}</h3>
                 <p className="mono">
-                  <a href={pullRequestUrl(p.branch)} rel="noopener">
-                    {ROOM.proposalOnGithub}
-                  </a>
+                  {p.approved_at ? (
+                    <a href={pullRequestUrl(p.branch)} rel="noopener">
+                      {ROOM.proposalOnGithub}
+                    </a>
+                  ) : (
+                    ROOM.proposalWaiting
+                  )}
                 </p>
               </li>
             ))}

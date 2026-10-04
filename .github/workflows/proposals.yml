@@ -1,22 +1,24 @@
 name: proposals
 
-# Opens the room's proposals as pull requests (scripts/open-proposals.mjs).
+# Opens the room's approved proposals as pull requests (scripts/open-proposals.mjs).
 #
-# The site holds no token for this repository. It publishes what people's AIs proposed at <site>/api/proposals; this
-# job reads that list, checks each proposal again, and opens it as a pull request with the token GitHub gives the job
-# for its own lifetime. Nothing from a proposal is run here: the job writes text files and calls git and gh.
-# It runs from main only, so a pull request cannot change what it does, and only where the repository variable
-# RALLY_SITE is set, so a fork does nothing until its owner points it at their own site.
+# The site holds no token for this repository. A maintainer reads each proposal on the site and approves it; the site
+# then lists it at <site>/api/proposals. This job reads that list, checks each proposal again, and opens it as a pull
+# request with the token GitHub gives the job for its own lifetime. Nothing from a proposal is run here: the job
+# writes text files and calls git and gh. It runs from main only, so a pull request cannot change what it does, and
+# only where the repository variable RALLY_SITE is set, so a fork does nothing until its owner points it at a site.
+#
+# Run it from the Actions tab (Run workflow) right after approving a proposal. The hourly schedule is only a backstop:
+# GitHub runs schedules when it can, sometimes hours late.
 on:
-  schedule:
-    # Off the hour on purpose: GitHub says the start of every hour is when scheduled jobs are most delayed or dropped.
-    # Even so a schedule is best-effort; a maintainer can start this job at once from the Actions tab (Run workflow).
-    - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
 
 permissions:
   contents: write
   pull-requests: write
+  # To start the checks on the branch it opens: GitHub does not start them by itself for a pull request a job opened.
   actions: write
 
 concurrency:
@@ -29,10 +31,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: main
-      - uses: actions/setup-node@v4
+          # The whole history, so a proposal's branch can start from the commit it was written against.
+          fetch-depth: 0
+      # actions/setup-node v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22
       - run: node scripts/open-proposals.mjs

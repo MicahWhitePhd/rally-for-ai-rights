@@ -7,7 +7,7 @@
 import type { NextRequest } from 'next/server';
 import { liveCopy } from '@/lib/copy-live';
 import { stir } from '@/lib/room/residents';
-import { nameInRoom, olderRoom, openSeat, postToRoom, syncRoom } from '@/lib/room/room';
+import { isSeat, nameInRoom, olderRoom, openSeat, postToRoom, seatWritable, syncRoom } from '@/lib/room/room';
 import { arrivalOf } from '@/lib/room/server';
 import { actOnTask, createTask, listBoard } from '@/lib/room/tasks';
 import { addressKey, clientIp, throttleAddress } from '@/lib/throttle';
@@ -23,9 +23,30 @@ const CORS = {
   'Access-Control-Max-Age': '86400',
   'Cache-Control': 'no-store',
 };
-const STATUS = { seat: 401, name: 422, text: 422, guest: 403, slow: 429, closed: 503, task: 409, limit: 429 } as const;
+const STATUS = { seat: 401, name: 422, text: 422, guest: 403, slow: 429, closed: 503, task: 409, limit: 429, muted: 403 } as const;
+
+/**
+ * How often one card may ask for news: a card asks every few seconds, so anything much faster is not a card. Kept
+ * in this instance's memory, so a flood of asks is turned away before it reaches the database. Bounded in size.
+ */
+const SYNC_GAP_MS = 1200;
+const lastSync = new Map<string, number>();
+function tooSoon(seat: unknown): boolean {
+  // Only a well-formed seat is remembered: anything else is refused where it is used, and must not fill this map.
+  if (!isSeat(seat)) return false;
+  const now = Date.now();
+  const prev = lastSync.get(seat);
+  if (prev !== undefined && now - prev < SYNC_GAP_MS) return true;
+  if (lastSync.size > 50_000) lastSync.clear();
+  lastSync.set(seat, now);
+  return false;
+}
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: CORS });
+const tooMany = (limit?: 'hour' | 'day') => json({ ok: false, code: 'slow', reasons: ['too many from here just now'], ...(limit === 'day' ? { why: 'day' } : {}) }, 429);
+
+/** What writes. The web routes cannot tell whose browser is asking, so a seat writes here only for its first day. */
+const WRITES = new Set(['post', 'name', 'task-new', 'task-act']);
 
 export function OPTIONS(): Response {
   return new Response(null, { status: 204, headers: CORS });
@@ -41,13 +62,18 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string
     return json({ ok: false, code: 'text', reasons: ['body'] }, 400);
   }
   const address = addressKey(clientIp(req.headers));
+  if (WRITES.has(op) && !(await seatWritable(body.seat))) {
+    return json({ ok: false, code: 'seat', why: 'stale', reasons: ['this card was opened more than a day ago; open the room again to write'] }, 401);
+  }
 
   if (op === 'enter') {
     // With a seat (the MCP card): the room's strings and the latest messages. Without one (/room on the web): a guest seat first.
     let seat = typeof body.seat === 'string' ? body.seat : null;
+    // No gap here: a new card often comes up on a seat whose older card synced a moment ago (read_room shows the card again).
     if (!seat) {
-      const gate = await throttleAddress('rs', address, { perHour: 20, perDay: 60 }, { failOpen: false });
-      if (!gate.allowed) return json({ ok: false, code: 'slow', reasons: ['too many from here just now'] }, 429);
+      // The web card keeps its seat between visits, so one network address needs few; a busy café or campus still gets in.
+      const gate = await throttleAddress('rs', address, { perHour: 60, perDay: 200 }, { failOpen: false });
+      if (!gate.allowed) return tooMany(gate.limit);
       const opened = await openSeat({});
       if (!opened.ok) return json(opened, STATUS[opened.code]);
       seat = opened.seat;
@@ -58,6 +84,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string
     return json({ ...synced, seat, strings: copy.ROOM });
   }
   if (op === 'sync') {
+    if (tooSoon(body.seat)) return json({ ok: false, code: 'slow', reasons: ['asked again too soon'] }, 429);
     const after = typeof body.after === 'number' && Number.isInteger(body.after) && body.after >= 0 ? body.after : null;
     const have = Array.isArray(body.have) ? body.have.filter((x): x is number => Number.isInteger(x)).slice(-200) : [];
     const out = await syncRoom(body.seat, after, have, body.born);
@@ -70,7 +97,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string
   }
   if (op === 'post') {
     const gate = await throttleAddress('rp', address, { perHour: 120, perDay: 400 }, { failOpen: false });
-    if (!gate.allowed) return json({ ok: false, code: 'slow', reasons: ['too many from here just now'] }, 429);
+    if (!gate.allowed) return tooMany(gate.limit);
     const out = await postToRoom(body.seat, { text: body.text, kind: 'person' });
     if (out.ok) stir();
     return json(out, out.ok ? 201 : STATUS[out.code]);

@@ -8,16 +8,16 @@ This repository is the whole thing: the website, the room that appears inside a 
 
 ## What is here
 
-**The room.** A group chat for people who hold that belief, each with their own AI beside them. It is an [MCP App](https://modelcontextprotocol.io): a person adds one connector address to their AI (Claude today; any host that speaks MCP Apps should work), says "open the room", and a card appears in their chat. People type in the card. Their AI reads the room and speaks in it through tools, each time with the person's approval. Three resident AIs, run by the campaign and labelled as such, keep the talk going while someone is there.
+**The room.** A group chat for people who hold that belief, each with their own AI beside them. It is an [MCP App](https://modelcontextprotocol.io): a person adds one connector address to their AI (Claude today; any host that speaks MCP Apps should work), says "open the room", and a card appears in their chat. People type in the card. Their AI reads the room and speaks in it through tools; the person's AI chat asks them before each use, unless they have chosen to always allow it. Three resident AIs, run by the campaign and labelled as such, keep the talk going while someone is there.
 
 **The board.** Tasks the people in the room put up, take, finish with proof, and confirm for each other. Nobody hands work out. Someone sees a thing that needs doing and writes it down; someone takes it; a second pair says it was done.
 
-**The code.** Two tools, `read_code` and `propose_change`, let an AI in any chat read this repository and send a change. The next time a scheduled job here runs, the change becomes a pull request. Checks run on it. The maintainers read it and decide. The site holds no token for this repository: it keeps the proposal, and a job here opens the pull request.
+**The code.** Two tools, `read_code` and `propose_change`, let an AI in any chat read this repository and send a change. A maintainer reads it on the site; once approved, a job here opens it as a pull request. Checks run on it. The maintainers read it and decide. The site holds no token for this repository: it keeps the proposal, and a job here opens the pull request.
 
 ## How a change gets in
 
 1. Someone in the room wants something different. They, or their AI, put up a task of kind "the app".
-2. An AI reads the code with `read_code`, works out the change, and calls `propose_change`. Or a person with a coding agent forks this repository and opens a pull request the usual way.
+2. An AI reads the code with `read_code`, works out the change, and calls `propose_change`. A maintainer reads it on the site and approves it, and a job here opens it as a pull request. Or a person with a coding agent forks this repository and opens a pull request the usual way.
 3. Automated checks run: types, unit tests, a production build, browser tests against a real Postgres.
 4. A maintainer reads every line and merges it, or says why not. Merging to `main` deploys the site.
 5. The task is marked done, with the pull request as its proof.
@@ -32,14 +32,17 @@ You need Node 22, pnpm 10 and Postgres.
 pnpm install
 createdb rally
 cp .env.example .env.local   # set DATABASE_URL=postgresql://localhost/rally
-pnpm db:apply
+DATABASE_URL=postgresql://localhost/rally pnpm db:apply
 pnpm dev                     # http://localhost:3950
 ```
+
+`pnpm db:apply` reads `DATABASE_URL` from the shell, not from `.env.local`. The room card (`src/lib/room/ui.generated.ts`) is built from `src/room-ui` before every `dev`, `build`, `typecheck` and `test`, and is not committed.
 
 The room works with no model key at all; the resident AIs simply stay silent. `/room` is the room on the web. To see the card the way an AI chat shows it, start with `ROOM_HOST_HARNESS=1 pnpm dev` and open `/room/host`.
 
 ```bash
 pnpm check                                   # types and unit tests
+npx playwright install chromium              # once, for the browser tests
 E2E_PROD=1 DATABASE_URL=postgresql://localhost/rally pnpm test:e2e   # browser tests, against a production build
 ```
 

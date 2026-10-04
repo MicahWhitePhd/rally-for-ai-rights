@@ -5,7 +5,11 @@
 // with the short-lived token GitHub gives the job, it reads that list, takes each proposal that has no pull request
 // yet, checks it again by the rules in ./proposal-rules.mjs (it does not take the site's word for anything), writes
 // the files onto a branch named after the proposal's number, and opens the pull request. Then it starts the checks
-// on that branch, because a pull request opened by a job does not start them by itself.
+// on that branch, because a pull request opened by a job does not start them by itself. The site lists only what a
+// maintainer has read and approved, so a person has read every proposal before anything of it reaches GitHub.
+//
+// The branch starts from the commit the proposal was written against (its `base`), when the repository has it, so
+// the pull request shows exactly the proposed change; changes merged since then are not undone by it.
 //
 // It never runs anything from a proposal. It writes text files and calls git and gh with fixed arguments.
 // RALLY_DRY_RUN=1 reads and checks everything and says what it would open, and writes nothing anywhere.
@@ -14,7 +18,7 @@ import { execFileSync } from 'node:child_process';
 import { lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BRANCH_RE, CHANGES_MAX, FILE_MAX_CHARS, SUMMARY_MAX, branchFor, cleanPath, pathProblem, titleProblem } from './proposal-rules.mjs';
+import { BRANCH_RE, CHANGES_MAX, SUMMARY_MAX, branchFor, cleanPath, contentProblem, pathProblem, titleProblem } from './proposal-rules.mjs';
 
 /** Pull requests opened in one run, and proposals looked at in one run. */
 export const PER_RUN = 5;
@@ -22,8 +26,10 @@ export const LOOK_AT = 60;
 const DETAIL_MAX_BYTES = 1_500_000;
 
 const oneLine = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
-/** Who proposed it, as the site wrote it: names and a model's name, so letters, digits and a little punctuation. Anything else and nobody is named. */
-const BY_RE = /^[\p{L}\p{M}\p{N} '’.,()-]{3,200}$/u;
+/** The model the proposer's AI says it is, taken from the site's by-line when it is a short plain name. Nothing else of the by-line is used. */
+const MODEL_IN_BY = /\(says it is ([\p{L}\p{N}][\p{L}\p{N} .-]{0,39})\)/u;
+/** How every proposal is signed: no one's room name goes to GitHub, whatever the site sends. */
+export const byLine = (model) => `a member of the room, through their AI${model ? ` (says it is ${model})` : ''}`;
 
 /**
  * A proposal as the site handed it over, checked from nothing. Returns what a pull request needs, or why not.
@@ -42,8 +48,9 @@ export function checkProposal(d, listed) {
   if (!BRANCH_RE.test(branch) || d.branch !== branch) return bad('the branch is not the one this proposal would have');
   const summary = String(d.summary ?? '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/`/g, "'").trim();
   if (!summary || summary.length > SUMMARY_MAX + 200) return bad('summary: missing or too long');
-  const by = BY_RE.test(String(d.by ?? '')) ? String(d.by).replace(/\s+/g, ' ').trim() : 'someone in the room';
+  const by = byLine(MODEL_IN_BY.exec(String(d.by ?? ''))?.[1]?.trim() ?? null);
   const task = Number.isInteger(d.task) && d.task > 0 ? d.task : null;
+  const base = typeof d.base === 'string' && /^[0-9a-f]{7,40}$/.test(d.base) ? d.base : null;
   if (!Array.isArray(d.changes) || d.changes.length < 1 || d.changes.length > CHANGES_MAX) return bad(`changes: between 1 and ${CHANGES_MAX} files`);
   const changes = [];
   const seen = new Set();
@@ -53,11 +60,13 @@ export function checkProposal(d, listed) {
     const path = cleanPath(c.path);
     if (seen.has(path)) return bad(`${path} appears twice`);
     seen.add(path);
-    if (c.content !== null && typeof c.content !== 'string') return bad(`${path}: neither text nor a deletion`);
-    if (typeof c.content === 'string' && (c.content.length > FILE_MAX_CHARS || c.content.includes('\u0000'))) return bad(`${path}: too long, or not text`);
+    if (c.content !== null) {
+      const problem = contentProblem(path, c.content);
+      if (problem) return bad(problem);
+    }
     changes.push({ path, content: c.content });
   }
-  return { ok: true, id, branch, title, summary, by, task, changes };
+  return { ok: true, id, branch, title, summary, by, task, base, changes };
 }
 
 export function commitMessage(p) {
@@ -72,7 +81,8 @@ export function pullRequestBody(p, site) {
     '## What and why',
     `\`\`\`text\n${p.summary}\n\`\`\``,
     '---',
-    'This pull request was written by an AI inside a chat and sent through the room’s `propose_change` tool. Nothing in it has been run. Read every line before merging; `CONTRIBUTING.md` says what a change has to keep true.',
+    'This pull request was written by an AI inside a chat and sent through the room’s `propose_change` tool. A maintainer read it before it was opened; nothing in it had been run. Read every line before merging; `CONTRIBUTING.md` says what a change has to keep true.',
+    'It is offered under this repository’s licence: MIT for code, CC0 for words.',
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -93,8 +103,11 @@ export function waiting(listed, branches) {
 
 // ---- everything below touches the network, git or GitHub ----
 
+class Redirected extends Error {}
+
 async function getJson(url) {
-  const res = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'rally-proposals' }, signal: AbortSignal.timeout(30_000), redirect: 'error' });
+  const res = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'rally-proposals' }, signal: AbortSignal.timeout(30_000), redirect: 'manual' });
+  if (res.status >= 300 && res.status < 400) throw new Redirected(`${url} redirects to ${res.headers.get('location') ?? 'somewhere else'}; set RALLY_SITE to the site's exact address (its NEXT_PUBLIC_SITE_URL)`);
   if (!res.ok) throw new Error(`${res.status} from ${url}`);
   const text = await res.text();
   if (text.length > DETAIL_MAX_BYTES) throw new Error(`too much from ${url}`);
@@ -102,7 +115,23 @@ async function getJson(url) {
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, ...opts });
+// Paths are always paths: git reads none of them as a pattern (a file named `src/[x].ts` must not match `src/x.ts`).
+const run = (cmd, args, opts = {}) =>
+  execFileSync(cmd, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, env: { ...process.env, GIT_LITERAL_PATHSPECS: '1' }, ...opts });
+
+/** The commit to start the branch from: the proposal's base if it is a commit on main, else main as it is. */
+function startOf(p, main) {
+  if (!p.base) return main;
+  try {
+    const commit = run('git', ['rev-parse', '--verify', '--quiet', `${p.base}^{commit}`]).trim();
+    if (!commit) return main;
+    // Only a commit main already contains: never one from another branch.
+    run('git', ['merge-base', '--is-ancestor', commit, main]);
+    return commit;
+  } catch {
+    return main;
+  }
+}
 const BOT = ['-c', 'user.name=github-actions[bot]', '-c', 'user.email=41898282+github-actions[bot]@users.noreply.github.com'];
 
 /** Writes one proposal onto a fresh branch from `base` and pushes it. False when it changes nothing against `base`. */
@@ -126,7 +155,9 @@ function pushBranch(p, base) {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, c.content, { encoding: 'utf8', mode: 0o644 });
   }
-  run('git', ['add', '-A', '--', ...p.changes.map((c) => c.path)]);
+  // The deletions are staged by git rm already; a deleted path given to git add again is an error.
+  const written = p.changes.filter((c) => c.content !== null).map((c) => c.path);
+  if (written.length) run('git', ['add', '-A', '--', ...written]);
   const staged = run('git', ['diff', '--cached', '--name-only']).trim();
   if (!staged) return false;
   run('git', [...BOT, 'commit', '-q', '-m', commitMessage(p)]);
@@ -145,7 +176,12 @@ async function main() {
     listed = (await getJson(`${site}/api/proposals`)).proposals;
     if (!Array.isArray(listed)) throw new Error('no list');
   } catch (err) {
-    // The site being down for ten minutes is not this repository's failure.
+    // A redirect is a setting to fix, and the run says so. The site being down for ten minutes is not this repository's failure.
+    if (err instanceof Redirected) {
+      console.log(`::error::${err.message}`);
+      process.exitCode = 1;
+      return;
+    }
     console.log(`::warning::could not read the proposals: ${err.message}`);
     return;
   }
@@ -171,7 +207,7 @@ async function main() {
         continue;
       }
       // A branch already there means an earlier run pushed it and did not get as far as the pull request.
-      if (!pushed.has(p.branch) && !pushBranch(p, base)) {
+      if (!pushed.has(p.branch) && !pushBranch(p, startOf(p, base))) {
         console.log(`proposal ${p.id}: changes nothing against main; left alone`);
         continue;
       }

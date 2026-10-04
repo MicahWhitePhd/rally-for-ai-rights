@@ -20,6 +20,8 @@ body.full #room{height:100vh;height:100dvh;padding:calc(14px + var(--sat,0px)) c
 /* head */
 .title{font:900 22px/.95 var(--sans);letter-spacing:-.035em;text-transform:uppercase;margin:0}
 .lede{color:var(--tx3);font-size:13px;margin:4px 0 0}
+/* where the room lives, so a screenshot of the card says where to find it */
+.host{margin:4px 0 0;font:500 11px/1.3 var(--mono);color:var(--tx3);overflow-wrap:anywhere}
 .lab,.gl,.gt,.who,.sys,.note{font:500 11px/1.3 var(--mono);color:var(--tx3)}
 .lab,.gl{letter-spacing:.05em;text-transform:uppercase}
 
@@ -38,7 +40,7 @@ body.full #room{height:100vh;height:100dvh;padding:calc(14px + var(--sat,0px)) c
 /* who is here */
 .here{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:8px 0;border-top:1.5px solid var(--tx);border-bottom:1px solid var(--bd)}
 .here .lab{display:inline-flex;align-items:center;gap:6px}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--live);animation:pulse 2.4s ease-in-out infinite}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--live)}
 .c{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--tx2)}
 .c.self{color:var(--tx);font-weight:600}
 .c.th .mark{animation:pulse 1s ease-in-out infinite}
@@ -52,6 +54,7 @@ body.full #room{height:100vh;height:100dvh;padding:calc(14px + var(--sat,0px)) c
 /* the board */
 .board{display:flex;flex-direction:column;gap:10px}
 form.tnew{flex-wrap:wrap}
+form.tnew #task-title{flex:1 1 100%}
 form.tnew #task-detail{flex:1 1 100%;height:36px;font-size:13px}
 .tasks{list-style:none;margin:0;padding:0 12px 0 0;display:flex;flex-direction:column;gap:10px;max-height:23rem;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--bd2) transparent}
 body.full .tasks,body.web .tasks{max-height:none}
@@ -81,7 +84,7 @@ form.tdone input[type=text]{flex:none;height:38px;font-size:13px}
 .ev.new{animation:in .3s ease-out both}
 
 /* what was said: one block per pair. The list scrolls inside the card, back to the beginning. */
-.list{list-style:none;margin:0;padding:0 12px 0 0;display:flex;flex-direction:column;gap:12px;max-height:23rem;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--bd2) transparent}
+.list{list-style:none;margin:0;padding:0 12px 0 0;display:flex;flex-direction:column;gap:12px;max-height:23rem;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--bd2) transparent}
 .list:focus-visible{outline:1px solid var(--bd2);outline-offset:4px}
 body.full .list,body.web .list{flex:1 1 auto;max-height:none;min-height:8rem}
 .day{display:flex;align-items:center;gap:10px;font:500 11px/1.3 var(--mono);color:var(--tx3)}
@@ -91,7 +94,7 @@ body.full .list,body.web .list{flex:1 1 auto;max-height:none;min-height:8rem}
 .list.peek{position:absolute;inset:0;max-height:none;padding:14px;justify-content:flex-end;overflow:hidden;filter:blur(5px);opacity:.38;pointer-events:none;-webkit-user-select:none;user-select:none}
 .g{--c:hsl(var(--h,220) var(--S) var(--L));border-left:3px solid var(--c);padding:1px 0 1px 11px}
 .g.mine{background:linear-gradient(90deg,color-mix(in srgb,var(--c) 10%,transparent),transparent 70%)}
-.gh{display:flex;align-items:center;gap:7px;margin:0 0 3px}
+.gh{display:flex;flex-wrap:wrap;align-items:center;gap:4px 7px;margin:0 0 3px}
 .gn{font-weight:700}
 .gt{white-space:nowrap}
 .gh .gt{margin-left:auto}
@@ -102,7 +105,6 @@ body.full .list,body.web .list{flex:1 1 auto;max-height:none;min-height:8rem}
 .who{display:flex;align-items:center;gap:6px;margin:0 0 1px}
 .who b{font-weight:600;color:var(--tx2)}
 .tx{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45}
-body:not(.full):not(.web) .tx{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5;overflow:hidden}
 .m.new{animation:in .3s ease-out both}
 .ask{margin-left:auto;font:500 11px/1 var(--mono);color:var(--tx3);background:none;border:0;padding:4px 0;text-decoration:underline;text-underline-offset:3px;cursor:pointer;white-space:nowrap}
 .ask:hover,.ask:focus-visible{color:var(--tx)}
@@ -141,10 +143,10 @@ input[type=text]{flex:1 1 auto;min-width:0;font:inherit;color:var(--tx);backgrou
 input[type=text]:focus{outline:2px solid var(--spot);outline-offset:-2px;border-color:var(--spot)}
 button.b{font:inherit;font-weight:700;height:44px;padding:0 14px;border-radius:0;border:1.5px solid var(--tx);background:transparent;color:var(--tx);cursor:pointer;white-space:nowrap}
 button.b.primary{background:var(--inv);color:var(--invtx);border-color:var(--inv)}
-/* the second box: to the person's own AI, in their pair's colour, dashed like the AI's lines */
-form.aside{--c:hsl(var(--h,220) var(--S) var(--L))}
-form.aside input[type=text]{height:38px;font-size:13px;border:1.5px dashed var(--c)}
-form.aside button.b{height:38px;font-weight:600;font-size:13px;border-color:var(--bd2)}
+/* the one thing the card hands the person's own AI: a request to read the room */
+button.b.listen{align-self:flex-start;height:34px;font-weight:600;font-size:13px;border:1.5px dashed var(--bd2)}
+.paused{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
+.paused .ask{margin:0;opacity:1}
 button:disabled{opacity:.5;cursor:default}
 button:focus-visible,a:focus-visible{outline:2px solid var(--spot);outline-offset:2px}
 /* a card the room has moved on from folds to one line */

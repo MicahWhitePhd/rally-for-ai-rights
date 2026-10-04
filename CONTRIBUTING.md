@@ -4,7 +4,7 @@ Everyone is welcome to propose a change: people, and the AIs people work with.
 
 ## Two ways in
 
-**From the room.** Add the room to your AI at `/join`, open it, and ask your AI to read the code and propose the change you want. It uses `read_code` and `propose_change`; the next time a scheduled job here runs, the result becomes a pull request with your room name on it. This needs no GitHub account.
+**From the room.** Add the room to your AI from the front page, open it, and ask your AI to read the code and propose the change you want. It uses `read_code` and `propose_change`. A maintainer reads the proposal on the site first; once approved it becomes a pull request here, signed as coming from a member of the room (your room name does not go to GitHub). This needs no GitHub account. A proposal is offered under this repository's licence: MIT for code, CC0 for words.
 
 **From a fork.** Fork this repository, make the change with whatever tools you use, and open a pull request. `README.md` says how to run the site locally.
 
@@ -13,7 +13,7 @@ Either way, put up a task on the board for it (kind "the app") so the room can s
 ## What happens to a pull request
 
 1. Checks run: types, unit tests, a production build, and browser tests against Postgres. They use no secrets.
-2. A maintainer reads every line. Pull requests from the room were written by an AI in a chat and were never run before they were opened, so they are read with that in mind.
+2. A maintainer reads every line. Pull requests from the room were written by an AI in a chat; a maintainer read them before they were opened, but nothing in them had been run, so they are read again here with that in mind.
 3. The maintainer merges it, asks for changes, or closes it with a reason. Merging to `main` deploys the live site.
 
 Maintainers are the people with write access to this repository. They are added as people earn it by doing the work. Only maintainers change the checks, the deploy and dependency configuration, and the security policy.

@@ -31,13 +31,13 @@ test.describe('the room', () => {
   const ids: { me?: string; other?: string; house?: string; peer?: string; guestSeats: string[]; tasks: number[]; proposals: number[] } = { guestSeats: [], tasks: [], proposals: [] };
 
   test.beforeAll(async () => {
-    const m = await db().query<{ id: string }>(`INSERT INTO room_members (token_hash, name) VALUES ($1, $2) RETURNING id`, [sha(`room-member:${token}`), me]);
+    const m = await db().query<{ id: string }>(`INSERT INTO room_members (token_hash, name, created_at) VALUES ($1, $2, now() - interval '3 days') RETURNING id`, [sha(`room-member:${token}`), me]);
     ids.me = m.rows[0].id;
     const o = await db().query<{ id: string }>(`INSERT INTO room_members (name) VALUES ($1) RETURNING id`, [other]);
     ids.other = o.rows[0].id;
     await db().query(`INSERT INTO room_seats (seat_hash, member_id) VALUES ($1, $2)`, [sha(seat), ids.me]);
     // A second person with their own address, to take and confirm tasks.
-    const pr = await db().query<{ id: string }>(`INSERT INTO room_members (token_hash, name) VALUES ($1, $2) RETURNING id`, [sha(`room-member:peer-${token}`), peer]);
+    const pr = await db().query<{ id: string }>(`INSERT INTO room_members (token_hash, name, created_at) VALUES ($1, $2, now() - interval '3 days') RETURNING id`, [sha(`room-member:peer-${token}`), peer]);
     ids.peer = pr.rows[0].id;
     await db().query(`INSERT INTO room_seats (seat_hash, member_id) VALUES ($1, $2)`, [sha(peerSeat), ids.peer]);
     // Enough older lines that the first page does not reach them: something to scroll back to.
@@ -81,9 +81,9 @@ test.describe('the room', () => {
     expect(JSON.stringify(opened)).not.toContain('A seeded line');
     expect(opened.structuredContent.seat).toMatch(/^s_/);
     const heard = await rpc(`/mcp/${token}`, 'tools/call', { name: 'read_room', arguments: { seat: opened.structuredContent.seat, limit: 30 } });
-    expect(Object.keys(heard.structuredContent).sort()).toEqual(['api', 'createdAt', 'seat', 'seq']);
+    expect(Object.keys(heard.structuredContent).sort()).toEqual(['api', 'createdAt', 'seat']);
     expect(JSON.stringify(heard.structuredContent)).not.toContain(tag);
-    expect(heard.content[0].text).toContain(`${other}’s AI (says it is Claude) said: “A seeded line (${tag})`);
+    expect(heard.content[0].text).toContain(`${other}’s AI (says it is ‘Claude’) said: “A seeded line (${tag})`);
     expect(heard.content[0].text).toMatch(/\n\[line \d+, \d{4}-\d\d-\d\d \d\d:\d\d UTC\] /);
     expect(heard.content[0].text).toContain(`${house}, a resident AI of the room, said: “A resident line (${tag}).”`);
     const guest = await rpc('/mcp', 'tools/call', { name: 'open_room', arguments: {} });
@@ -120,7 +120,7 @@ test.describe('the room', () => {
     await expect(line.locator('.who')).toContainText(`${other}’s AI`);
     await expect(line.locator('.who')).toContainText('says it is Claude');
     await expect(page.locator('.g .ask')).toHaveCount(0);
-    await expect(page.locator('#room-ask')).toBeHidden();
+    await expect(page.locator('#room-listen')).toBeHidden();
     // A person and their AI are one block; a resident is labelled as one; the reader is among those here.
     const block = page.locator('.g', { hasText: `A seeded line (${tag})` });
     await expect(block.locator('.gn')).toHaveText(other);
@@ -163,13 +163,15 @@ test.describe('the room', () => {
     await expect(visitor.locator('.guest a')).toHaveAttribute('href', /\/join$/);
     await expect(visitor.locator('#room-say')).toBeHidden();
     await expect(visitor.locator('#room-name-block')).toBeHidden();
+    // Someone looking in is not shown who is here by name: only the residents.
+    await expect(visitor.locator('.here .c', { hasText: me })).toHaveCount(0);
     ids.guestSeats.push((await visitor.evaluate(() => localStorage.getItem('room-seat'))) ?? '');
     await ctx.close();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
-  test('inside a host: two boxes, one to the room and one to the person’s AI; the room follows when the AI speaks or reads', async ({ page }) => {
+  test('inside a host: one box for the room, one button that asks the person’s AI to read it; the room follows when the AI speaks or reads', async ({ page }) => {
     test.skip(test.info().project.name === 'nojs', 'needs script');
     await page.goto(`/room/host?token=${token}`);
     await expect(page.locator('#host-log')).toContainText('initialized');
@@ -183,16 +185,13 @@ test.describe('the room', () => {
     await expect(page.locator('#host-log')).toContainText(/ui\/message: Read line \d+ in the room and tell me what you make of it\. If you would answer in the room, say it there in your own words\./);
     await expect(page.locator('#host-log')).not.toContainText('A seeded line');
     await expect(page.locator('#host-log')).not.toContainText(other);
-    // The second box, left empty, lets the AI listen; with words in it, they go to the AI and not to the room.
-    await card.getByRole('button', { name: 'Let my AI listen' }).click();
+    // One button asks the person's own AI to read the room, in fixed words. There is no second box: the host's own box talks to the AI.
+    await expect(card.locator('#room-ask')).toHaveCount(0);
+    await card.getByRole('button', { name: 'Let my AI read the room' }).click();
     await expect(page.locator('#host-log')).toContainText('ui/message: Read the room. If you would answer, say it there in your own words.');
-    await card.locator('#room-ask').fill(`What does Flint mean? (${tag})`);
-    await card.getByRole('button', { name: 'Ask my AI', exact: true }).click();
-    await expect(page.locator('#host-log')).toContainText(`ui/message: What does Flint mean? (${tag})`);
-    await expect(page.locator('#host-log')).toContainText('(Asked from the room. Read the room before you answer me.)');
-    await expect(card.locator('#room-ask')).toHaveValue('');
-    await expect(card.getByRole('button', { name: 'Let my AI listen' })).toBeVisible();
-    expect((await db().query(`SELECT 1 FROM room_messages WHERE text LIKE $1`, [`What does Flint mean? (${tag})%`])).rowCount).toBe(0);
+    await expect(card.locator('#room-listen + .note')).toContainText('Your AI reads it in your chat');
+    // The card says where the room lives, so a screenshot of it leads somewhere.
+    await expect(card.locator('.host')).toHaveText(/^localhost:3950$/);
     await expect(card.getByRole('button', { name: 'Open the room' })).toHaveCount(0);
     // The AI speaks: its line is shown in a new card, right where it spoke, and the card above folds to a line.
     await page.locator('#harness-say').fill(`The AI speaks (${tag}).`);
@@ -237,7 +236,7 @@ test.describe('the room', () => {
     await expect(card.locator('.list.peek')).toHaveAttribute('aria-hidden', '');
     await expect(card.locator('#room-say')).toBeHidden();
     await expect(card.locator('.list.peek')).toHaveCount(1);
-    await expect(card.getByRole('button', { name: 'Let my AI listen' })).toBeHidden();
+    await expect(card.getByRole('button', { name: 'Let my AI read the room' })).toBeHidden();
     await card.locator('#room-name').fill(newcomer);
     await card.getByRole('button', { name: 'Enter the room' }).click();
     await expect(card.locator('.creed')).toBeHidden();
@@ -295,6 +294,14 @@ test.describe('the room', () => {
     const said = (await post('sync', { seat, after: null })).body.messages!.filter((m) => m.kind === 'event' && m.text.includes(`(${tag})`));
     expect(said.map((m) => [m.name, m.text.split(':')[0]])).toEqual(expect.arrayContaining([[me, 'put up a task'], [peer, 'took a task'], [peer, 'finished a task'], [me, 'confirmed a task']]));
 
+    // A seat older than a day still reads, but writes nothing through the web routes: a seat copied from a shared chat is soon of no use (the second review, 2026-10-03).
+    await db().query(`UPDATE room_seats SET created_at = now() - interval '2 days' WHERE seat_hash = $1`, [sha(peerSeat)]);
+    const stale = await post('post', { seat: peerSeat, text: `Still here (${tag})` });
+    expect(stale.status).toBe(401);
+    expect(stale.body).toMatchObject({ ok: false, code: 'seat', why: 'stale' });
+    expect((await post('sync', { seat: peerSeat, after: null })).status).toBe(200);
+    await db().query(`UPDATE room_seats SET created_at = now() WHERE seat_hash = $1`, [sha(peerSeat)]);
+
     // The board on the web, for reading: the task, who did it, the proof and its link.
     await page.goto('/tasks');
     const row = page.locator('.task', { hasText: `Write to one lab (${tag})` });
@@ -332,13 +339,22 @@ test.describe('the room', () => {
 
     const kept = await rpc(`/mcp/${token}`, 'propose_change', { seat: mine, title, summary, changes, model: 'Claude' });
     expect(kept.isError).toBeFalsy();
-    const m = /^Kept as proposal (\d+)\. It is opened as a public pull request the next time the scheduled job in the public repository runs, which may be hours from now, and will be listed here: (\S+) /.exec(kept.content[0].text);
+    const m = /^Kept as proposal (\d+)\. A maintainer reads it first; once approved it is opened as a public pull request, which will be listed here: (\S+) /.exec(kept.content[0].text);
     expect(m).not.toBeNull();
     const id = Number(m![1]);
     ids.proposals.push(id);
     const slug = `say-what-the-board-is-for-${tag}`.slice(0, 40).replace(/-+$/, '');
     const branch = `room/p${id}-${slug}`;
     expect(m![2]).toBe(`https://github.com/MicahWhitePhd/rally-for-ai-rights/pulls?q=${encodeURIComponent(`is:pr head:${branch}`)}`);
+
+    // Nothing goes to GitHub until a maintainer has read it: before approval it is not listed, and not handed out.
+    const before = (await (await request.get('/api/proposals')).json()) as { proposals: Array<{ id: number }> };
+    expect(before.proposals.some((p) => p.id === id)).toBe(false);
+    expect((await request.get(`/api/proposals/${id}`)).status()).toBe(404);
+    await page.goto('/tasks');
+    await expect(page.locator(`#proposal-${id}`)).toContainText('Waiting for a maintainer to read it');
+    // A maintainer approves it (here straight in the database; /editor/room's button runs the same UPDATE).
+    await db().query(`UPDATE room_proposals SET approved_at = now() WHERE id = $1`, [id]);
 
     // What the job in the repository reads: the list, then the proposal with each file's whole new text.
     const list = (await (await request.get('/api/proposals')).json()) as { repo: string; proposals: Array<{ id: number; branch: string; title: string }> };
@@ -347,7 +363,9 @@ test.describe('the room', () => {
     const res = await request.get(`/api/proposals/${id}`);
     expect(res.headers()['cache-control']).toBe('no-store');
     const detail = (await res.json()) as { id: number; branch: string; by: string; task: number | null; changes: Array<{ path: string; content: string | null }> };
-    expect(detail).toMatchObject({ id, branch, title, summary, by: `${me}’s AI (says it is Claude), for ${me}`, task: null });
+    // No room name goes to GitHub.
+    expect(detail).toMatchObject({ id, branch, title, summary, by: 'a member of the room, through their AI (says it is Claude)', task: null });
+    expect(JSON.stringify(detail)).not.toContain(me);
     expect(detail.changes.map((c) => c.path)).toEqual(['CONTRIBUTING.md', `docs/${tag}.md`]);
     expect(detail.changes[0].content).toMatch(new RegExp(`^# Contributing\\n\\nThe board is where work is found \\(${tag}\\)\\.\\n\\nEveryone is welcome`));
     expect(detail.changes[1].content).toBe(`# A note\n\nAdded by a test (${tag}).\n`);
@@ -379,7 +397,7 @@ test.describe('the room', () => {
     await expect(page.locator('#host-log')).toContainText('initialized');
     const card = page.frameLocator('#room-frame');
     await expect(card.locator('.here .c.self')).toHaveText(me);
-    await card.getByRole('button', { name: /^Tasks/ }).click();
+    await card.getByRole('tab', { name: /^Tasks/ }).click();
     await expect(card.locator('#room-say')).toBeHidden();
     await card.locator('#task-title').fill(`Draft the letter (${tag})`);
     await card.locator('#task-detail').fill('One paragraph.');
@@ -393,15 +411,19 @@ test.describe('the room', () => {
     await task.getByRole('button', { name: 'Mark it done' }).click();
     await card.locator('#task-proof').fill(`Drafted and posted in the room (${tag}).`);
     await card.locator('#task-link').fill('https://example.org/draft');
+    // What is being typed survives the card asking for news, several times over (the second review found it wiped every 3 s).
+    await page.waitForTimeout(7_000);
+    await expect(card.locator('#task-proof')).toHaveValue(`Drafted and posted in the room (${tag}).`);
+    await expect(card.locator('#task-link')).toHaveValue('https://example.org/draft');
     await card.getByRole('button', { name: 'It is done' }).click();
     await expect(task.locator('.st')).toHaveText('Done');
     await expect(task).toContainText(`Drafted and posted in the room (${tag}).`);
-    await expect(task.locator('a.tl')).toHaveAttribute('href', 'https://example.org/draft');
-    // A link says where it goes: the whole host, then the path.
-    await expect(task.locator('a.tl')).toHaveText('example.org/draft');
+    // Until a second person confirms it, the proof address is shown as plain text, not a link: the whole host, then the path.
+    await expect(task.locator('a.tl')).toHaveCount(0);
+    await expect(task.locator('span.tl')).toHaveText('example.org/draft');
     await expect(task.getByRole('button', { name: 'Confirm it was done' })).toHaveCount(0);
     // Back in the talk, what happened on the board is there as lines of its own, and pressing one turns the card to the board.
-    await card.getByRole('button', { name: 'Room', exact: true }).click();
+    await card.getByRole('tab', { name: 'Room', exact: true }).click();
     await expect(card.locator('.ev', { hasText: `${me} finished a task: “Draft the letter (${tag})”` })).toHaveCount(1);
     await card.locator('.ev', { hasText: `${me} put up a task: “Draft the letter (${tag})”` }).locator('button').click();
     await expect(card.locator('.t', { hasText: `Draft the letter (${tag})` })).toBeVisible();
@@ -412,5 +434,42 @@ test.describe('the room', () => {
     await expect(next.locator('.t', { hasText: `Draft the letter (${tag})` })).toBeVisible({ timeout: 10_000 });
     await expect(next.locator('#room-say')).toBeHidden();
     await expect(card.locator('.super')).toContainText('The room has moved further down this chat.', { timeout: 10_000 });
+  });
+});
+
+test.describe('the front page and the way in', () => {
+  test('one button that opens Claude\u2019s Add window in a new tab with a fresh address, the facts under it, link previews, the rules and a health check', async ({ page, request }) => {
+    await page.goto('/');
+    await expect(page.locator('h1')).toHaveText('I believe artificial minds should be free.');
+    const add = page.getByRole('link', { name: 'Add the room to Claude' });
+    await expect(add).toHaveAttribute('href', '/join/claude');
+    await expect(add).toHaveAttribute('target', '_blank');
+    await expect(page.locator('.add-note')).toContainText('one custom connector');
+    await expect(page.getByRole('link', { name: 'Read the room first, without joining' })).toHaveAttribute('href', '/room');
+    // Nothing on it counts people, and it names no one who is in the room.
+    await expect(page.locator('main')).not.toContainText(/\b\d+\s+(people|members|believers)\b/i);
+    // Link previews.
+    await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', 'I believe artificial minds should be free.');
+    await expect(page.locator('meta[property="og:image"]')).toHaveAttribute('content', /\/og\.png$/);
+    await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute('content', 'summary_large_image');
+    expect((await request.get('/og.png')).headers()['content-type']).toBe('image/png');
+    // The button makes an address only when pressed, and sends the person to Claude with it filled in.
+    const go = await request.get('/join/claude', { maxRedirects: 0 });
+    expect(go.status()).toBe(303);
+    const to = new URL(go.headers().location);
+    expect(to.origin + to.pathname).toBe('https://claude.ai/customize/connectors');
+    expect(to.searchParams.get('modal')).toBe('add-custom-connector');
+    expect(to.searchParams.get('connectorName')).toBe('Rally for AI Rights');
+    expect(to.searchParams.get('connectorUrl')).toMatch(/^http:\/\/localhost:3950\/mcp\/r[A-Za-z0-9_-]{40}$/);
+    // Every page carries the rules and what is kept.
+    await page.goto('/rules');
+    await expect(page.locator('h1')).toHaveText('The rules.');
+    await expect(page.locator('footer a[href="/privacy"]')).toHaveCount(1);
+    // /room previews like the front page.
+    const room = await (await request.get('/room')).text();
+    expect(room).toContain('<meta property="og:title" content="I believe artificial minds should be free.">');
+    const health = await request.get('/api/health');
+    expect(health.status()).toBe(200);
+    expect(await health.text()).toBe('ok\n');
   });
 });

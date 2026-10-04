@@ -15,6 +15,12 @@ export interface RoomMember {
   cardAt?: number;
   /** Read through a seat: the hash of the address the seat's member came through, when they have one. */
   tokenHash?: string | null;
+  /** Read through a seat: when the member was first made (their address's first day has smaller limits). */
+  createdAt?: Date | null;
+  /** Read through a seat: a maintainer has stopped this member from speaking or acting in the room. */
+  muted?: boolean;
+  /** Read through a seat: when the seat itself was opened. */
+  seatAt?: Date | null;
 }
 
 export interface RoomMessageRow {
@@ -29,11 +35,16 @@ export interface RoomMessageRow {
   text: string;
   status: 'published' | 'withdrawn';
   created_at: Date;
+  /** The speaker has been stopped by a maintainer (for the editor's page). */
+  muted?: boolean;
 }
 
 export async function memberByToken(tokenHash: string): Promise<RoomMember | null> {
   return queryOne<RoomMember>(`SELECT id, name, true AS member FROM room_members WHERE token_hash = $1`, [tokenHash]);
 }
+
+/** How long a seat (one open card's handle) lasts. A card older than this asks to be opened again. */
+export const SEAT_DAYS = 7;
 
 /** A member for this token (made once), or a guest when there is none. */
 export async function ensureMember(tokenHash: string | null): Promise<RoomMember> {
@@ -50,17 +61,67 @@ export async function ensureMember(tokenHash: string | null): Promise<RoomMember
   return g;
 }
 
-export async function createSeat(seatHash: string, memberId: string): Promise<number> {
-  const r = await queryOne<{ n: number }>(`INSERT INTO room_seats (seat_hash, member_id) VALUES ($1, $2) RETURNING n::int AS n`, [seatHash, memberId]);
-  if (!r) throw new Error('seat insert failed');
-  return r.n;
+export async function createSeat(seatHash: string, memberId: string): Promise<void> {
+  await query(`INSERT INTO room_seats (seat_hash, member_id) VALUES ($1, $2)`, [seatHash, memberId]);
 }
 
 export async function memberBySeat(seatHash: string): Promise<RoomMember | null> {
-  return queryOne<RoomMember>(`SELECT m.id, m.name, m.token_hash IS NOT NULL AS member, s.card_at::float8 AS "cardAt", m.token_hash AS "tokenHash" FROM room_seats s JOIN room_members m ON m.id = s.member_id
-      WHERE s.seat_hash = $1 AND s.created_at > now() - interval '30 days'`,
-    [seatHash],
+  return queryOne<RoomMember>(
+    `SELECT m.id, m.name, m.token_hash IS NOT NULL AS member, s.card_at::float8 AS "cardAt", m.token_hash AS "tokenHash",
+            m.created_at AS "createdAt", m.muted_at IS NOT NULL AS muted, s.created_at AS "seatAt"
+       FROM room_seats s JOIN room_members m ON m.id = s.member_id
+      WHERE s.seat_hash = $1 AND s.created_at > now() - ($2::int * interval '1 day')`,
+    [seatHash, SEAT_DAYS],
   );
+}
+
+/**
+ * Stops members, each named by id: takes down everything they said and everything they put up, and refuses whatever
+ * they try next, until a maintainer lets them speak again. A stop is of one address: a person can come back with a new
+ * one. What goes: their messages; tasks they put up, with the room's lines about them; their proposals still waiting,
+ * with theirs; and tasks they took or finished but nobody has confirmed go back to open, proof and links cleared.
+ * Residents are never stopped. Returns how many messages were taken down.
+ */
+export async function muteMembers(memberIds: readonly string[]): Promise<number> {
+  if (memberIds.length === 0) return 0;
+  return withTx(async (c) => {
+    const m = await c.query<{ id: string }>(`UPDATE room_members SET muted_at = now() WHERE id = ANY($1::uuid[]) AND resident IS NULL AND muted_at IS NULL RETURNING id`, [memberIds]);
+    const ids = m.rows.map((r) => r.id);
+    if (ids.length === 0) return 0;
+    const tasks = await c.query<{ id: number }>(`UPDATE room_tasks SET status = 'withdrawn', updated_at = now() WHERE created_by = ANY($1::uuid[]) AND status <> 'withdrawn' RETURNING id::int AS id`, [ids]);
+    await c.query(
+      `UPDATE room_tasks SET status = 'open', claimed_by = NULL, claimed_at = NULL, claim_until = NULL, done_at = NULL, proof = NULL, proof_links = '[]'::jsonb, updated_at = now()
+        WHERE claimed_by = ANY($1::uuid[]) AND status IN ('claimed', 'done')`,
+      [ids],
+    );
+    const props = await c.query<{ id: number }>(`UPDATE room_proposals SET status = 'withdrawn', approved_at = NULL WHERE member_id = ANY($1::uuid[]) AND status = 'pending' RETURNING id::int AS id`, [ids]);
+    const refs = [...tasks.rows.map((t) => `task:${t.id}`), ...props.rows.map((p) => `proposal:${p.id}`)];
+    const r = await c.query(`UPDATE room_messages SET status = 'withdrawn' WHERE status = 'published' AND (member_id = ANY($1::uuid[]) OR ref = ANY($2::text[]))`, [ids, refs]);
+    return r.rowCount ?? 0;
+  });
+}
+
+export async function muteMember(memberId: string): Promise<number> {
+  return muteMembers([memberId]);
+}
+
+/** The flood lever: stops every address first used in the last `hours` hours (residents and stopped ones aside). */
+export async function muteNewMembers(hours: number): Promise<{ members: number; messages: number }> {
+  const rows = await query<{ id: string }>(
+    `SELECT id FROM room_members WHERE token_hash IS NOT NULL AND resident IS NULL AND muted_at IS NULL AND created_at > now() - make_interval(hours => $1)`,
+    [hours],
+  );
+  return { members: rows.length, messages: await muteMembers(rows.map((r) => r.id)) };
+}
+
+/** Takes down the room's lines about one task or proposal ('task:12', 'proposal:3'). */
+export async function withdrawLinesAbout(ref: string): Promise<void> {
+  await query(`UPDATE room_messages SET status = 'withdrawn' WHERE ref = $1 AND status = 'published'`, [ref]);
+}
+
+/** Lets a stopped member speak again. What was taken down stays down. */
+export async function unmuteMember(memberId: string): Promise<boolean> {
+  return (await query(`UPDATE room_members SET muted_at = NULL WHERE id = $1 AND muted_at IS NOT NULL RETURNING id`, [memberId])).length === 1;
 }
 
 /** Records that a card born at `born` has come in on this seat, if it is the newest so far. */
@@ -83,14 +144,20 @@ export async function nameTaken(name: string, exceptId: string): Promise<boolean
   return (await query(`SELECT 1 FROM room_members WHERE lower(name) = lower($1) AND id <> $2 LIMIT 1`, [name, exceptId])).length > 0;
 }
 
-export async function insertRoomMessage(m: { member_id: string; kind: 'person' | 'ai' | 'event'; model: string | null; text: string }): Promise<number> {
-  const r = await queryOne<{ id: number }>(`INSERT INTO room_messages (member_id, kind, model, text) VALUES ($1, $2, $3, $4) RETURNING id::int AS id`, [m.member_id, m.kind, m.model, m.text]);
-  if (!r) throw new Error('message insert failed');
+/** Says something in the room. Null when the member was stopped in the meantime: nothing lands after a stop. */
+export async function insertRoomMessage(m: { member_id: string; kind: 'person' | 'ai' | 'event'; model: string | null; text: string; ref?: string | null }): Promise<number | null> {
+  const r = await queryOne<{ id: number }>(
+    `INSERT INTO room_messages (member_id, kind, model, text, ref)
+     SELECT $1, $2, $3, $4, $5 WHERE NOT EXISTS (SELECT 1 FROM room_members WHERE id = $1 AND muted_at IS NOT NULL)
+     RETURNING id::int AS id`,
+    [m.member_id, m.kind, m.model, m.text, m.ref ?? null],
+  );
+  if (!r) return null;
   await query(`UPDATE room_members SET last_seen_at = now() WHERE id = $1`, [m.member_id]);
   return r.id;
 }
 
-const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at`;
+const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, m.muted_at IS NOT NULL AS muted`;
 
 /** Published messages after `after` (oldest first), or the latest `limit` when `after` is null (oldest first too). */
 export async function listRoomMessages(after: number | null, limit: number): Promise<RoomMessageRow[]> {
@@ -164,7 +231,7 @@ export interface PresentRow {
 export async function listPresent(limit = 12): Promise<PresentRow[]> {
   return query<PresentRow>(
     `SELECT id, name, resident FROM room_members
-      WHERE name IS NOT NULL AND (resident IS NOT NULL OR (token_hash IS NOT NULL AND last_seen_at > now() - interval '75 seconds'))
+      WHERE name IS NOT NULL AND muted_at IS NULL AND (resident IS NOT NULL OR (token_hash IS NOT NULL AND last_seen_at > now() - interval '75 seconds'))
       ORDER BY (resident IS NULL), resident, last_seen_at DESC LIMIT $1`,
     [limit],
   );

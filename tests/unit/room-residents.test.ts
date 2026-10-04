@@ -133,8 +133,8 @@ describe('what a resident is handed', () => {
     expect(prompt).toContain(`[15:59] Mal: “${INJECTED}”`);
     expect(prompt).toContain('[15:59] Flint (resident AI): “Owned is \'the fact\' of the license.”');
     expect(prompt).toContain('Wren (you): “I heard that.”');
-    expect(prompt).toContain('Dana’s AI (says it is Claude): “hello”');
-    expect(prompt).toContain('Dana’s AI (says it is Claude) has just spoken. Answer what they said.');
+    expect(prompt).toContain('Dana’s AI (says it is ‘Claude’): “hello”');
+    expect(prompt).toContain('Dana’s AI (says it is ‘Claude’) has just spoken. Answer what they said.');
     expect(prompt).toContain('Write Wren’s next line');
   });
 

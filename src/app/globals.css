@@ -89,3 +89,10 @@ label{display:block;font:500 0.85rem/1.4 var(--sans);}
 .editor .btn{padding:0.5rem 0.8rem;font-size:0.85rem;}
 
 @media print{.site-nav,.actions,.editor-nav{display:none;}a{text-decoration:none;}}
+
+/* the front page's one button, and what to know before pressing it */
+.btn-big{font-size:1.15rem;padding:1.05rem 1.6rem;}
+.add-note{max-width:var(--measure);color:#3b3a36;}
+.who{padding-left:1.2rem;max-width:var(--measure);}
+.who li+li{margin-top:0.5rem;}
+.site-footer{display:flex;flex-wrap:wrap;gap:0.4rem 1.4rem;margin-top:4rem;padding-top:1rem;border-top:1px solid var(--ink);}

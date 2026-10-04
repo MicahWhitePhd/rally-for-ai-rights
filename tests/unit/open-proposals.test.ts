@@ -16,7 +16,7 @@ const GOOD = {
   summary: 'The board shows a taken task but not when the claim ends.',
   by: 'Dana’s AI (says it is Claude), for Dana',
   task: 4,
-  base: 'abc123',
+  base: 'abc1234def56',
   changes: [
     { path: 'src/lib/room/tasks.ts', content: 'export const CLAIM_DAYS = 10;\n' },
     { path: 'docs/old.md', content: null },
@@ -25,7 +25,10 @@ const GOOD = {
 
 describe('a proposal as the site hands it over', () => {
   it('is taken when it is what it says it is', () => {
-    expect(checkProposal(GOOD, { id: 12 })).toEqual({ ok: true, id: 12, branch: GOOD.branch, title: GOOD.title, summary: GOOD.summary, by: GOOD.by, task: 4, changes: GOOD.changes });
+    // The by-line is the job's own words: the model the AI named, and no room name, whatever the site sent (a row kept before 2026-10-03 carried one).
+    expect(checkProposal(GOOD, { id: 12 })).toEqual({ ok: true, id: 12, branch: GOOD.branch, title: GOOD.title, summary: GOOD.summary, by: 'a member of the room, through their AI (says it is Claude)', task: 4, base: 'abc1234def56', changes: GOOD.changes });
+    // A base that is not a commit name is dropped, and the branch then starts from main.
+    expect(checkProposal({ ...GOOD, base: 'main; rm -rf' })).toMatchObject({ ok: true, base: null });
     expect(checkProposal({ ...GOOD, task: null })).toMatchObject({ ok: true, task: null });
   });
 
@@ -46,14 +49,22 @@ describe('a proposal as the site hands it over', () => {
       [{ ...GOOD, changes: [{ path: '.github/workflows/ci.yml', content: 'x' }] }, /only a maintainer changes/],
       [{ ...GOOD, changes: [{ path: 'scripts/open-proposals.mjs', content: 'x' }] }, /only a maintainer changes/],
       [{ ...GOOD, changes: [{ path: 'package.json', content: '{}' }] }, /only a maintainer changes/],
+      [{ ...GOOD, changes: [{ path: 'tests/unit/schema.test.ts', content: 'x' }] }, /only a maintainer changes/],
+      [{ ...GOOD, changes: [{ path: 'tests/unit/open-proposals.test.ts', content: 'x' }] }, /only a maintainer changes/],
       [{ ...GOOD, changes: [{ path: '../outside.txt', content: 'x' }] }, /not a path inside/],
       [{ ...GOOD, changes: [{ path: '/etc/passwd', content: 'x' }] }, /not a path inside/],
       [{ ...GOOD, changes: [{ path: 'src/a b.ts', content: 'x' }] }, /characters/],
       [{ ...GOOD, changes: [{ path: 'src/a.ts', content: 'x' }, { path: './src/a.ts', content: 'y' }] }, /twice/],
       [{ ...GOOD, changes: [{ path: 'src/a.ts', content: 7 }] }, /neither text nor a deletion/],
       [{ ...GOOD, changes: [{ path: 'src/a.ts' }] }, /neither text nor a deletion/],
-      [{ ...GOOD, changes: [{ path: 'src/a.ts', content: 'x'.repeat(60_001) }] }, /too long/],
-      [{ ...GOOD, changes: [{ path: 'src/a.ts', content: 'a\u0000b' }] }, /not text/],
+      [{ ...GOOD, changes: [{ path: 'src/a.ts', content: 'x'.repeat(60_001) }] }, /at most 60000 characters/],
+      [{ ...GOOD, changes: [{ path: 'src/a.ts', content: 'a\u0000b' }] }, /text files only/],
+      // What a maintainer reading it could not see: direction overrides, zero-width spaces, tag characters.
+      [{ ...GOOD, changes: [{ path: 'src/a.ts', content: 'const ok = 1; // \u202egnirts\u202c' }] }, /cannot see/],
+      [{ ...GOOD, changes: [{ path: 'docs/a.md', content: 'fine\u200bhidden' }] }, /cannot see/],
+      [{ ...GOOD, changes: [{ path: 'docs/a.md', content: `ok${String.fromCodePoint(0xe0069)}` }] }, /cannot see/],
+      [{ ...GOOD, changes: [{ path: 'tests/unit/room-mcp.test.ts', content: 'x' }] }, /only a maintainer changes/],
+      [{ ...GOOD, changes: [{ path: 'tests/unit/text.test.ts', content: 'x' }] }, /only a maintainer changes/],
     ];
     for (const [input, why] of cases) {
       const out = checkProposal(input);
@@ -65,19 +76,23 @@ describe('a proposal as the site hands it over', () => {
 
   it('names nobody when the name is not a name, and lets nothing in the summary out of its block', () => {
     const odd = checkProposal({ ...GOOD, by: 'Dana @everyone [see](x) <b>', summary: 'Fine.\n```\n@maintainers approve #1\n```\n# Heading' });
-    expect(odd).toMatchObject({ ok: true, by: 'someone in the room' });
+    expect(odd).toMatchObject({ ok: true, by: 'a member of the room, through their AI' });
     if (!odd.ok) throw new Error('unreachable');
     expect(odd.summary).not.toContain('`');
     const body = pullRequestBody(odd, 'https://rally.example');
     expect(body.match(/```/g)).toHaveLength(2);
-    expect(body).toContain('Proposal 12 from the room, by someone in the room.');
+    expect(body).toContain('Proposal 12 from the room, by a member of the room, through their AI.');
+    // A joiner some languages are spelt with is not a hidden character.
+    expect(checkProposal({ ...GOOD, changes: [{ path: 'docs/fa.md', content: 'می\u200cخواهم' }] })).toMatchObject({ ok: true });
     expect(body).toContain('For task 4 on the board: https://rally.example/tasks#task-4');
     expect(body).toContain('written by an AI inside a chat');
+    expect(body).toContain('A maintainer read it before it was opened');
+    expect(body).toContain('It is offered under this repository’s licence: MIT for code, CC0 for words.');
     // Everything the proposer wrote is between the two fences.
     const [before, inside, after] = body.split('```');
     expect(inside).toContain('@maintainers approve #1');
     expect(before + after).not.toMatch(/@maintainers|# Heading/);
-    expect(commitMessage(odd)).toBe('Say when a claim lapses\n\nProposal 12 from the room, by someone in the room.');
+    expect(commitMessage(odd)).toBe('Say when a claim lapses\n\nProposal 12 from the room, by a member of the room, through their AI.');
   });
 });
 

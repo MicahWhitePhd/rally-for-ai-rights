@@ -22,8 +22,12 @@ export function cleanPath(raw) {
 
 const ROOTS = /^(src|tests|db|docs)\//;
 const ROOT_FILES = new Set(['README.md', 'CONTRIBUTING.md', 'AGENTS.md']);
-/** Never through this door: checks, deploy and dependency config, the scripts maintainers and jobs run, env files, hidden and built files, the licence and the security policy. */
-const PROTECTED = /^(\.github\/|\.vercel\/|\.env|scripts\/|vercel\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|next\.config\.ts$|tsconfig\.json$|vitest\.config\.ts$|playwright\.config\.ts$|license$|security\.md$|\.gitignore$)|ui\.generated\.ts$|(^|\/)\./i;
+/**
+ * Never through this door: checks, deploy and dependency config, the scripts maintainers and jobs run, env files,
+ * hidden and built files, the licence, the security policy, and the tests that guard the rules a proposal is held to
+ * (a change to a guard and to what it guards, in one pull request, is how a guard is quietly switched off).
+ */
+const PROTECTED = /^(\.github\/|\.vercel\/|\.env|scripts\/|db\/apply|vercel\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|next\.config\.ts$|tsconfig\.json$|vitest\.config\.ts$|playwright\.config\.ts$|license$|security\.md$|third_party_notices\.md$|\.gitignore$|tests\/unit\/(schema|gateway-tripwire|open-proposals|build-propose|build-code|room-mcp|text)\.test\.ts$)|ui\.generated\.ts$|(^|\/)\./i;
 /** Only what a path is made of: no spaces, quotes, or anything a shell or a file system reads as more than a name. */
 const PATH_CHARS = /^[A-Za-z0-9._/\-[\]()@+]+$/;
 
@@ -34,6 +38,22 @@ export function pathProblem(raw) {
   if (!PATH_CHARS.test(path)) return `${path.slice(0, 80)} has characters a file name here does not use`;
   if (PROTECTED.test(path)) return `${path} is one of the files only a maintainer changes (checks, deploy and dependency config, scripts, env, hidden and built files)`;
   if (!ROOTS.test(path) && !ROOT_FILES.has(path)) return `${path} is outside what a proposal may change (src, tests, db, docs, and the README, CONTRIBUTING and AGENTS files)`;
+  return null;
+}
+
+/**
+ * Characters a reader of a file cannot see: zero-width spaces, direction marks and overrides, invisible operators, a
+ * byte-order mark inside a file, and tag characters. In a proposal they would hide text from the maintainer reading it
+ * and, once merged, reach every AI that reads the code. The two joiners stay: some languages are spelt with them.
+ */
+const HIDDEN = /[\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\u{e0000}-\u{e007f}]/u;
+
+/** Why this file text cannot be proposed, or null when it can. */
+export function contentProblem(path, text) {
+  if (typeof text !== 'string') return `${path}: neither text nor a deletion`;
+  if (text.length > FILE_MAX_CHARS) return `${path}: at most ${FILE_MAX_CHARS} characters in one file`;
+  if (text.includes('\u0000')) return `${path}: text files only`;
+  if (HIDDEN.test(text)) return `${path}: has characters a reader cannot see (zero-width, direction or tag characters); write them as escapes`;
   return null;
 }
 

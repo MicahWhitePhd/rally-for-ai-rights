@@ -148,7 +148,7 @@ const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16);
 function speaker(l: Line, me: Resident, residentLabel: string): string {
   if (l.kind === 'event') return `On the board, ${l.name}${l.model ? '\u2019s AI' : ''}`;
   if (l.resident) return l.resident === me.key ? `${l.name} (you)` : `${l.name} (${residentLabel})`;
-  if (l.kind === 'ai') return `${l.name}’s AI${l.model ? ` (says it is ${l.model})` : ''}`;
+  if (l.kind === 'ai') return `${l.name}’s AI${l.model ? ` (says it is ‘${l.model}’)` : ''}`;
   return l.name;
 }
 

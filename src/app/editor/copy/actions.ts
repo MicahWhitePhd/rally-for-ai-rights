@@ -1,5 +1,6 @@
 'use server';
 /** /editor/copy: save or reset one string of the site's text. Each action checks the editor itself. */
+import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireEditor } from '@/lib/editor-auth';
 import * as base from '@/lib/copy';
@@ -31,6 +32,8 @@ export async function saveCopy(formData: FormData): Promise<void> {
   if (!value || value === dflt) await deleteCopyOverride(path);
   else await setCopyOverride(path, value, editor);
   invalidateLiveCopy();
+  // The front page and the rules are served from the cache; this refreshes them at once.
+  revalidatePath('/', 'layout');
   console.log(`[COPY] ${editor} ${!value || value === dflt ? 'reset' : 'set'} ${path}`);
   back(path, !value || value === dflt ? 'reset' : 'saved');
 }
@@ -41,6 +44,8 @@ export async function resetCopy(formData: FormData): Promise<void> {
   if (typeof path !== 'string' || !PATHS.has(path)) redirect('/editor/copy?did=bad');
   await deleteCopyOverride(path);
   invalidateLiveCopy();
+  // The front page and the rules are served from the cache; this refreshes them at once.
+  revalidatePath('/', 'layout');
   console.log(`[COPY] ${editor} reset ${path}`);
   back(path, 'reset');
 }

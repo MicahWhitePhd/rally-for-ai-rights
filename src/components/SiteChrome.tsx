@@ -26,3 +26,16 @@ export function SiteHeader() {
     </header>
   );
 }
+
+/** The rules, what is kept, and the code: on every page, so they are never more than one press away. */
+export function SiteFooter() {
+  return (
+    <footer className="site-footer mono">
+      <a href="/rules">The rules</a>
+      <a href="/privacy">What is kept</a>
+      <a href={REPO_URL} rel="noopener">
+        The code
+      </a>
+    </footer>
+  );
+}

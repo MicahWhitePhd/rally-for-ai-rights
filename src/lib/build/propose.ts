@@ -6,13 +6,18 @@
  * stands and keeps it as a proposal. That is all the site does. It holds no
  * GitHub token and never writes to the repository.
  *
- * The pull request is opened from the other side: a scheduled job in the
- * public repository (.github/workflows/proposals.yml, running
- * scripts/open-proposals.mjs) reads the proposals this site publishes at
- * /api/proposals, checks each one again by the same rules, and opens it as a
- * pull request with the short-lived token GitHub gives every job. People who
- * keep the rally (the maintainers) read it and decide; nothing here can merge
- * anything, and nothing here touches the live site.
+ * A maintainer reads each proposal at /editor/room and approves it or takes
+ * it down: whatever reaches GitHub is public there for good, and runs as code
+ * in the checks, so a person reads it first. Only approved proposals are
+ * published at /api/proposals. The pull request is opened from the other
+ * side: a job in the public repository (.github/workflows/proposals.yml,
+ * running scripts/open-proposals.mjs) reads that list, checks each one again
+ * by the same rules, and opens it with the short-lived token GitHub gives
+ * every job. The maintainers then decide on the pull request; nothing here can
+ * merge anything, and nothing here touches the live site.
+ *
+ * No one's room name goes to GitHub: a commit and a pull request are
+ * permanent and public, so a proposal is signed "a member of the room".
  *
  * What a proposal may not touch: the checks that run on pull requests, the
  * deploy configuration, the dependency list, env files, built files, and the
@@ -30,15 +35,21 @@ import { getSetting } from '@/lib/db/queries/settings';
 import { REPO_URL } from '@/lib/site';
 import { normaliseStatement, plainTextProblems } from '@/lib/text';
 import { throttle } from '@/lib/throttle';
-import { cleanModel, fail, seatedMember, type RoomFailure } from '@/lib/room/room';
-import { CHANGES_MAX, EDITS_MAX, FILE_MAX_CHARS, SUMMARY_MAX, SUMMARY_MIN, TITLE_MAX, TITLE_MIN, cleanPath, pathProblem, slug, titleProblem } from '../../../scripts/proposal-rules.mjs';
+import { cleanModel, fail, failWhy, isFirstDay, seatedMember, type RoomFailure } from '@/lib/room/room';
+import { SITE_URL } from '@/lib/site';
+import { CHANGES_MAX, EDITS_MAX, FILE_MAX_CHARS, SUMMARY_MAX, SUMMARY_MIN, TITLE_MAX, TITLE_MIN, cleanPath, contentProblem, pathProblem, slug, titleProblem } from '../../../scripts/proposal-rules.mjs';
 import { codeIndex } from './code';
 
 export { CHANGES_MAX, EDITS_MAX, FILE_MAX_CHARS, SUMMARY_MAX, TITLE_MAX, pathProblem };
 
-/** Proposals kept: three a day from one person, twenty from the room. Attempts that are turned away do not count against these. */
+/**
+ * Proposals kept: three a day from one person (one on an address's first day), twenty from the room, of which first-day
+ * addresses together may use five. Attempts that are turned away do not count against these.
+ */
 const PER_MEMBER_DAY = 3;
+const PER_MEMBER_FIRST_DAY = 1;
 const PER_DAY = 20;
+const PER_DAY_FIRST_DAY = 5;
 const ATTEMPTS_PER_HOUR = 20;
 
 export interface Change {
@@ -64,7 +75,7 @@ export function proposalsEnvOn(): boolean {
   return process.env.RALLY_PROPOSALS !== 'off';
 }
 
-/** Where the pull request for a branch is, or will be within minutes: GitHub's own list, narrowed to that branch. */
+/** Where the pull request for a branch is, or will be once it is approved and opened: GitHub's own list, narrowed to that branch. */
 export function pullRequestUrl(branch: string): string {
   return `${REPO_URL}/pulls?q=${encodeURIComponent(`is:pr head:${branch}`)}`;
 }
@@ -105,7 +116,8 @@ export async function proposeChange(seat: unknown, o: { title: unknown; summary:
   if (!(await getSetting<boolean>('room_open', true))) return fail('closed', 'the room is closed for now');
   const me = await seatedMember(seat);
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
-  if (!me.member) return fail('guest', 'only someone who has added the room to their own AI can propose a change (see /join)');
+  if (!me.member) return fail('guest', `only someone who has added the room to their own AI can propose a change (an address of one's own comes from ${SITE_URL})`);
+  if (me.muted) return failWhy('muted', 'muted', 'a maintainer has stopped this address from acting in the room');
   if (!me.name) return fail('name', 'choose a name in the room card first');
 
   const title = field(o.title, 'title', TITLE_MIN, TITLE_MAX, true);
@@ -156,23 +168,24 @@ export async function proposeChange(seat: unknown, o: { title: unknown; summary:
       if ('problem' in applied) return no('change', `${c.path}: ${applied.problem}`);
       text = applied.text;
     } else text = c.content as string;
-    if (text !== null && text.length > FILE_MAX_CHARS) return no('change', `${c.path}: at most ${FILE_MAX_CHARS} characters in one file`);
-    if (text !== null && text.includes('\u0000')) return no('change', `${c.path}: text files only`);
+    const problem = text === null ? null : contentProblem(c.path, text);
+    if (problem) return no('change', problem);
     if (text !== null && exists && text === current) return no('change', `${c.path}: that is what the file already says`);
     next.push({ path: c.path, content: text });
   }
 
   // It can be kept. Only now does it count against the day's allowance.
-  const mine = await throttle(`room:pr:${me.id}`, PER_MEMBER_DAY, 86_400, { failOpen: false });
-  if (!mine.allowed) return fail('slow', `${PER_MEMBER_DAY} proposals a day from one person`);
-  const all = await throttle('room:prs', PER_DAY, 86_400, { failOpen: false });
-  if (!all.allowed) return fail('slow', `${PER_DAY} proposals a day from the room`);
+  const firstDay = isFirstDay(me);
+  const mine = await throttle(`room:pr:${me.id}`, firstDay ? PER_MEMBER_FIRST_DAY : PER_MEMBER_DAY, 86_400, { failOpen: false });
+  if (!mine.allowed) return firstDay ? failWhy('slow', 'firstDay', 'one proposal on an address\'s first day') : failWhy('slow', 'day', `${PER_MEMBER_DAY} proposals a day from one person`);
+  const all = firstDay ? await throttle('room:prs:new', PER_DAY_FIRST_DAY, 86_400, { failOpen: false }) : await throttle('room:prs', PER_DAY, 86_400, { failOpen: false });
+  if (!all.allowed) return failWhy('slow', 'day', `${PER_DAY} proposals a day from the room`);
 
   const model = cleanModel(o.model);
-  const by = `${me.name}’s AI${model ? ` (says it is ${model})` : ''}, for ${me.name}`;
+  const by = `a member of the room, through their AI${model ? ` (says it is ${model})` : ''}`;
   const kept = await insertProposal({ member_id: me.id, task_id: taskId, title: title.text, summary: summary.text, by_line: by, base: index.commit || null, slug: slug(title.text), changes: next });
   try {
-    await insertRoomMessage({ member_id: me.id, kind: 'event', model: 'ai', text: `proposed a change to the app: “${title.text.replace(/[“”"]/g, "'")}” (proposal ${kept.id})`.slice(0, 590) });
+    await insertRoomMessage({ member_id: me.id, kind: 'event', model: 'ai', text: `proposed a change to the app: “${title.text.replace(/[“”"]/g, "'")}” (proposal ${kept.id})`.slice(0, 590), ref: `proposal:${kept.id}` });
   } catch (err) {
     console.warn('[ROOM] proposal event not written', (err as Error)?.message);
   }

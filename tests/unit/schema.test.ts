@@ -36,10 +36,26 @@ describe('the schema', () => {
     }
   });
 
-  it('has nothing psql would run as a command of its own', () => {
-    expect(sql).not.toMatch(/^\s*\\/m);
-    expect(sql).not.toMatch(/\\(copy|i|ir|include|!|o|w|g|gexec|set|connect|c)\b/);
+  it('has no backslash anywhere, so nothing in it could be read as a psql command, and is applied without psql', () => {
+    // A psql command can sit at the end of a line after a statement, not only at the start of one: so no backslash at all.
+    expect(sql).not.toContain('\\');
     expect(sql).not.toContain('$$');
+    const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { scripts: Record<string, string> };
+    expect(pkg.scripts['db:apply']).toBe('node scripts/db-apply.mjs');
+    expect(readFileSync(new URL('../../scripts/db-apply.mjs', import.meta.url), 'utf8')).not.toMatch(/child_process|execFile|spawn\(/);
+  });
+
+  it('keeps the ADD COLUMN line for every column added after its table was first made, so an older database still gets it', () => {
+    // A column folded into its CREATE TABLE is only made on a new database: one made before it keeps the old table.
+    // Add to this list whenever a column is added to a table that already exists somewhere; never take one out.
+    const added: Record<string, string[]> = {
+      room_members: ['muted_at'],
+      room_messages: ['ref'],
+      room_proposals: ['summary', 'by_line', 'base', 'changes', 'status', 'approved_at'],
+    };
+    for (const [table, columns] of Object.entries(added)) {
+      for (const c of columns) expect(statements.some((s) => s.startsWith(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${c} `)), `${table}.${c}`).toBe(true);
+    }
   });
 
   it('keeps no email, password or network address column', () => {

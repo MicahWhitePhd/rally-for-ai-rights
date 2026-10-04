@@ -9,10 +9,8 @@ export const HAS_DB = !!process.env.DATABASE_URL;
 
 let pool: Pool | null = null;
 export function db(): Pool {
-  if (!pool) {
-    const ssl = process.env.PGSSL === 'require' ? { rejectUnauthorized: false } : undefined;
-    pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2, ssl });
-  }
+  // TLS, when wanted, comes from sslmode in the address, as it does for the site (src/lib/db.ts).
+  if (!pool) pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
   return pool;
 }
 

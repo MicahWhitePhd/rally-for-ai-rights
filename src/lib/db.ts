@@ -19,26 +19,16 @@ function baseConfig(): PoolConfig {
       'DATABASE_URL is not set. Set it to a Postgres that db/schema.sql has been applied to (`pnpm db:apply`).',
     );
   }
-  // TLS for hosted Postgres without verifying the cert chain. Toggle with PGSSL=require.
-  const useSsl = process.env.PGSSL === 'require';
-  let connectionString = raw;
-  if (useSsl) {
-    try {
-      const u = new URL(raw);
-      u.searchParams.delete('sslmode');
-      u.searchParams.delete('channel_binding');
-      connectionString = u.toString();
-    } catch {
-      /* unparseable string — leave as-is */
-    }
-  }
+  // TLS comes from the address itself: a hosted Postgres gives an address with sslmode=require, which `pg` treats as
+  // verify-full (the server's certificate is checked). A local database needs none.
   return {
-    connectionString,
-    max: 5,
-    idleTimeoutMillis: 30_000,
+    connectionString: raw,
+    // One sync runs several queries at once; room for two or three of them on one instance.
+    max: 10,
+    // Idle connections close quickly, so a database that bills while connections are open can go to sleep.
+    idleTimeoutMillis: 5_000,
     // Headroom for a Neon cold start (TCP + TLS + wake can exceed a few seconds).
     connectionTimeoutMillis: 12_000,
-    ssl: useSsl ? { rejectUnauthorized: false } : undefined,
   };
 }
 

@@ -1,4 +1,4 @@
-/** GET /api/proposals/<id>: one waiting proposal with every file's whole new text (null for a file to delete). See ../route.ts. */
+/** GET /api/proposals/<id>: one approved proposal with every file's whole new text (null for a file to delete). See ../route.ts. */
 import { getPendingProposal } from '@/lib/db/queries/proposals';
 import { proposalsEnvOn } from '@/lib/build/propose';
 import { clientIp, throttleAddress } from '@/lib/throttle';

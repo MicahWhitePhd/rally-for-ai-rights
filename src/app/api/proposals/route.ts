@@ -1,10 +1,11 @@
 /**
- * GET /api/proposals: the changes proposed through the room that are waiting to be opened as pull requests.
+ * GET /api/proposals: the changes proposed through the room that a maintainer has read and approved, waiting to be
+ * opened as pull requests.
  *
- * Public on purpose. A scheduled job in the public repository reads this list (scripts/open-proposals.mjs), fetches
+ * Public on purpose. A job in the public repository reads this list (scripts/open-proposals.mjs), fetches
  * each proposal it has not yet opened from /api/proposals/<id>, checks it again by its own copy of the rules, and
  * opens the pull request. The site holds no token for the repository; this is the whole of what passes between them,
- * and all of it is about to be public on GitHub anyway.
+ * and a maintainer has read all of it before it is listed here.
  */
 import { pendingProposals } from '@/lib/db/queries/proposals';
 import { REPO } from '@/lib/site';

@@ -77,6 +77,15 @@ export function addressKey(raw: string): string {
   return `${g.slice(0, 4).map((x) => x.toString(16)).join(':')}::/64`;
 }
 
+/**
+ * Claude's own servers (Anthropic's published egress range, 160.79.104.0/21). Every tool call from every Claude user
+ * reaches the connector from these, so a per-address limit there would be one limit shared by everyone.
+ */
+export function isClaudeServer(key: string): boolean {
+  const o = ipv4Octets(key);
+  return Boolean(o && o[0] === 160 && o[1] === 79 && o[2] >= 104 && o[2] <= 111);
+}
+
 /** No address, or the loopback one: local dev and e2e (`next dev` / `next start` fill x-forwarded-for from the socket). */
 export function isLocalAddress(key: string): boolean {
   return !key || /^(?:127\.|::1$)/.test(key);

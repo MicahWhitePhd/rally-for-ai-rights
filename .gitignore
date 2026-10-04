@@ -10,3 +10,5 @@ playwright-report
 .vercel
 .DS_Store
 .rally
+# Built from src/room-ui by scripts/build-room-ui.mjs before every dev, build, typecheck and test run.
+src/lib/room/ui.generated.ts

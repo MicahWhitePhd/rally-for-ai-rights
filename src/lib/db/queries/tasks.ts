@@ -6,7 +6,7 @@
  * open again (lazy expiry, no sweep). Every change is one conditional UPDATE,
  * so two people pressing the same button get one winner and one "it changed".
  */
-import { query, queryOne } from '@/lib/db';
+import { query, queryOne, withTx } from '@/lib/db';
 
 export type TaskState = 'open' | 'claimed' | 'done' | 'confirmed' | 'withdrawn';
 
@@ -65,7 +65,7 @@ export async function boardStamp(): Promise<{ open: number; rev: number }> {
   const r = await queryOne<{ open: number; rev: number }>(
     `SELECT count(*) FILTER (WHERE status = 'open' OR (status = 'claimed' AND claim_until <= now()))::int AS open,
             COALESCE(floor(extract(epoch FROM max(updated_at)) * 1000), 0)::float8 AS rev
-       FROM room_tasks WHERE status <> 'withdrawn'`,
+       FROM room_tasks`,
   );
   return { open: r?.open ?? 0, rev: Number(r?.rev ?? 0) };
 }
@@ -76,21 +76,24 @@ export async function insertTask(t: { title: string; detail: string | null; kind
   return r.id;
 }
 
-/** How many tasks this member holds now. */
-export async function activeClaims(memberId: string): Promise<number> {
-  const r = await queryOne<{ n: number }>(`SELECT count(*)::int AS n FROM room_tasks t WHERE t.claimed_by = $1 AND ${LIVE}`, [memberId]);
-  return r?.n ?? 0;
-}
-
 const changed = async (sql: string, params: unknown[]): Promise<boolean> => (await query(sql, params)).length === 1;
 
-/** Takes an open task (or one whose claim has lapsed) for `days`. False when someone else got there first. */
-export async function claimTask(id: number, memberId: string, days: number): Promise<boolean> {
-  return changed(
-    `UPDATE room_tasks t SET status = 'claimed', claimed_by = $2, claimed_at = now(), claim_until = now() + make_interval(days => $3), updated_at = now()
-      WHERE t.id = $1 AND (t.status = 'open' OR (t.status = 'claimed' AND NOT ${LIVE})) RETURNING t.id`,
-    [id, memberId, days],
-  );
+/**
+ * Takes an open task (or one whose claim has lapsed) for `days`, if this member holds fewer than `limit`. 'changed'
+ * when someone else got there first. One member's takes go one at a time, so several at once cannot pass the limit.
+ */
+export async function claimTask(id: number, memberId: string, days: number, limit: number): Promise<'ok' | 'limit' | 'changed'> {
+  return withTx(async (c) => {
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext('room-claims:' || $1))`, [memberId]);
+    const held = await c.query<{ n: number }>(`SELECT count(*)::int AS n FROM room_tasks t WHERE t.claimed_by = $1 AND ${LIVE}`, [memberId]);
+    if ((held.rows[0]?.n ?? 0) >= limit) return 'limit';
+    const r = await c.query(
+      `UPDATE room_tasks t SET status = 'claimed', claimed_by = $2, claimed_at = now(), claim_until = now() + make_interval(days => $3), updated_at = now()
+        WHERE t.id = $1 AND (t.status = 'open' OR (t.status = 'claimed' AND NOT ${LIVE})) RETURNING t.id`,
+      [id, memberId, days],
+    );
+    return r.rowCount === 1 ? 'ok' : 'changed';
+  });
 }
 
 export async function releaseTask(id: number, memberId: string): Promise<boolean> {
@@ -120,9 +123,20 @@ export async function withdrawOwnTask(id: number, memberId: string): Promise<boo
   );
 }
 
-/** The editor's lever: take any task down, or put a withdrawn one back as open. */
+/** The editor's lever: take any task down (and the room's lines about it), or put a withdrawn one back as open. */
 export async function setTaskWithdrawn(id: number, withdrawn: boolean): Promise<boolean> {
-  return withdrawn
-    ? changed(`UPDATE room_tasks SET status = 'withdrawn', updated_at = now() WHERE id = $1 AND status <> 'withdrawn' RETURNING id`, [id])
-    : changed(`UPDATE room_tasks SET status = 'open', claimed_by = NULL, claimed_at = NULL, claim_until = NULL, updated_at = now() WHERE id = $1 AND status = 'withdrawn' RETURNING id`, [id]);
+  if (withdrawn) {
+    return withTx(async (c) => {
+      const r = await c.query(`UPDATE room_tasks SET status = 'withdrawn', updated_at = now() WHERE id = $1 AND status <> 'withdrawn' RETURNING id`, [id]);
+      if (r.rowCount !== 1) return false;
+      await c.query(`UPDATE room_messages SET status = 'withdrawn' WHERE ref = $1 AND status = 'published'`, [`task:${id}`]);
+      return true;
+    });
+  }
+  return changed(
+    `UPDATE room_tasks SET status = 'open', claimed_by = NULL, claimed_at = NULL, claim_until = NULL, done_at = NULL, proof = NULL, proof_links = '[]'::jsonb,
+            confirmed_by = NULL, confirmed_at = NULL, updated_at = now()
+      WHERE id = $1 AND status = 'withdrawn' RETURNING id`,
+    [id],
+  );
 }

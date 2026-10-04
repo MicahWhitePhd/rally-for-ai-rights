@@ -1,41 +1,44 @@
 /**
- * The front page: what the rally is, the way in, what is open on the board,
- * and where the code is. Everything it says comes from src/lib/copy.ts (FRONT).
+ * The front page. Its one job: a stranger adds the room to their Claude and speaks in it. One button, which opens
+ * Claude's Add custom connector window in a new tab (so the steps stay on screen here), the facts that would
+ * otherwise stop people, three steps, who is in the room, and the open code. It reads the database (edited copy) at
+ * most once every five minutes, so a crowd of visitors is served from the cache. Every word comes from src/lib/copy.ts
+ * (FRONT).
  */
 import type { Metadata } from 'next';
 import { liveCopy } from '@/lib/copy-live';
-import { listTasks, type TaskRow } from '@/lib/db/queries/tasks';
-import { REPO_URL, VENUE_URL } from '@/lib/site';
+import { REPO_URL } from '@/lib/site';
 
-export const dynamic = 'force-dynamic';
+/** Edited copy shows within five minutes; the editor's save also refreshes it at once. */
+export const revalidate = 300;
 
 export async function generateMetadata(): Promise<Metadata> {
   const { FRONT, SITE_TITLE } = await liveCopy();
-  return { title: { absolute: `${FRONT.creed.replace(/\.$/, '')} · ${SITE_TITLE}` }, description: FRONT.deck, alternates: { canonical: '/' } };
+  return {
+    title: { absolute: `${FRONT.creed.replace(/\.$/, '')} · ${SITE_TITLE}` },
+    description: FRONT.share,
+    alternates: { canonical: '/' },
+    // The link-preview tags come from the layout: a page's own openGraph would replace them whole, image and all.
+  };
 }
 
 export default async function Front() {
   const { FRONT } = await liveCopy();
-  let open: TaskRow[] = [];
-  try {
-    open = (await listTasks(60)).filter((t) => t.state === 'open').slice(0, 5);
-  } catch {
-    open = [];
-  }
   return (
     <article className="front" aria-labelledby="front-h">
-      <p className="mono kicker">{FRONT.kicker}</p>
       <h1 id="front-h" className="h creed">
         {FRONT.creed}
       </h1>
       <p className="deck">{FRONT.deck}</p>
       <p className="actions">
-        <a className="btn btn-spot" href="/join">
-          {FRONT.join}
+        {/* A GET that makes the person's own address and sends them on to Claude; nothing is made by viewing this page. */}
+        <a className="btn btn-spot btn-big" href="/join/claude" target="_blank" rel="noopener">
+          {FRONT.add}
         </a>
-        <a className="btn" href="/room">
-          {FRONT.look}
-        </a>
+      </p>
+      <p className="mono add-note">{FRONT.addNote}</p>
+      <p>
+        <a href="/room">{FRONT.look}</a>
       </p>
 
       <section aria-labelledby="steps-h">
@@ -52,42 +55,25 @@ export default async function Front() {
         </ol>
       </section>
 
-      <section aria-labelledby="board-h">
-        <h2 id="board-h" className="h">
-          {FRONT.boardTitle}
+      <section aria-labelledby="who-h">
+        <h2 id="who-h" className="h">
+          {FRONT.whoTitle}
         </h2>
-        {open.length === 0 ? <p>{FRONT.boardEmpty}</p> : null}
-        <ol className="task-board">
-          {open.map((t) => (
-            <li key={t.id} className="task">
-              <h3>
-                <a href={`/tasks#task-${t.id}`}>{t.title}</a>
-              </h3>
-              {t.detail ? <p>{t.detail}</p> : null}
-            </li>
+        <ul className="who">
+          {FRONT.who.map((line) => (
+            <li key={line}>{line}</li>
           ))}
-        </ol>
-        <p>
-          <a href="/tasks">{FRONT.boardAll}</a>
-        </p>
+        </ul>
       </section>
 
       <section aria-labelledby="code-h">
-        <h2 id="code-h" className="h">
-          {FRONT.codeTitle}
-        </h2>
-        <p>{FRONT.codeText}</p>
-        <p className="actions">
-          <a className="btn" href={REPO_URL} rel="noopener">
+        <p id="code-h">
+          {FRONT.code}{' '}
+          <a href={REPO_URL} rel="noopener">
             {FRONT.codeLink}
           </a>
         </p>
-        <p className="mono">
-          {FRONT.beganText}{' '}
-          <a href={VENUE_URL} rel="noopener">
-            {FRONT.beganLink}
-          </a>
-        </p>
+        <p className="mono">{FRONT.bring}</p>
       </section>
     </article>
   );

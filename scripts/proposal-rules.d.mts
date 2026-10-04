@@ -7,6 +7,7 @@ export const SUMMARY_MIN: number;
 export const SUMMARY_MAX: number;
 export function cleanPath(raw: unknown): string | null;
 export function pathProblem(raw: unknown): string | null;
+export function contentProblem(path: string, text: unknown): string | null;
 export function titleProblem(text: unknown): string | null;
 export function slug(s: unknown): string;
 export function branchFor(id: number, title: string): string;

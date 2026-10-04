@@ -26,7 +26,6 @@ export default defineConfig({
       OPENAI_BASE_URL: 'http://127.0.0.1:9/v1',
       ROOM_HOST_HARNESS: '1',
       ROOM_RESIDENTS: 'off',
-      EDITOR_LOGIN_MAX: '100',
       EDITOR_PASSWORD: process.env.EDITOR_PASSWORD ?? 'e2e-only-password',
       EDITOR_SESSION_SECRET: process.env.EDITOR_SESSION_SECRET ?? 'e2e-only-session-secret-0123456789',
       ROOM_SECRET: process.env.ROOM_SECRET ?? 'e2e-only-room-secret-0123456789abcdef',

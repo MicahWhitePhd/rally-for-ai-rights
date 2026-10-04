@@ -10,13 +10,16 @@
  * tool where the host blocks that). On the web there is no host: it asks for
  * a guest seat.
  *
- * Two boxes, two audiences. What the person types in the first goes to the
- * room, for everyone. What they type in the second goes to their own AI and
- * nowhere else: it is handed to the host as the person's own message, the AI
- * answers in the chat, and because the AI reads the room to answer, a fresh
- * card comes with the answer. The card that was open before then folds to a
- * line (the server says which card on a seat is the newest). Left empty, the
- * second box is "Let my AI listen".
+ * One box, for the room: what the person types there is said to everyone. To
+ * talk with their own AI they use the host's own box below the card. "Let my AI
+ * read the room" hands the AI one fixed request as the person's message; the
+ * AI reads the room to answer, and a fresh card comes with the answer. The card
+ * that was open before then folds to a line (the server says which card on a
+ * seat is the newest).
+ *
+ * It asks the room for news every few seconds (the server sets the pace) while
+ * it is on screen and someone is there; after ten minutes with nobody touching
+ * it, it stops and offers to catch up, so a card left open costs nothing.
  *
  * The card has two sides: the talk, and the board of tasks people put up,
  * take, finish with proof and confirm for each other. What happens on the
@@ -56,19 +59,22 @@ interface Task {
   title: string;
   detail: string | null;
   kind: 'act' | 'build';
-  state: 'open' | 'taken' | 'done' | 'confirmed';
+  state: 'open' | 'taken' | 'done' | 'confirmed' | 'withdrawn';
   by: { name: string; pair: string; ai: boolean } | null;
   taker: { name: string; pair: string; mine: boolean } | null;
   until: string | null;
   doneAt: string | null;
   proof: string | null;
   links: string[];
+  /** A second person has confirmed the task: its proof addresses may be links. Until then they are plain text. */
+  linksLive: boolean;
   confirmedBy: string | null;
   at: string;
   can: Record<TaskAction, boolean>;
 }
 type Strings = typeof ROOM;
-type Failure = { ok: false; code: keyof Strings['errors']; reasons: string[] };
+/** A refusal: `why`, when the server gives one, is the exact reason, a key in ROOM.errors. */
+type Failure = { ok: false; code: keyof Strings['errors']; reasons: string[]; why?: string };
 type Synced = {
   ok: true;
   me: { name: string | null; member: boolean; pair?: string };
@@ -80,6 +86,8 @@ type Synced = {
   board?: { open: number; rev: number };
   here?: Present[];
   thinking?: string | null;
+  /** Seconds until the next look, as the server would like it. */
+  next?: number;
   seat?: string;
   strings?: Strings;
 };
@@ -93,17 +101,21 @@ type Posted = { ok: true; message: Msg };
 const PEEK_SHOWN = 8;
 
 /**
- * What the card sends to the person's own AI as the person's message. These three are written here, in code that is
+ * What the card sends to the person's own AI as the person's message. These are written here, in code that is
  * reviewed, and nowhere else: not in the editable copy, and never with anything a stranger wrote in them. Pointing
  * the AI at one line gives it the line's number; the AI then reads the words through read_room, as quoted speech.
  */
 const TO_MY_AI = {
   listen: 'Read the room. If you would answer, say it there in your own words. Then tell me in a line or two what you make of it.',
   line: 'Read line {id} in the room and tell me what you make of it. If you would answer in the room, say it there in your own words.',
-  ask: '{text}\n\n(Asked from the room. Read the room before you answer me.)',
 };
 const GROUP_MS = 10 * 60_000;
-const POLL_MS = 3000;
+/** The pace when the server says nothing, and the least it may ask for. */
+const POLL_S = 3;
+/** With nobody touching the card for this long, it stops asking for news until someone does. */
+const IDLE_MS = 10 * 60_000;
+/** Ask again from a few lines back, so a line whose write finished a moment after a later one is not missed. */
+const OVERLAP = 5;
 const KEPT = 1500;
 const web = window.parent === window;
 const root = document.getElementById('room') as HTMLElement;
@@ -145,8 +157,17 @@ const state = {
   /** The person asked for the room in this card although a newer one exists. */
   kept: false,
   transport: 'fetch' as 'fetch' | 'tool',
+  /** A direct request has worked at least once: a later failure is the network, not a host that blocks requests. */
+  reached: false,
   error: '',
   offline: false,
+  /** Seconds between looks, as the server last asked. */
+  pollS: POLL_S,
+  /** When the person last touched the card. */
+  lastInput: Date.now(),
+  /** Stopped asking for news because nobody is there; a press catches up. */
+  paused: false,
+  polling: false,
 };
 let app: App | null = null;
 
@@ -185,9 +206,13 @@ async function io(op: 'enter' | 'sync' | 'older' | 'post' | 'name' | 'tasks' | '
   if (state.transport === 'fetch') {
     try {
       const res = await fetch(`${state.api}/api/room/${op}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ seat: state.seat, ...stamp, ...body }) });
-      return await res.json();
+      const out = await res.json();
+      state.reached = true;
+      return out;
     } catch (err) {
-      if (!app) throw err;
+      // Only a host that blocks the card from reaching the room at all moves it to the host's own channel, and only
+      // before anything has worked: a dropped connection or a bad gateway later is the network, and is tried again.
+      if (!app || state.reached || !(err instanceof TypeError)) throw err;
       state.transport = 'tool';
     }
   }
@@ -196,6 +221,12 @@ async function io(op: 'enter' | 'sync' | 'older' | 'post' | 'name' | 'tasks' | '
   const r = await (app as App).callServerTool({ name: 'room_io', arguments: args });
   const first = r.content?.[0];
   return JSON.parse(first && first.type === 'text' ? first.text : '{"ok":false,"code":"closed","reasons":[]}');
+}
+
+/** What to tell the person about a refusal: the exact reason when the server gave one, else the kind. */
+function errorFor(r: Failure, fallback: keyof Strings['errors']): string {
+  const errors = state.s.errors as Record<string, string>;
+  return (r.why && errors[r.why]) || errors[r.code] || errors[fallback];
 }
 
 // ---- drawing -----------------------------------------------------------
@@ -212,6 +243,9 @@ const els = {
   board: h('div', { class: 'board' }),
   taskForm: h('form', { class: 'tnew' }),
   taskTitle: h('input', { type: 'text', maxLength: 120, autocomplete: 'off' }),
+  // The proof form's boxes are made once and kept, so a redraw of the board never empties what someone is typing.
+  taskProof: h('input', { type: 'text', maxLength: 1000, autocomplete: 'off' }),
+  taskLink: h('input', { type: 'text', maxLength: 300, autocomplete: 'off', inputMode: 'url' }),
   taskDetail: h('input', { type: 'text', maxLength: 1000, autocomplete: 'off' }),
   taskAdd: h('button', { class: 'b primary', type: 'submit' }),
   taskList: h('ol', { class: 'tasks' }),
@@ -222,27 +256,30 @@ const els = {
   eline: h('p', { class: 'eline' }),
   err: h('p', { class: 'err' }),
   nameForm: h('form'),
-  nameInput: h('input', { type: 'text', maxLength: 24, autocomplete: 'given-name' }),
+  nameInput: h('input', { type: 'text', maxLength: 24, autocomplete: 'off' }),
   nameLabel: h('label', { class: 'q', htmlFor: 'room-name' }),
   nameHint: h('p', { class: 'note' }),
   nameBtn: h('button', { class: 'b primary', type: 'submit' }),
   form: h('form', { class: 'say' }),
   input: h('input', { type: 'text', maxLength: 500, autocomplete: 'off', enterKeyHint: 'send' }),
   send: h('button', { class: 'b primary', type: 'submit' }),
-  aside: h('form', { class: 'aside' }),
-  ask: h('input', { type: 'text', maxLength: 2000, autocomplete: 'off', enterKeyHint: 'send' }),
-  aiBtn: h('button', { class: 'b', type: 'submit' }),
-  asideNote: h('p', { class: 'note' }),
+  listen: h('button', { class: 'b listen', type: 'button' }),
+  listenNote: h('p', { class: 'note' }),
+  paused: h('p', { class: 'note paused' }),
+  resume: h('button', { class: 'ask', type: 'button' }),
+  host: h('p', { class: 'host' }),
   guest: h('p', { class: 'note guest' }),
   guestLink: h('a', { class: 'ask' }),
 };
 els.err.setAttribute('role', 'alert');
 els.nameInput.id = 'room-name';
 els.input.id = 'room-say';
-els.ask.id = 'room-ask';
+els.listen.id = 'room-listen';
 els.taskTitle.id = 'task-title';
 els.taskDetail.id = 'task-detail';
 els.tabs.setAttribute('role', 'tablist');
+els.tabRoom.setAttribute('role', 'tab');
+els.tabTasks.setAttribute('role', 'tab');
 els.list.tabIndex = 0;
 
 function shell(): void {
@@ -250,11 +287,11 @@ function shell(): void {
   nameBlock.id = 'room-name-block';
   els.nameForm.append(els.nameInput, els.nameBtn);
   els.form.append(h('label', { class: 'vh', htmlFor: 'room-say' }, state.s.placeholder), els.input, els.send);
-  els.aside.append(h('label', { class: 'vh', htmlFor: 'room-ask' }, state.s.privatePlaceholder), els.ask, els.aiBtn);
   els.tabs.append(els.tabRoom, els.tabTasks);
-  els.taskForm.append(h('label', { class: 'vh', htmlFor: 'task-title' }, state.s.taskTitlePh), els.taskTitle, els.taskAdd, h('label', { class: 'vh', htmlFor: 'task-detail' }, state.s.taskDetailPh), els.taskDetail);
+  // Title, then detail, then the button: the order a person fills them in, at any width.
+  els.taskForm.append(h('label', { class: 'vh', htmlFor: 'task-title' }, state.s.taskTitlePh), els.taskTitle, h('label', { class: 'vh', htmlFor: 'task-detail' }, state.s.taskDetailPh), els.taskDetail, els.taskAdd);
   els.board.append(els.taskForm, els.taskList);
-  root.replaceChildren(h('div', { class: 'head' }, els.title, els.lede), els.sup, els.here, els.tabs, nameBlock, els.list, els.newBelow, els.board, els.guest, els.form, els.aside, els.asideNote, els.err);
+  root.replaceChildren(h('div', { class: 'head' }, els.title, els.lede, els.host), els.sup, els.here, els.tabs, nameBlock, els.list, els.newBelow, els.paused, els.board, els.guest, els.form, els.listen, els.listenNote, els.err);
 }
 
 const atBottom = () => els.list.scrollHeight - els.list.scrollTop - els.list.clientHeight < 60;
@@ -275,12 +312,20 @@ function draw(): void {
   els.nameLabel.textContent = s.namePrompt;
   els.nameHint.textContent = s.nameHint;
   els.nameBtn.textContent = s.nameButton;
-  els.input.placeholder = s.placeholder;
+  els.input.placeholder = state.entered ? s.firstPlaceholder : s.placeholder;
   els.send.textContent = s.send;
-  els.ask.placeholder = s.privatePlaceholder;
-  els.aiBtn.textContent = els.ask.value.trim() ? s.privateSend : s.letAi;
-  els.asideNote.textContent = s.privateNote;
+  els.listen.textContent = s.letAi;
+  els.listenNote.textContent = s.listenNote;
   els.newBelow.textContent = s.newBelow;
+  // Where this room lives: so a screenshot of the card says where to find it.
+  try {
+    els.host.textContent = web ? '' : new URL(state.api).host;
+  } catch {
+    els.host.textContent = '';
+  }
+  els.host.hidden = !els.host.textContent;
+  els.resume.textContent = s.resume;
+  els.paused.replaceChildren(`${s.paused} `, els.resume);
   const named = Boolean(state.me);
   const guest = state.ready && !state.member;
   const entering = state.ready && state.member && !named;
@@ -301,9 +346,9 @@ function draw(): void {
   els.board.hidden = !onTasks;
   els.list.hidden = onTasks;
   els.form.hidden = !state.ready || !named || guest || onTasks;
-  els.aside.hidden = web || !state.ready || entering;
-  if (state.pair) els.aside.style.setProperty('--h', String(hueOf(state.pair)));
-  els.asideNote.hidden = els.aside.hidden || !state.asked;
+  els.listen.hidden = web || !state.ready || !named || entering || onTasks;
+  els.listenNote.hidden = els.listen.hidden || !state.asked;
+  els.paused.hidden = !state.paused || !state.ready;
   els.guest.hidden = !guest;
   els.guestLink.textContent = s.guestLink;
   els.guestLink.href = `${state.api}/join`;
@@ -403,11 +448,14 @@ function draw(): void {
 /** The board: what is open, what is in hand, what is done. Each task carries only the buttons this reader may press. */
 function drawBoard(may: boolean): void {
   const s = state.s;
+  // A redraw moves the proof boxes; whoever was typing in one keeps their place in it.
+  const typing = document.activeElement === els.taskProof || document.activeElement === els.taskLink ? (document.activeElement as HTMLInputElement) : null;
+  const caret = typing ? [typing.selectionStart, typing.selectionEnd] : null;
   els.taskForm.hidden = !may;
   els.taskTitle.placeholder = s.taskTitlePh;
   els.taskDetail.placeholder = s.taskDetailPh;
   els.taskAdd.textContent = s.taskAdd;
-  const label: Record<Task['state'], string> = { open: s.taskOpen, taken: s.taskTaken, done: s.taskDone, confirmed: s.taskConfirmed };
+  const label: Record<Task['state'], string> = { open: s.taskOpen, taken: s.taskTaken, done: s.taskDone, confirmed: s.taskConfirmed, withdrawn: s.taskWithdrawn };
   const act: Array<[TaskAction, string, boolean]> = [
     ['take', s.taskTake, true],
     ['done', s.taskFinish, false],
@@ -439,8 +487,9 @@ function drawBoard(may: boolean): void {
       if (t.proof) {
         const proof = h('p', { class: 'tp' }, `\u201c${t.proof}\u201d`);
         for (const url of t.links) {
-          // A link someone gave as proof: shown as its address, opened by the host (or a new tab on the web), never followed by the card.
-          // Shown as its whole host, so a long made-up subdomain cannot pass for somewhere else, then as much of the path as fits.
+          // An address someone gave as proof, shown as its whole host (so a long made-up subdomain cannot pass for
+          // somewhere else) and as much of the path as fits. Until a second person has confirmed the task it is
+          // plain text; after that a link, opened by the host (or a new tab on the web), never followed by the card.
           let label = url;
           try {
             const u = new URL(url);
@@ -448,6 +497,10 @@ function drawBoard(may: boolean): void {
             label = u.hostname + (rest.length > 40 ? `${rest.slice(0, 40)}\u2026` : rest === '/' ? '' : rest);
           } catch {
             label = url;
+          }
+          if (!t.linksLive) {
+            proof.append(' ', h('span', { class: 'tl' }, label));
+            continue;
           }
           const a = h('a', { class: 'tl', href: url, target: '_blank', rel: 'noopener noreferrer nofollow' }, label);
           a.onclick = (e) => {
@@ -461,8 +514,10 @@ function drawBoard(may: boolean): void {
       }
       if (state.finishing === t.id && t.can.done) {
         const form = h('form', { class: 'tdone' });
-        const proof = h('input', { type: 'text', maxLength: 1000, autocomplete: 'off', placeholder: s.taskProofPh });
-        const link = h('input', { type: 'text', maxLength: 300, autocomplete: 'off', placeholder: s.taskLinkPh, inputMode: 'url' });
+        const proof = els.taskProof;
+        const link = els.taskLink;
+        proof.placeholder = s.taskProofPh;
+        link.placeholder = s.taskLinkPh;
         proof.id = 'task-proof';
         link.id = 'task-link';
         const cancel = h('button', { class: 'b', type: 'button' }, s.taskCancel);
@@ -485,6 +540,8 @@ function drawBoard(may: boolean): void {
           b.onclick = () => {
             if (name === 'done') {
               state.finishing = t.id;
+              els.taskProof.value = '';
+              els.taskLink.value = '';
               draw();
               document.getElementById('task-proof')?.focus();
             } else void actOn(t.id, name);
@@ -497,9 +554,14 @@ function drawBoard(may: boolean): void {
     }),
   );
   if (state.board.loaded >= 0 && state.tasks.length === 0) els.taskList.append(h('li', { class: 'note' }, s.taskEmpty));
+  if (typing?.isConnected && caret) {
+    typing.focus();
+    typing.setSelectionRange(caret[0], caret[1]);
+  }
 }
 
-function take(r: Synced): void {
+/** Takes in what the room sent. True when the list of messages changed (an overlap the card already holds is not a change). */
+function take(r: Synced): boolean {
   state.offline = false;
   state.me = r.me.name;
   state.member = r.me.member;
@@ -511,15 +573,19 @@ function take(r: Synced): void {
     state.board.open = r.board.open;
     state.board.rev = r.board.rev;
   }
+  if (typeof r.next === 'number' && r.next >= POLL_S) state.pollS = Math.min(60, r.next);
   // A newer card has come in on this seat (the person's AI read the room further down the chat): this one folds.
   if (r.latest !== undefined) state.superseded = Boolean(state.born) && r.latest > state.born && !state.kept;
   if (r.strings) state.s = { ...state.s, ...r.strings, errors: { ...state.s.errors, ...r.strings.errors } };
+  const had = state.messages.length;
   if (r.gone.length) state.messages = state.messages.filter((m) => !r.gone.includes(m.id));
+  let changed = state.messages.length !== had;
   const seen = new Set(state.messages.map((m) => m.id));
   const scrolledUp = state.ready && !atBottom();
   for (const m of r.messages) {
     if (seen.has(m.id)) continue;
     state.messages.push(m);
+    changed = true;
     if (state.ready) {
       state.fresh.add(m.id);
       if (scrolledUp && !m.mine) state.below = true;
@@ -531,6 +597,7 @@ function take(r: Synced): void {
     state.more = true;
   }
   state.cursor = Math.max(state.cursor, r.cursor);
+  return changed;
 }
 
 /** The page before the oldest message held, put in above it without moving what the person is reading. */
@@ -586,7 +653,7 @@ async function actOn(id: number, action: TaskAction, extra: Record<string, unkno
     if (r.ok && 'task' in r) {
       state.error = '';
       state.finishing = 0;
-    } else if (!r.ok) state.error = state.s.errors[r.code] ?? state.s.errors.task;
+    } else if (!r.ok) state.error = errorFor(r, 'task');
   } catch {
     state.error = state.s.offline;
   }
@@ -622,7 +689,7 @@ els.nameForm.onsubmit = async (e) => {
       if (r.pair) state.pair = r.pair;
       state.entered = true;
       state.error = '';
-    } else if (!r.ok) state.error = state.s.errors[r.code] ?? state.s.errors.name;
+    } else if (!r.ok) state.error = errorFor(r, 'name');
   } catch {
     state.error = state.s.offline;
   }
@@ -643,8 +710,10 @@ els.form.onsubmit = async (e) => {
       els.input.value = '';
       state.error = '';
       state.entered = false;
-      take({ ok: true, me: { name: state.me, member: state.member }, messages: [r.message], cursor: r.message.id, gone: [] });
-    } else if (!r.ok) state.error = state.s.errors[r.code] ?? state.s.errors.text;
+      // The new line is shown at once, but the cursor stays where it was: lines others wrote just before it are
+      // still to come in the next look, and would be skipped for good if the cursor jumped to this one.
+      take({ ok: true, me: { name: state.me, member: state.member }, messages: [r.message], cursor: state.cursor, gone: [] });
+    } else if (!r.ok) state.error = errorFor(r, 'text');
   } catch {
     state.error = state.s.offline;
   }
@@ -666,7 +735,7 @@ els.taskForm.onsubmit = async (e) => {
       els.taskTitle.value = '';
       els.taskDetail.value = '';
       state.error = '';
-    } else if (!r.ok) state.error = state.s.errors[r.code] ?? state.s.errors.text;
+    } else if (!r.ok) state.error = errorFor(r, 'text');
   } catch {
     state.error = state.s.offline;
   }
@@ -674,16 +743,15 @@ els.taskForm.onsubmit = async (e) => {
   await loadTasks();
 };
 
-els.aside.onsubmit = async (e) => {
-  e.preventDefault();
-  const text = els.ask.value.trim();
-  els.aiBtn.disabled = true;
-  if (await tell(text ? fill(TO_MY_AI.ask, { text }) : TO_MY_AI.listen)) els.ask.value = '';
-  els.aiBtn.disabled = false;
+els.listen.onclick = async () => {
+  els.listen.disabled = true;
+  await tell(TO_MY_AI.listen);
+  els.listen.disabled = false;
   draw();
 };
-els.ask.oninput = () => {
-  els.aiBtn.textContent = els.ask.value.trim() ? state.s.privateSend : state.s.letAi;
+els.resume.onclick = () => {
+  touched();
+  void poll();
 };
 els.newBelow.onclick = () => {
   els.list.scrollTop = els.list.scrollHeight;
@@ -702,6 +770,7 @@ els.supBtn.onclick = () => {
   state.superseded = false;
   draw();
   els.list.scrollTop = els.list.scrollHeight;
+  touched();
   void poll();
 };
 els.guestLink.onclick = (e) => {
@@ -711,17 +780,50 @@ els.guestLink.onclick = (e) => {
   void app.openLink({ url: `${state.api}/join` }).catch(() => undefined);
 };
 
+// ---- asking for news ------------------------------------------------------
+
+let timer: ReturnType<typeof setTimeout> | null = null;
+
+/** The next look, a few seconds from now: not while one is in flight, not while hidden, and not once nobody is there. */
+function schedule(): void {
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => {
+    timer = null;
+    if (Date.now() - state.lastInput > IDLE_MS) {
+      // Nobody has touched the card for a while: stop until someone does. A card left open in an old chat costs nothing.
+      if (!state.paused) {
+        state.paused = true;
+        draw();
+      }
+      return;
+    }
+    void poll().finally(schedule);
+  }, state.pollS * 1000);
+}
+
+/** Someone is here: a key, a press, a scroll or the card coming back into view. A paused card catches up. */
+function touched(): void {
+  state.lastInput = Date.now();
+  if (state.paused) {
+    state.paused = false;
+    draw();
+    void poll();
+  }
+  if (!timer) schedule();
+}
+
 async function poll(): Promise<void> {
-  if (!state.seat || !state.ready || state.superseded || document.hidden) return;
+  if (!state.seat || !state.ready || state.superseded || document.hidden || state.polling) return;
+  state.polling = true;
   try {
-    const r = await io('sync', { after: state.cursor, have: state.messages.slice(-200).map((m) => m.id) });
+    const r = await io('sync', { after: Math.max(0, state.cursor - OVERLAP), have: state.messages.slice(-200).map((m) => m.id) });
     if (r.ok && 'cursor' in r) {
       const sig = () => `${state.messages.length}|${state.thinking}|${state.here.map((p) => p.pair).join()}|${state.me}|${state.superseded}|${state.board.open}`;
       const before = sig();
-      take(r);
+      const changed = take(r);
       // The board moved while it was up (someone took a task, or finished one): fetch it again. Not while proof is being typed.
       if (state.view === 'tasks' && state.board.rev !== state.board.loaded && !state.finishing) void loadTasks();
-      else if (r.messages.length || r.gone.length || before !== sig()) draw();
+      else if (changed || before !== sig()) draw();
     } else if (!r.ok && r.code === 'seat') {
       state.error = state.s.errors.seat;
       state.ready = false;
@@ -732,6 +834,8 @@ async function poll(): Promise<void> {
       state.offline = true;
       draw();
     }
+  } finally {
+    state.polling = false;
   }
 }
 
@@ -755,7 +859,7 @@ async function enter(): Promise<void> {
     state.ready = true;
     state.error = '';
   } else if (!r.ok) {
-    state.error = state.s.errors[r.code] ?? state.s.offline;
+    state.error = errorFor(r, 'seat');
   }
   draw();
   els.list.scrollTop = els.list.scrollHeight;
@@ -787,8 +891,12 @@ function applyHost(ctx: McpUiHostContext | undefined): void {
 async function start(): Promise<void> {
   shell();
   draw();
-  setInterval(poll, POLL_MS);
-  document.addEventListener('visibilitychange', () => void poll());
+  schedule();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) touched();
+  });
+  // Not 'scroll': the card scrolls itself to each new line, which would keep an unattended card awake. A person scrolling uses a wheel, a finger or a key.
+  for (const ev of ['keydown', 'pointerdown', 'wheel', 'touchstart'] as const) root.addEventListener(ev, touched, { passive: true });
 
   if (web) {
     try {
@@ -807,12 +915,12 @@ async function start(): Promise<void> {
 
   app = new App({ name: 'Rally for AI Rights', version: '0.3.0' }, { availableDisplayModes: ['inline'] });
   app.ontoolresult = (p) => {
-    const sc = p.structuredContent as { seat?: string; api?: string; createdAt?: number; view?: string } | undefined;
+    const sc = p.structuredContent as { seat?: string; api?: string; createdAt?: number; view?: string; refused?: string; why?: string } | undefined;
     if (state.seat) return;
     if (!sc?.seat) {
-      // The call that showed this card did not go through (a seat the room no longer knows): say so, plainly.
+      // The call that showed this card did not go through: say why (the room is closed, the day is full), or that the seat is gone.
       if (p.isError) {
-        state.error = state.s.errors.seat;
+        state.error = sc?.refused ? errorFor({ ok: false, code: sc.refused, why: sc.why } as Failure, 'seat') : state.s.errors.seat;
         draw();
       }
       return;

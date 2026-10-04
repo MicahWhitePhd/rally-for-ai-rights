@@ -10,16 +10,16 @@
   },
   "packageManager": "pnpm@10.30.3",
   "scripts": {
-    "dev": "node scripts/build-code-index.mjs && next dev -p 3950",
+    "dev": "node scripts/build-room-ui.mjs && node scripts/build-code-index.mjs && next dev -p 3950",
     "build": "node scripts/build-room-ui.mjs && node scripts/build-code-index.mjs && next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "typecheck": "node scripts/build-room-ui.mjs && tsc --noEmit",
+    "test": "node scripts/build-room-ui.mjs && vitest run",
     "test:e2e": "playwright test",
     "check": "pnpm typecheck && pnpm test",
     "build:room-ui": "node scripts/build-room-ui.mjs",
     "build:code-index": "node scripts/build-code-index.mjs",
-    "db:apply": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f db/schema.sql"
+    "db:apply": "node scripts/db-apply.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

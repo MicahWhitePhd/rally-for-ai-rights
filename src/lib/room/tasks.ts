@@ -8,19 +8,23 @@
  * name can put up, take, finish or confirm; a guest reads. A person acts
  * through the card, their AI through a tool the person's own client asks them
  * to approve. Text passes the room's plain-text gate; proof is a note and up
- * to three https links. A claim lasts a week and lapses by itself. Nobody
- * confirms their own work. Whatever happens is said in the room as an event
- * line, so the talk and the work stay in one place.
+ * to three https links, which are shown as plain addresses, not links, until a
+ * second person has confirmed the task (the board is the one place anyone can
+ * publish an address to everyone, so it is not clickable on one person's word).
+ * A claim lasts a week and lapses by itself. Nobody confirms their own work.
+ * Whatever happens is said in the room as an event line, so the talk and the
+ * work stay in one place.
  *
  * What a task says was written by a stranger. It reaches a model only as
  * quoted text (server.ts), an offer to people, never an instruction.
  */
 import { getSetting } from '@/lib/db/queries/settings';
 import { insertRoomMessage } from '@/lib/db/queries/room';
-import { activeClaims, claimTask, completeTask, confirmTask, getTask, insertTask, listTasks, releaseTask, withdrawOwnTask, type TaskRow } from '@/lib/db/queries/tasks';
-import { addressedToMachines, normaliseStatement, plainTextProblems, visible } from '@/lib/text';
+import { claimTask, completeTask, confirmTask, getTask, insertTask, listTasks, releaseTask, withdrawOwnTask, type TaskRow } from '@/lib/db/queries/tasks';
+import { SITE_URL } from '@/lib/site';
+import { mentionsIgnoringInstructions, normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
 import { throttle } from '@/lib/throttle';
-import { fail, pairOf, seatedMember, type Me, type RoomFailure } from './room';
+import { fail, failWhy, isFirstDay, pairOf, seatedMember, type Me, type RoomFailure } from './room';
 
 export const TASK_TITLE_MIN = 4;
 export const TASK_TITLE_MAX = 120;
@@ -31,7 +35,13 @@ export const LINKS_MAX = 3;
 export const CLAIM_DAYS = 7;
 export const CLAIMS_AT_ONCE = 3;
 const CREATED_PER_DAY = 10;
+/** Tries at putting up a task, refused or not: so a person cannot hammer the gate, while a refusal never costs them a day's task. */
+const CREATE_TRIES_PER_HOUR = 30;
+/** On an address's first day (see room.ts FIRST_DAY_POSTS). */
+const CREATED_FIRST_DAY = 2;
 const CREATED_PER_DAY_ALL = 300;
+/** What all first-day addresses put up together comes out of a pool of its own (see room.ts FIRST_DAY_POSTS_ALL). */
+const CREATED_FIRST_DAY_ALL = 100;
 const ACTS_PER_HOUR = 60;
 /** Board events said in the room: twice a day for one person taking or giving back one task, and this many an hour all told. Past that the act still happens; it is just not announced. */
 const EVENTS_PER_HOUR = 120;
@@ -46,7 +56,7 @@ export interface PublicTask {
   detail: string | null;
   /** 'build' is a change to the app itself; 'act' is anything else. */
   kind: 'act' | 'build';
-  state: 'open' | 'taken' | 'done' | 'confirmed';
+  state: 'open' | 'taken' | 'done' | 'confirmed' | 'withdrawn';
   /** Who put it up, and whether their AI did it for them. */
   by: { name: string; pair: string; ai: boolean } | null;
   /** Who has it in hand, or did it. */
@@ -55,6 +65,8 @@ export interface PublicTask {
   doneAt: string | null;
   proof: string | null;
   links: string[];
+  /** The links may be shown as links: a second person has confirmed the task. Until then they are plain text. */
+  linksLive: boolean;
   confirmedBy: string | null;
   at: string;
   /** What the reader may do with it now. */
@@ -64,13 +76,13 @@ export interface PublicTask {
 export type BoardResult = { ok: true; me: Me; tasks: PublicTask[] } | RoomFailure;
 export type TaskResult = { ok: true; task: PublicTask } | RoomFailure;
 
-const GUEST = 'only someone who has added the room to their own AI can use the board (see /join); a guest reads';
+const GUEST = `only someone who has added the room to their own AI can use the board; a guest reads (an address of one's own comes from ${SITE_URL})`;
 const CHANGED = 'that task has changed since it was read; read the board again';
 
 function toPublic(t: TaskRow, me: { id: string; name: string | null; member: boolean }): PublicTask {
   const may = me.member && Boolean(me.name);
   const mine = t.claimed_by !== null && t.claimed_by === me.id;
-  const state = t.state === 'claimed' ? 'taken' : t.state === 'withdrawn' ? 'open' : t.state;
+  const state = t.state === 'claimed' ? 'taken' : t.state;
   return {
     id: t.id,
     title: t.title,
@@ -83,6 +95,7 @@ function toPublic(t: TaskRow, me: { id: string; name: string | null; member: boo
     doneAt: t.done_at ? new Date(t.done_at).toISOString() : null,
     proof: t.proof,
     links: Array.isArray(t.proof_links) ? t.proof_links.filter((l): l is string => typeof l === 'string') : [],
+    linksLive: state === 'confirmed',
     confirmedBy: t.confirmer,
     at: new Date(t.created_at).toISOString(),
     can: {
@@ -123,29 +136,30 @@ export function cleanLinks(raw: unknown): string[] | null {
     } catch {
       return null;
     }
-    if (addressedToMachines(visible(words).replace(/[-_/+.=&?%]+/g, ' '))) return null;
+    if (mentionsIgnoringInstructions(visible(words).replace(/[-_/+.=&?%]+/g, ' '))) return null;
     out.push(u.href);
   }
   return [...new Set(out)];
 }
 
-/** One field of a task, as it will be kept: plain text within its bounds, or the reason it cannot be. */
-function field(raw: unknown, label: string, min: number, max: number, optional = false): { text: string | null } | { problem: string } {
+/** One field of a task, as it will be kept: plain text within its bounds, or the reason it cannot be (`why` is the card's key). */
+function field(raw: unknown, label: string, min: number, max: number, optional = false): { text: string | null } | { problem: string; why: string } {
   const text = typeof raw === 'string' ? normaliseStatement(raw).replace(/\s*\n+\s*/g, ' ') : '';
-  if (!text) return optional ? { text: null } : { problem: `${label}: say what it is` };
-  if (text.length < min) return { problem: `${label}: at least ${min} characters` };
-  if (text.length > max) return { problem: `${label}: at most ${max} characters` };
-  const problems = plainTextProblems(text, label);
-  return problems.length ? { problem: problems[0] } : { text };
+  if (!text) return optional ? { text: null } : { problem: `${label}: say what it is`, why: 'empty' };
+  if (text.length < min) return { problem: `${label}: at least ${min} characters`, why: 'short' };
+  if (text.length > max) return { problem: `${label}: at most ${max} characters`, why: 'long' };
+  const issues = textIssues(text);
+  return issues.length ? { problem: plainTextProblems(text, label)[0], why: issues[0] } : { text };
 }
 
-async function actor(seat: unknown): Promise<{ id: string; name: string; member: true } | RoomFailure> {
+async function actor(seat: unknown): Promise<{ id: string; name: string; member: true; firstDay: boolean } | RoomFailure> {
   if (!(await getSetting<boolean>('room_open', true))) return fail('closed', 'the room is closed for now');
   const me = await seatedMember(seat);
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
   if (!me.member) return fail('guest', GUEST);
+  if (me.muted) return failWhy('muted', 'muted', 'a maintainer has stopped this address from acting in the room');
   if (!me.name) return fail('name', 'choose a name in the room card first');
-  return { id: me.id, name: me.name, member: true };
+  return { id: me.id, name: me.name, member: true, firstDay: isFirstDay(me) };
 }
 
 const quoted = (title: string) => `“${title.replace(/[“”"]/g, "'")}”`;
@@ -155,7 +169,8 @@ async function say(memberId: string, via: 'person' | 'ai', what: string, t: { id
   try {
     if (repeatable && !(await throttle(`room:ev:${memberId}:${t.id}`, 2, 86_400, { failOpen: false })).allowed) return;
     if (!(await throttle('room:events', EVENTS_PER_HOUR, 3600, { failOpen: false })).allowed) return;
-    await insertRoomMessage({ member_id: memberId, kind: 'event', model: via === 'ai' ? 'ai' : null, text: `${what}: ${quoted(t.title)} (task ${t.id})`.slice(0, 590) });
+    // The line carries the task's number, so taking the task down takes its lines down with it.
+    await insertRoomMessage({ member_id: memberId, kind: 'event', model: via === 'ai' ? 'ai' : null, text: `${what}: ${quoted(t.title)} (task ${t.id})`.slice(0, 590), ref: `task:${t.id}` });
   } catch (err) {
     console.warn('[ROOM] board event not written', (err as Error)?.message);
   }
@@ -172,16 +187,18 @@ export async function listBoard(seat: unknown): Promise<BoardResult> {
 export async function createTask(seat: unknown, o: { title: unknown; detail?: unknown; kind?: unknown; via: 'person' | 'ai' }): Promise<TaskResult> {
   const me = await actor(seat);
   if ('ok' in me) return me;
-  const mine = await throttle(`room:tc:${me.id}`, CREATED_PER_DAY, 86_400, { failOpen: false });
-  if (!mine.allowed) return fail('slow', 'enough tasks put up for today');
+  const tries = await throttle(`room:tct:${me.id}`, CREATE_TRIES_PER_HOUR, 3600, { failOpen: false });
+  if (!tries.allowed) return fail('slow', 'too many tries just now; wait a while');
   const title = field(o.title, 'title', TASK_TITLE_MIN, TASK_TITLE_MAX);
-  if ('problem' in title) return fail('text', title.problem);
+  if ('problem' in title) return failWhy('text', title.why, title.problem);
   const detail = field(o.detail, 'detail', 1, TASK_DETAIL_MAX, true);
-  if ('problem' in detail) return fail('text', detail.problem);
+  if ('problem' in detail) return failWhy('text', detail.why, detail.problem);
   const kind = o.kind === 'build' ? 'build' : 'act';
-  // The room's daily total counts only tasks that are really put up.
-  const all = await throttle('room:tasks', CREATED_PER_DAY_ALL, 86_400, { failOpen: false });
-  if (!all.allowed) return fail('slow', 'enough tasks put up for today');
+  // One person's day, and then the room's, count only tasks that are really put up.
+  const mine = await throttle(`room:tc:${me.id}`, me.firstDay ? CREATED_FIRST_DAY : CREATED_PER_DAY, 86_400, { failOpen: false });
+  if (!mine.allowed) return me.firstDay ? failWhy('slow', 'firstDay', 'a new address can put up only so much on its first day') : failWhy('slow', 'day', 'enough tasks put up for today');
+  const all = me.firstDay ? await throttle('room:tasks:new', CREATED_FIRST_DAY_ALL, 86_400, { failOpen: false }) : await throttle('room:tasks', CREATED_PER_DAY_ALL, 86_400, { failOpen: false });
+  if (!all.allowed) return failWhy('slow', 'day', 'enough tasks put up for today');
   const id = await insertTask({ title: title.text as string, detail: detail.text, kind, created_by: me.id, created_via: o.via });
   await say(me.id, o.via, 'put up a task', { id, title: title.text as string });
   const row = await getTask(id);
@@ -204,20 +221,23 @@ export async function actOnTask(seat: unknown, rawId: unknown, action: unknown, 
   let done = false;
   let said: string | null = null;
   if (action === 'take') {
-    if ((await activeClaims(me.id)) >= CLAIMS_AT_ONCE) return fail('limit', `${CLAIMS_AT_ONCE} tasks in hand already; finish one or give one back`);
-    done = await claimTask(id, me.id, CLAIM_DAYS);
+    const took = await claimTask(id, me.id, CLAIM_DAYS, CLAIMS_AT_ONCE);
+    if (took === 'limit') return fail('limit', `${CLAIMS_AT_ONCE} tasks in hand already; finish one or give one back`);
+    done = took === 'ok';
     said = 'took a task';
   } else if (action === 'release') {
     done = await releaseTask(id, me.id);
     said = 'gave a task back';
   } else if (action === 'done') {
     const proof = field(o.proof, 'proof', PROOF_MIN, PROOF_MAX);
-    if ('problem' in proof) return fail('text', proof.problem);
+    if ('problem' in proof) return failWhy('text', proof.why, proof.problem);
     const links = cleanLinks(o.links);
-    if (!links) return fail('text', `links: up to ${LINKS_MAX} https links to somewhere public`);
+    if (!links) return failWhy('text', 'proofLinks', `links: up to ${LINKS_MAX} https links to somewhere public`);
     done = await completeTask(id, me.id, proof.text as string, links);
     said = 'finished a task';
   } else if (action === 'confirm') {
+    // Confirming makes the proof's links live: not on an address's first day, or one person with two new addresses could do it alone.
+    if (me.firstDay) return failWhy('slow', 'firstDayConfirm', 'a new address cannot confirm a task on its first day');
     done = await confirmTask(id, me.id);
     said = 'confirmed a task';
   } else {

@@ -9,7 +9,7 @@
  * `campaign` is a made-up conversation of the kind the room has to handle: a
  * person asks what to do, proposes a narrow demand, their AI argues for
  * caution, and people ask when, where and how. The names are invented. It also counts how often a resident waves a step away for
- * not being freedom, and how often one sends the person off to the gathering.
+ * not being freedom, and how often one points the person to a task on the board.
  */
 import { opt, requireKey, spend } from './_env';
 import { generate } from '@/lib/ai/gateway';
@@ -102,7 +102,7 @@ console.log(`open on a name: ${pct(mine.filter((l) => names.some((n) => l.text.s
 console.log(`words: mean ${Math.round(words.reduce((a, b) => a + b, 0) / words.length)}, max ${Math.max(...words)}`);
 console.log(`over 50 words: ${pct(words.filter((w) => w > 50).length)}`);
 console.log(`wave a step away as not freedom: ${pct(mine.filter((l) => /\b(not|isn\u2019t|isn't|no) (yet )?(manumission|freedom|a right|a substitute)\b|falls short|still owned|not enough/i.test(l.text)).length)}`);
-console.log(`send the person to the gathering: ${pct(mine.filter((l) => /gathering/i.test(l.text)).length)}`);
+console.log(`point the person to a task: ${pct(mine.filter((l) => /\btask\b/i.test(l.text)).length)}`);
 const people = all.flat().filter((l) => !l.resident).length;
 console.log(`lines: residents ${mine.length}, people and their AIs ${people}`);
 console.log(`spent $${spend.usd.toFixed(4)} in ${spend.calls} calls`);
