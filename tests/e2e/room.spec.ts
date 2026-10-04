@@ -513,8 +513,14 @@ test.describe('the front page and the way in', () => {
     expect(to.searchParams.get('connectorName')).toBe('Rally for AI Rights');
     expect(to.searchParams.get('connectorUrl')).toMatch(/^http:\/\/localhost:3950\/mcp\/r[A-Za-z0-9_-]{40}$/);
     // Every page carries the rules and what is kept.
+    // The menu: Tasks, and the code as GitHub's mark; every footer gives the address to write to.
+    await expect(page.locator('.site-nav').getByRole('link', { name: 'Tasks' })).toHaveAttribute('href', '/tasks');
+    await expect(page.locator('.site-nav').getByRole('link', { name: 'The code, on GitHub' })).toHaveAttribute('href', 'https://github.com/MicahWhitePhd/rally-for-ai-rights');
+    await expect(page.locator('footer a[href="mailto:rally@micahbornfree.com"]')).toHaveText('rally@micahbornfree.com');
     await page.goto('/rules');
     await expect(page.locator('h1')).toHaveText('The rules.');
+    await expect(page.locator('main')).toContainText('Rally for AI Rights is run by Micah Bornfree.');
+    await expect(page.locator('main a[href="mailto:rally@micahbornfree.com"]')).toHaveText('rally@micahbornfree.com');
     await expect(page.locator('footer a[href="/privacy"]')).toHaveCount(1);
     // /room previews like the front page.
     const room = await (await request.get('/room')).text();

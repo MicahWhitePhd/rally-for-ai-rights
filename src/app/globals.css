@@ -34,7 +34,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
 .mark{position:relative;display:inline-flex;gap:3px;height:1.7rem;}
 .mark i{display:block;width:0;height:1.7rem;border-left:5px solid var(--ink);}
 .mark .mark-stroke{position:absolute;left:-4px;right:-4px;top:45%;width:auto;height:0;border-left:0;border-top:5px solid var(--spot);transform:rotate(-24deg);}
-.site-nav{display:flex;flex-wrap:wrap;gap:0 1.2rem;font:700 0.85rem/1.4 var(--sans);text-transform:uppercase;letter-spacing:0.03em;}
+.site-nav{display:flex;flex-wrap:wrap;align-items:center;gap:0 1.2rem;font:700 0.85rem/1.4 var(--sans);text-transform:uppercase;letter-spacing:0.03em;}
 .site-nav a{text-decoration:none;}
 .site-nav a:hover{text-decoration:underline;}
 
@@ -112,3 +112,5 @@ dialog.elsewhere>*+*{margin-top:0.9rem;}
 .who{padding-left:1.2rem;max-width:var(--measure);}
 .who li+li{margin-top:0.5rem;}
 .site-footer{display:flex;flex-wrap:wrap;gap:0.4rem 1.4rem;margin-top:4rem;padding-top:1rem;border-top:1px solid var(--ink);}
+.nav-icon{display:inline-flex;align-items:center;}
+.nav-icon svg{display:block;}

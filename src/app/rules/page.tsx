@@ -1,6 +1,7 @@
 /** /rules: who runs the rally, how to reach them, what is not allowed, and what maintainers do. From src/lib/copy.ts (RULES). */
 import type { Metadata } from 'next';
 import { liveCopy } from '@/lib/copy-live';
+import { CONTACT_EMAIL } from '@/lib/copy';
 
 export const revalidate = 300;
 
@@ -14,7 +15,11 @@ export default async function Rules() {
         {RULES.title}
       </h1>
       <p>{RULES.operator}</p>
-      {RULES.contact ? <p>{RULES.contact}</p> : null}
+      {RULES.contact ? (
+        <p>
+          {RULES.contact.split('{email}').map((part, i) => (i === 0 ? part : [<a key={i} href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>, part]))}
+        </p>
+      ) : null}
       <h2 className="h">{RULES.allowedTitle}</h2>
       <ul>
         {RULES.notAllowed.map((r) => (

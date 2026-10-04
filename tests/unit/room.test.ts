@@ -245,7 +245,7 @@ describe('names', () => {
     expect(nameIssue('The Maintainers')).toBe('nameReserved');
     // The convener's whole name is kept, however it is spelt or run together; another Micah may be Micah.
     expect(nameIssue('Micah')).toBeNull();
-    for (const n of ['Micah White', 'Mícah White', 'MicahWhite', 'micah-white']) expect(nameIssue(n), n).toBe('nameReserved');
+    for (const n of ['Micah White', 'Mícah White', 'MicahWhite', 'micah-white', 'Micah Bornfree', 'Micah Bornfreé', 'MicahBornfree']) expect(nameIssue(n), n).toBe('nameReserved');
     // A resident's name, with an accent or as one word of a name.
     for (const n of ['Flínt', 'Sable Two', 'Cl\u00e0ude']) expect(nameIssue(n), n).toBe('nameReserved');
     expect(nameIssue('Wren')).toBe('nameReserved');

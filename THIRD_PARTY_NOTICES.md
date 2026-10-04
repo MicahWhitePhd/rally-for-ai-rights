@@ -274,3 +274,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Octicons (GitHub's mark in the site header)
+
+The GitHub mark in `src/components/SiteChrome.tsx` is the `mark-github` icon from Octicons, https://github.com/primer/octicons, MIT License, Copyright (c) 2023 GitHub Inc. Use of the GitHub logo follows GitHub's logo guidelines: it links to this repository on GitHub.

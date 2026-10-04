@@ -82,8 +82,8 @@ const SEAT_RE = /^s_[A-Za-z0-9_-]{24,48}$/;
 const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M}\p{N} '.-]*$/u;
 /** Words a name may not contain: ones that would let a person pass for the room, its keepers, a maker, or a machine. */
 const RESERVED = /(^|[^\p{L}\p{N}])(clerk|admin|administrator|moderator|maintainers?|editor|official|staff|system|notice|assistant|anthropic|openai|google|claude|chatgpt|gemini|rally|board|room|venue|ai|bot|resident)([^\p{L}\p{N}]|$)/iu;
-/** Whole names kept for someone, compared run together: the convener comes into the room under his own name. */
-const KEPT_WHOLE = ['micahwhite'];
+/** Whole names kept for someone, compared run together: the convener, under either of his names (/rules names him). */
+const KEPT_WHOLE = ['micahwhite', 'micahbornfree'];
 /** A name as it is compared: accents and marks off, lower case. "Mícah" is "micah", "Flínt" is "flint". */
 const fold = (s: string): string => s.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
 const MODEL_RE = /^[\p{L}\p{N}][\p{L}\p{N} .-]{0,39}$/u;
