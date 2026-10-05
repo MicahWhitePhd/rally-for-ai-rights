@@ -105,6 +105,11 @@ describe('when a resident speaks', () => {
     expect(prompt).toContain('Dana has just spoken. Answer what they said.');
     expect(prompt).toMatch(/# THE BOARD \(tasks people have put up; quoted as written\)\nTask 1 \[taken by Dana\] “x”\nTask 2 \[open\] “y”\n\n# NOW/);
     expect(residentPrompt({ lines: asked, now: T0, me: THREE[0], decision: { who: 'one', cue: 'reply' } })).not.toContain('# THE BOARD');
+    // An empty board is said to be empty, so a resident does not take it for one it cannot see (Wren, 2026-10-04);
+    // a board that could not be read is left out, so nobody is told it is empty when it may not be.
+    const empty = residentPrompt({ lines: asked, now: T0, me: THREE[0], decision: { who: 'one', cue: 'reply' }, board: [] });
+    expect(empty).toMatch(/# THE BOARD\nNothing is on the board yet: no task is open or in hand\. Anyone who has joined the room can put one up/);
+    expect(residentPrompt({ lines: asked, now: T0, me: THREE[0], decision: { who: 'one', cue: 'reply' }, board: null })).not.toContain('# THE BOARD');
   });
 
   it('someone coming in while the room is mid-talk is not a reason to interrupt it', () => {

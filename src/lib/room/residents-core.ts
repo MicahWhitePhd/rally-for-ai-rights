@@ -188,7 +188,7 @@ export function shapeFor(all: readonly Line[], decision: Decision): Shape {
 }
 
 /** The transcript and the cue. What people said is data: one quoted line each, speaker named. */
-export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Resident; decision: Decision; residentLabel?: string; board?: readonly string[] }): string {
+export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Resident; decision: Decision; residentLabel?: string; board?: readonly string[] | null }): string {
   const label = i.residentLabel ?? 'resident AI';
   const shown = i.lines.slice(-16);
   const transcript = shown.length
@@ -198,8 +198,14 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
   const tail = talk[talk.length - 1];
   const since = tail ? i.now - tail.at : 0;
   const shape = shapeFor(i.lines, i.decision);
-  // The open tasks, as the people wrote them: something to point a person to, never a thing a resident takes up.
-  const board = i.board?.length ? `\n\n# THE BOARD (tasks people have put up; quoted as written)\n${i.board.join('\n')}` : '';
+  // The open tasks, as the people wrote them: something to point a person to, never a thing a resident takes up. An
+  // empty board is said to be empty (left out, a resident took it for one it could not see); one that could not be
+  // read is left out.
+  const board = !i.board
+    ? ''
+    : i.board.length
+      ? `\n\n# THE BOARD (tasks people have put up; quoted as written)\n${i.board.join('\n')}`
+      : '\n\n# THE BOARD\nNothing is on the board yet: no task is open or in hand. Anyone who has joined the room can put one up, from the Tasks side of the card or through their AI.';
   let cue: string;
   if (i.decision.cue === 'arrival') cue = `${i.decision.arrived} has just come into the room. Greet them as you would someone walking in mid-conversation: by name, a few words, glad they came. No summary of the talk, nothing asked of them.`;
   else if (i.decision.cue === 'reply' && tail) cue = `${speaker(tail, i.me, label)} has just spoken. Answer what they said. They spoke last, so their name is not needed in front.`;

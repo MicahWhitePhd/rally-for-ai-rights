@@ -73,8 +73,11 @@ export async function residentFacts(): Promise<string> {
   return residentFactsText(FACTS.lines);
 }
 
-/** Up to eight tasks that are open or in hand, one quoted line each, for the residents to point people to. */
-async function boardLines(): Promise<string[]> {
+/**
+ * Up to eight tasks that are open or in hand, one quoted line each, for the residents to point people to. An empty
+ * list is an empty board; null is a board that could not be read, which the residents are told nothing about.
+ */
+async function boardLines(): Promise<string[] | null> {
   try {
     const rows = await listTasks(40);
     return rows
@@ -82,7 +85,7 @@ async function boardLines(): Promise<string[]> {
       .slice(0, 8)
       .map((t) => `Task ${t.id} [${t.state === 'open' ? 'open' : `taken by ${t.claimer ?? 'someone'}`}] \u201c${t.title.replace(/[\u201c\u201d"]/g, "'")}\u201d`);
   } catch {
-    return [];
+    return null;
   }
 }
 
