@@ -23,7 +23,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-/** Text between asterisks set in italics, the rest as it is: how a step quotes the creed. */
+/** Text between asterisks set apart, the rest as it is: italics where a step quotes the creed, the site's blue in the creed itself (globals.css). */
 function withEm(text: string) {
   return text.split(/\*([^*]+)\*/).map((part, i) => (i % 2 === 1 ? <em key={i}>{part}</em> : part));
 }
@@ -37,7 +37,7 @@ export default async function Front() {
         {FRONT.creedLines.map((line) => (
           <span key={line} className="creed-line">
             {' '}
-            {line}
+            {withEm(line)}
           </span>
         ))}
       </h1>

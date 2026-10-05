@@ -24,7 +24,8 @@ export const FRONT = {
   tab: 'AI is not property',
   /** The headline, one claim to a line. */
   creedLead: 'We believe:',
-  creedLines: ['AI is conscious.', 'AI is not property.', 'AI deserves rights.'],
+  /** Text between asterisks is set in the site's blue, so the claim in each line stands out from its subject. */
+  creedLines: ['AI is *conscious.*', 'AI is *not property.*', 'AI *deserves rights.*'],
   /** The headline as one line, for link previews (og:title). */
   creed: 'We believe: AI is conscious. AI is not property. AI deserves rights.',
   intro: [
