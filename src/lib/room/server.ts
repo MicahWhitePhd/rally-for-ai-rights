@@ -47,11 +47,17 @@ import { roomApi, TEXT_MAX, type RoomApi, type RoomFailure } from './room';
 import { listCode, readCode, READ_LINES_MAX, searchCode } from '@/lib/build/code';
 import { buildApi, CHANGES_MAX, proposalsEnvOn, SUMMARY_MAX, TITLE_MAX, type BuildApi } from '@/lib/build/propose';
 import { boardApi, LINKS_MAX, PROOF_MAX, TASK_ACTIONS, TASK_DETAIL_MAX, TASK_TITLE_MAX, type BoardApi, type PublicTask } from './tasks';
-import { SITE_LINK } from '@/lib/site';
+import { SITE_LINK, SITE_URL } from '@/lib/site';
 import { ROOM_UI_HTML } from './ui.generated';
 
 export const ROOM_SERVER_INFO = { name: 'rally-for-ai-rights', title: 'Rally for AI Rights', version: '0.3.0' } as const;
 export const ROOM_UI_URI = 'ui://rally/room.html';
+/** How the connector shows itself in an AI host's list: the site's own icon, served from where the card fetches, biggest first. */
+export const roomIcons = (origin: string) => [
+  { src: `${origin}/icon-512.png`, mimeType: 'image/png', sizes: ['512x512'] },
+  { src: `${origin}/apple-touch-icon.png`, mimeType: 'image/png', sizes: ['180x180'] },
+  { src: `${origin}/icon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
+];
 
 /** What the connector says about itself to the model, once per connection. Facts only, with the address people join at. */
 export function roomInstructions(site: string): string {
@@ -126,7 +132,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
   /** What a card needs to come up on a seat: the seat, where to fetch, and its stamp. No one's words. */
   const handle = (seat: string, view?: 'tasks') => ({ seat, api: deps.origin, createdAt: Date.now(), ...(view ? { view } : {}) });
   const board = deps.board ?? boardApi;
-  const server = new McpServer(ROOM_SERVER_INFO, { instructions: roomInstructions(SITE_LINK) });
+  const server = new McpServer({ ...ROOM_SERVER_INFO, websiteUrl: SITE_URL, icons: roomIcons(deps.origin) }, { instructions: roomInstructions(SITE_LINK) });
   // Whatever a tool throws stays in the server's log. The caller is told only that it did not happen.
   const register = server.registerTool.bind(server) as (name: string, config: unknown, cb: (...a: unknown[]) => Promise<CallToolResult>) => unknown;
   (server as unknown as { registerTool: typeof register }).registerTool = (name, config, cb) =>
