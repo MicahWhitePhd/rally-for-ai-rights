@@ -1,13 +1,14 @@
 /**
  * The front page. Its one job: a stranger adds the room to their Claude and speaks in it. The creed, then the way
  * in before the case for it: one button, which opens Claude's Add custom connector window in a new tab (so the
- * steps stay on screen here), the manifesto, three steps, who is in the room, and the open code. It reads the database (edited copy) at
+ * steps stay on screen here), the manifesto with the same two buttons again under its last line (for the person it
+ * convinced), three steps, who is in the room, and the open code. It reads the database (edited copy) at
  * most once every five minutes, so a crowd of visitors is served from the cache. Every word comes from src/lib/copy.ts
  * (FRONT).
  */
 import type { Metadata } from 'next';
 import { liveCopy } from '@/lib/copy-live';
-import { JoinElsewhere } from '@/components/join/JoinElsewhere';
+import { JoinElsewhere, JoinElsewhereButton } from '@/components/join/JoinElsewhere';
 import { REPO_URL, SITE_LABEL } from '@/lib/site';
 
 /** Edited copy shows within five minutes; the editor's save also refreshes it at once. */
@@ -63,6 +64,13 @@ export default async function Front() {
         {FRONT.intro.map((para, i) => (
           <p key={para}>{i === 0 ? opening(para) : para}</p>
         ))}
+      </div>
+      {/* The way in once more, for the person the manifesto convinced. The second button opens the dialog rendered above. */}
+      <div className="actions">
+        <a className="btn btn-spot btn-big" href="/join/claude" target="_blank" rel="noopener">
+          {FRONT.add}
+        </a>
+        <JoinElsewhereButton label={ELSEWHERE.button} />
       </div>
 
       <section aria-labelledby="steps-h">

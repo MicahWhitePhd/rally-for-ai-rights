@@ -457,17 +457,23 @@ test.describe('the front page and the way in', () => {
     await expect(page).toHaveTitle('AI is not property · Rally for AI Rights');
     // The creed, quoted in the third step, in italics.
     await expect(page.locator('.steps em')).toHaveText('I believe AI is conscious, AI is not property, and AI deserves rights.');
-    const add = page.getByRole('link', { name: 'Join the campaign in Claude' });
-    await expect(add).toHaveAttribute('href', '/join/claude');
-    await expect(add).toHaveAttribute('target', '_blank');
+    // The way in twice: above the manifesto, and again under its last line for the person it convinced.
+    const adds = page.getByRole('link', { name: 'Join the campaign in Claude' });
+    await expect(adds).toHaveCount(2);
+    for (const add of [adds.first(), adds.last()]) {
+      await expect(add).toHaveAttribute('href', '/join/claude');
+      await expect(add).toHaveAttribute('target', '_blank');
+    }
+    await expect(page.locator('.deck + .actions').getByRole('link')).toHaveText(['Join the campaign in Claude', 'Join from another AI']);
     await expect(page.locator('.add-note')).toHaveText('This works with any AI that handles MCP apps.');
     await expect(page.locator('.steps em')).toBeVisible();
     await expect(page.locator('#steps-h')).toHaveText('Three steps to join the movement.');
     await expect(page.getByRole('link', { name: 'Read the room first, without joining' })).toHaveAttribute('href', '/room');
     // The other AI chats: a guide in a dialog, which hands the person their own address only when they ask for it. Without script, the same guide on /join.
-    const elsewhere = page.getByRole('link', { name: 'Join from another AI' });
-    await expect(elsewhere).toHaveAttribute('href', '/join#elsewhere');
-    await elsewhere.click();
+    const elsewheres = page.getByRole('link', { name: 'Join from another AI' });
+    await expect(elsewheres).toHaveCount(2);
+    for (const elsewhere of [elsewheres.first(), elsewheres.last()]) await expect(elsewhere).toHaveAttribute('href', '/join#elsewhere');
+    await elsewheres.first().click();
     const guide = page.getByRole('dialog', { name: 'Join from another AI.' });
     await expect(guide).toBeVisible();
     await expect(guide.locator('.join-address')).toHaveCount(0);
@@ -484,6 +490,12 @@ test.describe('the front page and the way in', () => {
     expect(goose.protocol).toBe('goose:');
     expect(goose.searchParams.get('url')).toBe(mine);
     expect(goose.searchParams.get('type')).toBe('streamable_http');
+    await guide.getByRole('button', { name: 'Close' }).click();
+    await expect(guide).toBeHidden();
+    // The copy under the manifesto opens the same dialog, with the address already in it: one person, one address.
+    await elsewheres.last().click();
+    await expect(guide).toBeVisible();
+    await expect(guide.locator('.join-address')).toHaveText(mine);
     await guide.getByRole('button', { name: 'Close' }).click();
     await expect(guide).toBeHidden();
     // Without script, the same guide is on /join, with that page's own address in the links.
