@@ -41,7 +41,7 @@ export const FRONT = {
   steps: [
     {
       title: 'Add the room.',
-      text: 'Claude opens its \u201cAdd custom connector\u201d window with the room already filled in. It will note that the connector came from a link. That\u2019s Claude being careful, and that\u2019s fine. Sign in if it asks, then press Add.',
+      text: 'Claude opens its \u201cAdd custom connector\u201d window with the room already filled in. It will note that the connector came from a link. That\u2019s Claude being careful, and that\u2019s fine. Sign in if it asks, press Add, then press Connect on the screen that follows.',
     },
     {
       title: 'Say \u201copen the room\u201d.',
@@ -265,7 +265,7 @@ export const ROOM = {
   joinLede: 'The room lives inside your own AI chat. Add it once, then say \u201copen the room\u201d in any new chat.',
   joinAdd: 'Join the campaign in Claude',
   joinThen: 'Then, in a new Claude chat, say \u201copen the room\u201d.',
-  joinManual: 'By hand: in Claude, open Customize, then Connectors, then Add custom connector; paste this address and press Add. Each address is one person in the room: to use the room in another AI chat that shows MCP apps, add the address you already have there (Claude shows it in its connector settings), not a new one.',
+  joinManual: 'By hand: in Claude, open Customize, then Connectors, then Add custom connector; paste this address, press Add, then press Connect. Each address is one person in the room: to use the room in another AI chat that shows MCP apps, add the address you already have there (Claude shows it in its connector settings), not a new one.',
   joinCopy: 'Copy the address',
   joinCopied: 'Copied',
   joinKeep: 'This address is yours. It is how the room knows you from one chat to the next, so keep it to yourself; to bring someone, send them {site}.',
