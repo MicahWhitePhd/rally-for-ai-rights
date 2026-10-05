@@ -181,7 +181,7 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEle
   return el;
 }
 const fill = (tpl: string, vars: Record<string, string>) => tpl.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? '');
-const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
+const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 const dayName = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 const shortDay = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
 const dayOf = (iso: string) => new Date(iso).toDateString();
@@ -386,6 +386,7 @@ function draw(): void {
   if (!entering && shown.length && !state.more) items.push(h('li', { class: 'note start' }, s.beginning));
   let day = '';
   let minute = '';
+  let spoke = '';
   for (const block of blocks) {
     const first = block[0];
     const d = dayOf(first.at);
@@ -411,10 +412,11 @@ function draw(): void {
       ask.onclick = () => tell(fill(TO_MY_AI.line, { id: String(lastLine.id) }));
       head.append(ask);
     }
-    // The time once a minute: a run of quick lines does not need it on every one.
+    // The time whenever the speaker changes, and once a minute within one speaker's run: quick lines do not need it on every one.
     const at = `${d} ${clock.format(new Date(first.at))}`;
-    if (at !== minute) head.append(h('span', { class: 'gt' }, clock.format(new Date(first.at))));
+    if (at !== minute || first.pair !== spoke) head.append(h('span', { class: 'gt' }, clock.format(new Date(first.at))));
     minute = at;
+    spoke = first.pair;
     const li = h('li', { class: `g${first.resident ? ' res' : ''}${first.mine ? ' mine' : ''}` }, head);
     if (!first.resident) li.style.setProperty('--h', String(hueOf(first.pair)));
     for (const m of block) {
