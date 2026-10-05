@@ -46,13 +46,14 @@ export default async function Front() {
           <p key={para}>{para}</p>
         ))}
       </div>
-      <p className="actions">
+      {/* A div, not a paragraph: JoinElsewhere renders its <dialog> here, and a dialog may not live inside a <p>. */}
+      <div className="actions">
         {/* A GET that makes the person's own address and sends them on to Claude; nothing is made by viewing this page. */}
         <a className="btn btn-spot btn-big" href="/join/claude" target="_blank" rel="noopener">
           {FRONT.add}
         </a>
         <JoinElsewhere copy={{ ...ELSEWHERE, addressNote: ELSEWHERE.addressNote.replace('{site}', SITE_LABEL) }} />
-      </p>
+      </div>
       <p className="mono add-note">{FRONT.addNote}</p>
       <p>
         <a href="/room">{FRONT.look}</a>

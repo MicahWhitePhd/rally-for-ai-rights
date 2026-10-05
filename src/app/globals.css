@@ -43,7 +43,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
 .btn:hover{background:var(--hover-bg);}
 .btn-spot{background:var(--spot);}
 .btn-spot:hover{background:var(--spot);filter:brightness(1.08);}
-.actions{display:flex;flex-wrap:wrap;gap:0.6rem 1rem;align-items:center;}
+.actions{display:flex;flex-wrap:wrap;gap:0.6rem 1rem;align-items:center;text-wrap:pretty;}
 input[type="text"],input[type="password"],textarea{font:400 1rem/1.4 var(--mono);color:var(--ink);background:var(--paper);border:1px solid var(--ink);padding:0.5rem 0.6rem;max-width:100%;}
 textarea{width:100%;resize:vertical;}
 label{display:block;font:500 0.85rem/1.4 var(--sans);}
