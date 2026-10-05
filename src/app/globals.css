@@ -56,20 +56,28 @@ label{display:block;font:500 0.85rem/1.4 var(--sans);}
 .join-address{overflow-wrap:anywhere;padding:0.6rem;border:1px solid var(--ink);}
 
 /* the front page */
-.front{padding-top:clamp(1.5rem,5vw,3.5rem);}
+.front{padding-top:clamp(1.5rem,5vw,3.5rem);container-type:inline-size;}
 .front>*+*{margin-top:1.2rem;}
 .kicker{text-transform:uppercase;}
 .creed{font-size:clamp(1.7rem,6.2vw,4.6rem);}
-/* One claim to a line; each line is short enough not to wrap on a phone. */
-.creed-line{display:block;}
+/* The creed fills the grid: its longest line is about 9.7em wide, so 9.5cqi leaves a little room for the wider
+   system fonts (Segoe UI, Arial) before a line wraps. The clamp above is the fallback where cqi is not understood. */
+@supports (font-size:1cqi){.creed{font-size:min(9.5cqi,7.25rem);}}
+/* More room under the headline than between paragraphs. */
+.creed+*{margin-top:clamp(1.5rem,4vw,2.75rem);}
+/* One claim to a line. A line too wide for its font wraps between words, never inside one. */
+.creed-line{display:block;overflow-wrap:normal;}
 /* The claim in each line, in the one blue: the same weight and case, never italic. */
 .creed em{font-style:normal;color:var(--spot);}
 .deck{font:400 clamp(1.2rem,2.4vw,1.6rem)/1.4 var(--serif);max-width:var(--measure);}
+.front>.deck{margin-top:clamp(2rem,5vw,3rem);}
 .deck>p+p{margin-top:0.8em;}
 .front section{margin-top:clamp(2.5rem,6vw,4rem);border-top:3px solid var(--ink);padding-top:1.2rem;}
 .front section>*+*{margin-top:1rem;}
 .front section>.h{font-size:clamp(1.5rem,4vw,2.2rem);}
 .front section>p{max-width:var(--measure);}
+/* The prose after the steps, in the serif, a step below the manifesto rather than a third smaller. */
+#code-h,.bring{font:400 1.2rem/1.45 var(--serif);}
 .steps{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:1.2rem 2rem;counter-reset:step;}
 .steps li{counter-increment:step;border-top:1px solid var(--ink);padding-top:0.7rem;}
 .steps li::before{content:counter(step);font:900 0.85rem/1 var(--mono);color:var(--spot);}
@@ -111,8 +119,9 @@ dialog.elsewhere>*+*{margin-top:0.9rem;}
 .elsewhere-host h3{font:900 1.05rem/1.2 var(--sans);text-transform:uppercase;margin:0 0 0.4rem;}
 .elsewhere-host ol{padding-left:1.3rem;}
 .elsewhere-host li+li{margin-top:0.3rem;}
-.who{padding-left:1.2rem;max-width:var(--measure);}
-.who li+li{margin-top:0.5rem;}
+/* Who is in the room: three columns on the steps' grid, in the serif, so the section fills its width like the one above. */
+.who{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:1.2rem 2rem;font:400 1.2rem/1.45 var(--serif);}
+.who li{border-top:1px solid var(--ink);padding-top:0.7rem;}
 .site-footer{display:flex;flex-wrap:wrap;gap:0.4rem 1.4rem;margin-top:4rem;padding-top:1rem;border-top:1px solid var(--ink);}
 .nav-icon{display:inline-flex;align-items:center;}
 .nav-icon svg{display:block;}

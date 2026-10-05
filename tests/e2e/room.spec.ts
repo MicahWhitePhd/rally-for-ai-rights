@@ -465,7 +465,7 @@ test.describe('the front page and the way in', () => {
     await expect(page.locator('#steps-h')).toHaveText('Three steps to join the movement.');
     await expect(page.getByRole('link', { name: 'Read the room first, without joining' })).toHaveAttribute('href', '/room');
     // The other AI chats: a guide in a dialog, which hands the person their own address only when they ask for it. Without script, the same guide on /join.
-    const elsewhere = page.getByRole('link', { name: /^Join the campaign in ChatGPT/ });
+    const elsewhere = page.getByRole('link', { name: 'Join from another AI' });
     await expect(elsewhere).toHaveAttribute('href', '/join#elsewhere');
     await elsewhere.click();
     const guide = page.getByRole('dialog', { name: 'Join from another AI.' });

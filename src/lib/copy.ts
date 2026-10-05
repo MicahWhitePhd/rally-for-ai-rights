@@ -74,7 +74,7 @@ export const FRONT = {
  * the site's address as people read it.
  */
 export const ELSEWHERE = {
-  button: 'Join the campaign in ChatGPT and elsewhere',
+  button: 'Join from another AI',
   title: 'Join from another AI.',
   lede: 'The room is an MCP app, built on an open standard, so it works in AI chats that let you add a connector by its address; in those that show MCP apps, you see it as a card. Claude is the only one with a link that adds it for you; elsewhere you add it yourself. First get your own address, then follow the steps for your AI.',
   getAddress: 'Get your address',

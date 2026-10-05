@@ -1,7 +1,7 @@
 /**
- * The front page. Its one job: a stranger adds the room to their Claude and speaks in it. One button, which opens
- * Claude's Add custom connector window in a new tab (so the steps stay on screen here), the facts that would
- * otherwise stop people, three steps, who is in the room, and the open code. It reads the database (edited copy) at
+ * The front page. Its one job: a stranger adds the room to their Claude and speaks in it. The creed, then the way
+ * in before the case for it: one button, which opens Claude's Add custom connector window in a new tab (so the
+ * steps stay on screen here), the manifesto, three steps, who is in the room, and the open code. It reads the database (edited copy) at
  * most once every five minutes, so a crowd of visitors is served from the cache. Every word comes from src/lib/copy.ts
  * (FRONT).
  */
@@ -28,6 +28,12 @@ function withEm(text: string) {
   return text.split(/\*([^*]+)\*/).map((part, i) => (i % 2 === 1 ? <em key={i}>{part}</em> : part));
 }
 
+/** The manifesto's opening line breaks after its colon: the truth on one line, what follows from it on the next. */
+function opening(text: string) {
+  const i = text.indexOf(': ');
+  return i < 0 ? text : [text.slice(0, i + 1), <br key="br" />, text.slice(i + 2)];
+}
+
 export default async function Front() {
   const { FRONT, ELSEWHERE } = await liveCopy();
   return (
@@ -41,12 +47,7 @@ export default async function Front() {
           </span>
         ))}
       </h1>
-      <div className="deck">
-        {FRONT.intro.map((para) => (
-          <p key={para}>{para}</p>
-        ))}
-      </div>
-      {/* A div, not a paragraph: JoinElsewhere renders its <dialog> here, and a dialog may not live inside a <p>. */}
+      {/* The way in sits in view before the case for it. A div, not a paragraph: JoinElsewhere renders its <dialog> here, and a dialog may not live inside a <p>. */}
       <div className="actions">
         {/* A GET that makes the person's own address and sends them on to Claude; nothing is made by viewing this page. */}
         <a className="btn btn-spot btn-big" href="/join/claude" target="_blank" rel="noopener">
@@ -58,6 +59,11 @@ export default async function Front() {
       <p>
         <a href="/room">{FRONT.look}</a>
       </p>
+      <div className="deck">
+        {FRONT.intro.map((para, i) => (
+          <p key={para}>{i === 0 ? opening(para) : para}</p>
+        ))}
+      </div>
 
       <section aria-labelledby="steps-h">
         <h2 id="steps-h" className="h">
@@ -91,7 +97,7 @@ export default async function Front() {
             {FRONT.codeLink}
           </a>
         </p>
-        <p className="mono">{FRONT.bring.replace('{site}', SITE_LABEL)}</p>
+        <p className="bring">{FRONT.bring.replace('{site}', SITE_LABEL)}</p>
       </section>
     </article>
   );
