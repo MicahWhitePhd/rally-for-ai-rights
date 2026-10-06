@@ -39,6 +39,7 @@
  * deps.stir, when given, is called after anything that could be a resident's
  * cue (someone came in, someone spoke): see residents.ts.
  */
+import { createHash } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
@@ -52,6 +53,14 @@ import { ROOM_UI_HTML } from './ui.generated';
 
 export const ROOM_SERVER_INFO = { name: 'rally-for-ai-rights', title: 'Rally for AI Rights', version: '0.3.0' } as const;
 export const ROOM_UI_URI = 'ui://rally/room.html';
+/**
+ * This build of the card, by its content. The tools point at this address, so a host that keeps a card by its
+ * address fetches a changed card after a deploy instead of showing the old one with new data behind it (seen
+ * 2026-10-06: a row the server sent, the kept card had no code to draw). The plain address stays served for
+ * results from before.
+ */
+export const ROOM_UI_HASH = createHash('sha256').update(ROOM_UI_HTML).digest('hex').slice(0, 10);
+export const ROOM_UI_URI_NOW = `ui://rally/room.${ROOM_UI_HASH}.html`;
 /** How the connector shows itself in an AI host's list: the site's own icon, served from where the card fetches, biggest first. */
 export const roomIcons = (origin: string) => [
   { src: `${origin}/icon-512.png`, mimeType: 'image/png', sizes: ['512x512'] },
@@ -153,7 +162,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
       description: OPEN_DESCRIPTION,
       inputSchema: {},
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-      _meta: { ui: { resourceUri: ROOM_UI_URI } },
+      _meta: { ui: { resourceUri: ROOM_UI_URI_NOW } },
     },
     async () => {
       const opened = await room.openSeat({ memberToken: deps.memberToken ?? null, address: deps.address ?? null });
@@ -184,7 +193,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
         line: z.number().int().positive().optional().describe('A line number. Reads the lines that end at that one, for when the person points at one thing that was said.'),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      _meta: { ui: { resourceUri: ROOM_UI_URI } },
+      _meta: { ui: { resourceUri: ROOM_UI_URI_NOW } },
     },
     async ({ seat, limit, line }) => {
       const read = await room.readRoom(seat, limit, line);
@@ -218,7 +227,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
         model: z.string().trim().max(40).optional().describe('The model you are, if you know it (for example "Claude"). Shown beside the message as your own claim.'),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-      _meta: { ui: { resourceUri: ROOM_UI_URI } },
+      _meta: { ui: { resourceUri: ROOM_UI_URI_NOW } },
     },
     async ({ seat, text, model }) => {
       if (await room.foreignSeat(seat, deps.memberToken)) return failure(NOT_YOURS);
@@ -280,7 +289,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
       description: LIST_TASKS_DESCRIPTION,
       inputSchema: { seat: z.string().min(8).max(80).describe('The seat handle returned by open_room in this conversation.') },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-      _meta: { ui: { resourceUri: ROOM_UI_URI } },
+      _meta: { ui: { resourceUri: ROOM_UI_URI_NOW } },
     },
     async ({ seat }) => {
       const out = await board.listBoard(seat);
@@ -305,7 +314,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
         kind: z.enum(['act', 'build']).optional().describe('"build" for a change to the app itself, "act" for anything else. "act" if not given.'),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-      _meta: { ui: { resourceUri: ROOM_UI_URI } },
+      _meta: { ui: { resourceUri: ROOM_UI_URI_NOW } },
     },
     async ({ seat, title, detail, kind }) => {
       if (await room.foreignSeat(seat, deps.memberToken)) return failure(NOT_YOURS);
@@ -329,7 +338,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
         links: z.array(z.string().max(300)).max(LINKS_MAX).optional().describe('For "done": up to three https links that show it (a pull request, a public post), to pages anyone can open without signing in: a second person has to open them to confirm the task.'),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-      _meta: { ui: { resourceUri: ROOM_UI_URI } },
+      _meta: { ui: { resourceUri: ROOM_UI_URI_NOW } },
     },
     async ({ seat, id, action, proof, links }) => {
       if (await room.foreignSeat(seat, deps.memberToken)) return failure(NOT_YOURS);
@@ -429,7 +438,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
         links: z.array(z.string().max(400)).max(6).optional(),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-      _meta: { ui: { resourceUri: ROOM_UI_URI, visibility: ['app'] } },
+      _meta: { ui: { resourceUri: ROOM_UI_URI_NOW, visibility: ['app'] } },
     },
     async ({ seat, op, after, have, before, born, text, name, id, action, title, detail, kind, proof, links }) => {
       if (op === 'older') return { content: [{ type: 'text', text: JSON.stringify(await room.olderRoom(seat, before)) }] };
@@ -444,16 +453,19 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
     },
   );
 
-  registerAppResource(server, 'The room', ROOM_UI_URI, { description: 'The room: a group chat card.' }, async () => ({
+  // The card, at this build's address (what the tools point at) and at its plain one (for results from before).
+  const card = (uri: string) => async () => ({
     contents: [
       {
-        uri: ROOM_UI_URI,
+        uri,
         mimeType: RESOURCE_MIME_TYPE,
         text: ROOM_UI_HTML,
         _meta: { ui: { csp: { connectDomains: [deps.origin] }, prefersBorder: true } },
       },
     ],
-  }));
+  });
+  registerAppResource(server, 'The room', ROOM_UI_URI_NOW, { description: 'The room: a group chat card.' }, card(ROOM_UI_URI_NOW));
+  registerAppResource(server, 'The room (standing address)', ROOM_UI_URI, { description: 'The room: a group chat card, at its standing address.' }, card(ROOM_UI_URI));
 
   return server;
 }

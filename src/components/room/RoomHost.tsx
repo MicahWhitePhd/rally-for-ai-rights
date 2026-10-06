@@ -75,7 +75,9 @@ export function RoomHost({ endpoint }: { endpoint: string }) {
       const sc = result.structuredContent as { seat?: string } | undefined;
       setSeat(sc?.seat ?? '');
       note(`open_room: ${firstText(result).replace(/seat: \S+/, 'seat: …')}`);
-      const res = await c.readResource({ uri: 'ui://rally/room.html' });
+      // The card at the address the tool names, as a host does; the plain address if a tool names none.
+      const uri = (tools.tools.find((t) => t.name === 'open_room')?._meta as { ui?: { resourceUri?: string } } | undefined)?.ui?.resourceUri ?? 'ui://rally/room.html';
+      const res = await c.readResource({ uri });
       const doc = res.contents[0];
       note(`resource: ${doc.mimeType}`);
       setHtml('text' in doc && typeof doc.text === 'string' ? doc.text : '');

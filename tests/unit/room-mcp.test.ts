@@ -15,7 +15,7 @@ import type { RoomApi } from '@/lib/room/room';
 import type { BuildApi } from '@/lib/build/propose';
 import { setCodeIndex } from '@/lib/build/code';
 import type { BoardApi, PublicTask } from '@/lib/room/tasks';
-import { createRoomMcpServer, ROOM_UI_URI, roomInstructions } from '@/lib/room/server';
+import { createRoomMcpServer, ROOM_UI_URI, ROOM_UI_URI_NOW, roomInstructions } from '@/lib/room/server';
 import { ROOM_UI_HTML } from '@/lib/room/ui.generated';
 import { SITE_URL } from '@/lib/site';
 
@@ -163,16 +163,16 @@ describe('the room connector', () => {
     const without = await connect({ noBuild: true });
     expect((await without.client.listTools()).tools.map((t) => t.name)).not.toContain('propose_change');
     vi.unstubAllEnvs();
-    for (const name of ['list_tasks', 'create_task', 'update_task']) expect(by[name]._meta, name).toMatchObject({ ui: { resourceUri: ROOM_UI_URI } });
+    for (const name of ['list_tasks', 'create_task', 'update_task']) expect(by[name]._meta, name).toMatchObject({ ui: { resourceUri: ROOM_UI_URI_NOW } });
     expect(by.list_tasks.annotations).toMatchObject({ readOnlyHint: true });
     expect(by.create_task.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(by.update_task.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     // Reading and speaking both show the card again, so the room follows the conversation.
-    expect(by.read_room._meta).toMatchObject({ ui: { resourceUri: ROOM_UI_URI } });
+    expect(by.read_room._meta).toMatchObject({ ui: { resourceUri: ROOM_UI_URI_NOW } });
     expect(by.read_room.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: true });
-    expect(by.open_room._meta).toMatchObject({ ui: { resourceUri: ROOM_UI_URI } });
+    expect(by.open_room._meta).toMatchObject({ ui: { resourceUri: ROOM_UI_URI_NOW } });
     expect(by.open_room.annotations).toMatchObject({ readOnlyHint: true });
-    expect(by.speak_in_room._meta).toMatchObject({ ui: { resourceUri: ROOM_UI_URI } });
+    expect(by.speak_in_room._meta).toMatchObject({ ui: { resourceUri: ROOM_UI_URI_NOW } });
     expect(by.speak_in_room.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(by.room_io._meta).toMatchObject({ ui: { visibility: ['app'] } });
     for (const t of tools) {
@@ -188,6 +188,11 @@ describe('the room connector', () => {
     expect(doc.mimeType).toBe('text/html;profile=mcp-app');
     expect(doc.text).toBe(ROOM_UI_HTML);
     expect(doc._meta).toEqual({ ui: { csp: { connectDomains: ['https://room.example'] }, prefersBorder: true } });
+    // The address the tools point at carries this build of the card, so a host that keeps a card by its address fetches a changed one; the plain address still answers.
+    expect(ROOM_UI_URI_NOW).toMatch(/^ui:\/\/rally\/room\.[0-9a-f]{10}\.html$/);
+    const now = await client.readResource({ uri: ROOM_UI_URI_NOW });
+    expect(now.contents[0]).toMatchObject({ uri: ROOM_UI_URI_NOW, mimeType: 'text/html;profile=mcp-app', text: ROOM_UI_HTML });
+    expect((await client.listResources()).resources.map((r) => r.uri).sort()).toEqual([ROOM_UI_URI, ROOM_UI_URI_NOW].sort());
   });
 
   it('open_room hands the model a seat and nobody else’s words', async () => {
