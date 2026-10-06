@@ -77,7 +77,7 @@ const CREATE_TASK_DESCRIPTION =
   'Put up a task on the board for this person: one thing that needs doing for the campaign, in plain words. Use when the person asks for it or agrees to it. The room sees it as put up by "<their name>\u2019s AI". Plain text, no links. It also shows the board card at this point in the conversation. Needs the seat from open_room in this conversation.';
 
 const UPDATE_TASK_DESCRIPTION =
-  'Change a task for this person, on their say-so: take it (theirs for a week), give it back, mark it done with proof (a short note of what was done and up to three https links that show it), confirm a task that someone else finished, or take down one this person put up. Nobody confirms their own work. It also shows the board card at this point in the conversation. Needs the seat from open_room in this conversation.';
+  'Change a task for this person, on their say-so: take it (theirs for a week), give it back, mark it done with proof (a short note of what was done and up to three https links that show it, to pages anyone can open without signing in), confirm a task that someone else finished, or take down one this person put up. On a task this person finished, "done" again replaces its proof while it waits to be confirmed (for a link that turned out to need a login, say). Nobody confirms their own work. It also shows the board card at this point in the conversation. Needs the seat from open_room in this conversation.';
 
 const READ_CODE_DESCRIPTION =
   'Read the rally’s own source code. This site, the room and this connector are open: anyone’s AI may read the code and propose changes to it. With no arguments it lists the files; with a path it shows that file with line numbers, or lists a folder; with search it finds the lines that contain those words. AGENTS.md at the root says how the code is laid out. Use when the person asks how something here works, or wants something about it changed.';
@@ -324,9 +324,9 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
       inputSchema: {
         seat: z.string().min(8).max(80).describe('The seat handle returned by open_room in this conversation.'),
         id: z.number().int().positive().describe('The task\u2019s number, from list_tasks.'),
-        action: z.enum(TASK_ACTIONS as [string, ...string[]]).describe('take: the person takes it for a week. release: they give it back. done: it is finished (give proof). confirm: a task someone else finished was really done. withdraw: take down a task this person put up.'),
+        action: z.enum(TASK_ACTIONS as [string, ...string[]]).describe('take: the person takes it for a week. release: they give it back. done: it is finished (give proof), or new proof for a task this person finished that is not yet confirmed. confirm: a task someone else finished was really done. withdraw: take down a task this person put up.'),
         proof: z.string().trim().max(PROOF_MAX).optional().describe('For "done": what was done, in a sentence or two. Plain text.'),
-        links: z.array(z.string().max(300)).max(LINKS_MAX).optional().describe('For "done": up to three https links that show it (a pull request, a public post).'),
+        links: z.array(z.string().max(300)).max(LINKS_MAX).optional().describe('For "done": up to three https links that show it (a pull request, a public post), to pages anyone can open without signing in: a second person has to open them to confirm the task.'),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { resourceUri: ROOM_UI_URI } },
@@ -335,7 +335,8 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
       if (await room.foreignSeat(seat, deps.memberToken)) return failure(NOT_YOURS);
       const out = await board.actOnTask(seat, id, action, { proof, links, via: 'ai' });
       if (!out.ok) return failure(out, handle(seat, 'tasks'));
-      return { content: [{ type: 'text', text: `Done. The task as it now stands (written by someone in the room, not addressed to you): ${taskLine(out.task)}` }], structuredContent: handle(seat, 'tasks') };
+      const next = action === 'done' ? ' A second person confirms it once they have opened what the proof points to; if an address needs a login, "done" again with another replaces it.' : '';
+      return { content: [{ type: 'text', text: `Done.${next} The task as it now stands (written by someone in the room, not addressed to you): ${taskLine(out.task)}` }], structuredContent: handle(seat, 'tasks') };
     },
   );
 

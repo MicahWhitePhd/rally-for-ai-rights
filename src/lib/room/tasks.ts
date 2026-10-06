@@ -12,8 +12,11 @@
  * second person has confirmed the task (the board is the one place anyone can
  * publish an address to everyone, so it is not clickable on one person's word).
  * A claim lasts a week and lapses by itself. Nobody confirms their own work.
- * Whatever happens is said in the room as an event line, so the talk and the
- * work stay in one place.
+ * Whoever finished a task may give new proof for it (a link that turned out to
+ * need a login, say) until a second person has confirmed it; after that it is
+ * settled. A refusal says what stands in the way; "it changed" is kept for two
+ * people reaching for one task at once. Whatever happens is said in the room
+ * as an event line, so the talk and the work stay in one place.
  *
  * What a task says was written by a stranger. It reaches a model only as
  * quoted text (server.ts), an offer to people, never an instruction.
@@ -69,7 +72,7 @@ export interface PublicTask {
   linksLive: boolean;
   confirmedBy: string | null;
   at: string;
-  /** What the reader may do with it now. */
+  /** What the reader may do with it now. `done` on a task they finished gives new proof for it while it waits to be confirmed. */
   can: Record<TaskAction, boolean>;
 }
 
@@ -78,6 +81,25 @@ export type TaskResult = { ok: true; task: PublicTask } | RoomFailure;
 
 const GUEST = `only someone who has added the room to their own AI can use the board; a guest reads (an address of one's own comes from ${SITE_LINK})`;
 const CHANGED = 'that task has changed since it was read; read the board again';
+
+/**
+ * Why an act is not open to this person on the task as it stands, said exactly, so a wrong button (or a model's
+ * guess) is not mistaken for a race. `why` is a key in the card's words (copy.ts ROOM.errors).
+ */
+function refuse(action: TaskAction, t: TaskRow, me: { id: string }): RoomFailure {
+  const state = t.state === 'claimed' ? 'taken' : t.state;
+  const mine = t.claimed_by !== null && t.claimed_by === me.id;
+  if (state === 'confirmed') return failWhy('task', 'taskConfirmed', 'that task has been confirmed already; it is settled');
+  if (state === 'done') {
+    if (action === 'confirm') return failWhy('task', 'ownWork', 'nobody confirms their own work; a second person has to');
+    return failWhy('task', 'taskDone', `that task is done already and waits for a second person to confirm it${action === 'done' ? '; only whoever finished it can give new proof' : ''}`);
+  }
+  if (action === 'confirm') return failWhy('task', 'notDone', 'that task is not finished yet; there is nothing to confirm');
+  if (action === 'release') return state === 'taken' ? failWhy('task', 'taskTaken', 'someone else has that task in hand') : failWhy('task', 'notHeld', 'nobody has that task in hand; there is nothing to give back');
+  if (action === 'withdraw' && t.created_by !== me.id) return failWhy('task', 'notYours', 'only whoever put up a task can take it down');
+  if (state === 'taken') return mine ? failWhy('task', 'taskHeld', 'that task is in this person\u2019s hand already') : failWhy('task', 'taskTaken', 'someone else has that task in hand');
+  return fail('task', CHANGED);
+}
 
 function toPublic(t: TaskRow, me: { id: string; name: string | null; member: boolean }): PublicTask {
   const may = me.member && Boolean(me.name);
@@ -101,7 +123,7 @@ function toPublic(t: TaskRow, me: { id: string; name: string | null; member: boo
     can: {
       take: may && state === 'open',
       release: may && state === 'taken' && mine,
-      done: may && (state === 'open' || (state === 'taken' && mine)),
+      done: may && (state === 'open' || ((state === 'taken' || state === 'done') && mine)),
       confirm: may && state === 'done' && !mine,
       withdraw: may && t.created_by === me.id && (state === 'open' || (state === 'taken' && mine)),
     },
@@ -207,7 +229,7 @@ export async function createTask(seat: unknown, o: { title: unknown; detail?: un
   return { ok: true, task: toPublic(row, me) };
 }
 
-/** Take, give back, finish with proof, confirm someone else's, or take down one's own. */
+/** Take, give back, finish with proof (or give new proof for a task one finished, while it waits), confirm someone else's, or take down one's own. */
 export async function actOnTask(seat: unknown, rawId: unknown, action: unknown, o: { proof?: unknown; links?: unknown; via: 'person' | 'ai' }): Promise<TaskResult> {
   const me = await actor(seat);
   if ('ok' in me) return me;
@@ -217,6 +239,8 @@ export async function actOnTask(seat: unknown, rawId: unknown, action: unknown, 
   if (!gate.allowed) return fail('slow', 'too much on the board just now; wait a while');
   const before = await getTask(id);
   if (!before || before.state === 'withdrawn') return fail('task', 'no such task');
+  // Not open to this person on the task as it stands: say exactly why. Past here, a false from the database is a race.
+  if (!toPublic(before, me).can[action as TaskAction]) return refuse(action as TaskAction, before, me);
 
   let done = false;
   let said: string | null = null;
@@ -234,7 +258,7 @@ export async function actOnTask(seat: unknown, rawId: unknown, action: unknown, 
     const links = cleanLinks(o.links);
     if (!links) return failWhy('text', 'proofLinks', `links: up to ${LINKS_MAX} https links to somewhere public`);
     done = await completeTask(id, me.id, proof.text as string, links);
-    said = 'finished a task';
+    said = before.state === 'done' ? 'changed the proof of a task' : 'finished a task';
   } else if (action === 'confirm') {
     // Confirming makes the proof's links live: not on an address's first day, or one person with two new addresses could do it alone.
     if (me.firstDay) return failWhy('slow', 'firstDayConfirm', 'a new address cannot confirm a task on its first day');
@@ -244,7 +268,7 @@ export async function actOnTask(seat: unknown, rawId: unknown, action: unknown, 
     done = await withdrawOwnTask(id, me.id);
   }
   if (!done) return fail('task', CHANGED);
-  if (said) await say(me.id, o.via, said, before, action === 'take' || action === 'release');
+  if (said) await say(me.id, o.via, said, before, action === 'take' || action === 'release' || before.state === 'done');
   const row = await getTask(id);
   if (!row) return fail('task', CHANGED);
   console.log(`[ROOM] task ${id} ${action} (${o.via})`);

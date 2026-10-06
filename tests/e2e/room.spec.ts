@@ -266,7 +266,7 @@ test.describe('the room', () => {
   test('the board: put up, taken, finished with proof and confirmed by a second pair, against the real database', async ({ request, page }) => {
     const post = async (op: string, body: Record<string, unknown>) => {
       const res = await request.post(`/api/room/${op}`, { data: body });
-      return { status: res.status(), body: (await res.json()) as { ok: boolean; code?: string; task?: { id: number; state: string; taker: { name: string } | null; can: Record<string, boolean>; links: string[] }; tasks?: Array<{ id: number; state: string; taker: unknown; can: Record<string, boolean> }>; messages?: Array<{ kind: string; name: string; text: string; model: string | null }> } };
+      return { status: res.status(), body: (await res.json()) as { ok: boolean; code?: string; why?: string; task?: { id: number; state: string; taker: { name: string } | null; can: Record<string, boolean>; links: string[] }; tasks?: Array<{ id: number; state: string; taker: unknown; can: Record<string, boolean> }>; messages?: Array<{ kind: string; name: string; text: string; model: string | null }> } };
     };
     const made = await post('task-new', { seat, title: `Write to one lab (${tag})`, detail: 'One paragraph, your own words.' });
     expect(made.status).toBe(201);
@@ -283,9 +283,16 @@ test.describe('the room', () => {
     expect((await post('task-act', { seat: peerSeat, id, action: 'done', proof: 'x' })).status).toBe(422);
     expect((await post('task-act', { seat: peerSeat, id, action: 'done', proof: 'Sent the letter.', links: ['http://example.org'] })).status).toBe(422);
     const done = await post('task-act', { seat: peerSeat, id, action: 'done', proof: `Sent the letter (${tag}).`, links: ['https://example.org/letter'] });
-    expect(done.body.task).toMatchObject({ state: 'done', links: ['https://example.org/letter'] });
-    expect((await post('task-act', { seat: peerSeat, id, action: 'confirm' })).status).toBe(409);
-    expect((await post('task-act', { seat, id, action: 'confirm' })).body.task).toMatchObject({ state: 'confirmed' });
+    expect(done.body.task).toMatchObject({ state: 'done', links: ['https://example.org/letter'], can: { done: true, release: false } });
+    // The link turned out to need a login: whoever finished it gives new proof while it waits (the third review, 2026-10-06). Nobody
+    // else can, and the refusal says whose it is rather than that the task changed.
+    const amended = await post('task-act', { seat: peerSeat, id, action: 'done', proof: `Sent the letter; the copy is open to anyone now (${tag}).`, links: ['https://example.org/letter-public'] });
+    expect(amended.body.task).toMatchObject({ state: 'done', links: ['https://example.org/letter-public'], can: { done: true } });
+    const notTheirs = await post('task-act', { seat, id, action: 'done', proof: 'Mine instead of theirs.' });
+    expect([notTheirs.status, notTheirs.body.why]).toEqual([409, 'taskDone']);
+    expect((await post('task-act', { seat: peerSeat, id, action: 'confirm' })).body).toMatchObject({ ok: false, code: 'task', why: 'ownWork' });
+    expect((await post('task-act', { seat, id, action: 'confirm' })).body.task).toMatchObject({ state: 'confirmed', can: { done: false } });
+    expect((await post('task-act', { seat: peerSeat, id, action: 'done', proof: 'Once more, after the fact.' })).body).toMatchObject({ ok: false, code: 'task', why: 'taskConfirmed' });
 
     // Two people reaching for one task: one gets it. A claim past its date reads as open and can be taken.
     const second = (await post('task-new', { seat, title: `Find the contacts (${tag})` })).body.task!.id;
@@ -319,9 +326,9 @@ test.describe('the room', () => {
     await page.goto('/tasks');
     const row = page.locator('.task', { hasText: `Write to one lab (${tag})` });
     await expect(row).toContainText(`Done by ${peer}, confirmed by ${me}.`);
-    await expect(row).toContainText(`Sent the letter (${tag}).`);
+    await expect(row).toContainText(`Sent the letter; the copy is open to anyone now (${tag}).`);
     await expect(row.locator('a')).toHaveAttribute('rel', /nofollow/);
-    await expect(row.locator('a')).toHaveAttribute('href', 'https://example.org/letter');
+    await expect(row.locator('a')).toHaveAttribute('href', 'https://example.org/letter-public');
   });
 
   test('a change to the code, proposed from a chat: checked against the code as it stands, kept, published for the job that opens pull requests, and shown on the board page', async ({ request, page }) => {
@@ -431,10 +438,19 @@ test.describe('the room', () => {
     await card.getByRole('button', { name: 'It is done' }).click();
     await expect(task.locator('.st')).toHaveText('Done');
     await expect(task).toContainText(`Drafted and posted in the room (${tag}).`);
-    // Until a second person confirms it, the proof address is shown as plain text, not a link: the whole host, then the path.
+    // Until a second person confirms it, the proof address is shown as plain text, not a link, and whole, so they can copy it and go and look.
     await expect(task.locator('a.tl')).toHaveCount(0);
-    await expect(task.locator('span.tl')).toHaveText('example.org/draft');
+    await expect(task.locator('span.tl')).toHaveText('https://example.org/draft');
     await expect(task.getByRole('button', { name: 'Confirm it was done' })).toHaveCount(0);
+    // The link turned out to need a login: the proof can be changed while it waits. The form comes back filled in, and the new address replaces the old.
+    await task.getByRole('button', { name: 'Change the proof' }).click();
+    await expect(card.locator('#task-proof')).toHaveValue(`Drafted and posted in the room (${tag}).`);
+    await expect(card.locator('#task-link')).toHaveValue('https://example.org/draft');
+    await card.locator('#task-link').fill('https://example.org/draft-public');
+    await card.getByRole('button', { name: 'Keep the new proof' }).click();
+    await expect(task.locator('.st')).toHaveText('Done');
+    await expect(task.locator('span.tl')).toHaveText('https://example.org/draft-public');
+    await expect(task.getByRole('button', { name: 'Change the proof' })).toHaveCount(1);
     // Back in the talk, what happened on the board is there as lines of its own, and pressing one turns the card to the board.
     await card.getByRole('tab', { name: 'Room', exact: true }).click();
     await expect(card.locator('.ev', { hasText: `${me} finished a task: “Draft the letter (${tag})”` })).toHaveCount(1);

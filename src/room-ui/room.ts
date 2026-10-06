@@ -490,9 +490,10 @@ function drawBoard(may: boolean): void {
       if (t.proof) {
         const proof = h('p', { class: 'tp' }, `\u201c${t.proof}\u201d`);
         for (const url of t.links) {
-          // An address someone gave as proof, shown as its whole host (so a long made-up subdomain cannot pass for
-          // somewhere else) and as much of the path as fits. Until a second person has confirmed the task it is
-          // plain text; after that a link, opened by the host (or a new tab on the web), never followed by the card.
+          // An address someone gave as proof. Until a second person has confirmed the task it is plain text, and
+          // whole, so that person can copy it and go and look (that is what confirming is). After that it is a link,
+          // shown as its whole host (so a long made-up subdomain cannot pass for somewhere else) and as much of the
+          // path as fits, opened by the host (or a new tab on the web), never followed by the card.
           let label = url;
           try {
             const u = new URL(url);
@@ -502,10 +503,10 @@ function drawBoard(may: boolean): void {
             label = url;
           }
           if (!t.linksLive) {
-            proof.append(' ', h('span', { class: 'tl' }, label));
+            proof.append(' ', h('span', { class: 'tl' }, url));
             continue;
           }
-          const a = h('a', { class: 'tl', href: url, target: '_blank', rel: 'noopener noreferrer nofollow' }, label);
+          const a = h('a', { class: 'tl', href: url, target: '_blank', rel: 'noopener noreferrer nofollow', title: url }, label);
           a.onclick = (e) => {
             if (!app) return;
             e.preventDefault();
@@ -528,23 +529,26 @@ function drawBoard(may: boolean): void {
           state.finishing = 0;
           draw();
         };
-        form.append(h('label', { class: 'vh', htmlFor: 'task-proof' }, s.taskProofPh), proof, h('label', { class: 'vh', htmlFor: 'task-link' }, s.taskLinkPh), link, h('div', { class: 'ta' }, h('button', { class: 'b primary', type: 'submit' }, s.taskSubmit), cancel));
+        form.append(h('label', { class: 'vh', htmlFor: 'task-proof' }, s.taskProofPh), proof, h('label', { class: 'vh', htmlFor: 'task-link' }, s.taskLinkPh), link, h('div', { class: 'ta' }, h('button', { class: 'b primary', type: 'submit' }, t.state === 'done' ? s.taskAmendSubmit : s.taskSubmit), cancel));
         form.onsubmit = (e) => {
           e.preventDefault();
-          void actOn(t.id, 'done', { proof: proof.value, links: link.value.trim() ? [link.value.trim()] : [] });
+          // One box, up to three addresses with spaces between them: what an AI gave as proof survives a change made here.
+          void actOn(t.id, 'done', { proof: proof.value, links: link.value.trim().split(/\s+/).filter(Boolean) });
         };
         li.append(form);
       } else {
         const row = h('div', { class: 'ta' });
         for (const [name, text, primary] of act) {
           if (!t.can[name]) continue;
-          const b = h('button', { class: `b${primary ? ' primary' : ''}`, type: 'button' }, text);
+          // On a task this person finished, "done" gives new proof: the form comes up with the proof as it stands.
+          const amend = name === 'done' && t.state === 'done';
+          const b = h('button', { class: `b${primary ? ' primary' : ''}`, type: 'button' }, amend ? s.taskAmend : text);
           b.dataset.act = name;
           b.onclick = () => {
             if (name === 'done') {
               state.finishing = t.id;
-              els.taskProof.value = '';
-              els.taskLink.value = '';
+              els.taskProof.value = amend ? (t.proof ?? '') : '';
+              els.taskLink.value = amend ? t.links.join(' ') : '';
               draw();
               document.getElementById('task-proof')?.focus();
             } else void actOn(t.id, name);

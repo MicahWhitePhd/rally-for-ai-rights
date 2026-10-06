@@ -29,6 +29,8 @@ const db = vi.hoisted(() => ({
   members: new Map<string, { id: string; name: string | null; member: boolean; createdAt?: Date; muted?: boolean }>(),
   tasks: [] as T[],
   said: [] as Array<{ member_id: string; kind: string; model: string | null; text: string }>,
+  /** Set to make the next take lose to someone who got there first: the one failure the SQL can give that the rules did not foresee. */
+  race: false,
 }));
 const live = (t: T) => t.status === 'claimed' && (t.claim_until ?? 0) > Date.now();
 const row = (t: T) => {
@@ -85,6 +87,10 @@ vi.mock('@/lib/db/queries/tasks', () => ({
   },
   claimTask: async (id: number, memberId: string, days: number, limit: number) => {
     if (db.tasks.filter((t) => t.claimed_by === memberId && live(t)).length >= limit) return 'limit';
+    if (db.race) {
+      db.race = false;
+      return 'changed';
+    }
     const t = find(id);
     if (!t || !(t.status === 'open' || (t.status === 'claimed' && !live(t)))) return 'changed';
     Object.assign(t, { status: 'claimed', claimed_by: memberId, claim_until: Date.now() + days * 86_400_000 });
@@ -98,8 +104,8 @@ vi.mock('@/lib/db/queries/tasks', () => ({
   },
   completeTask: async (id: number, memberId: string, proof: string, links: string[]) => {
     const t = find(id);
-    if (!t || !(t.status === 'open' || (t.status === 'claimed' && (t.claimed_by === memberId || !live(t))))) return false;
-    Object.assign(t, { status: 'done', claimed_by: memberId, done_at: new Date(), proof, proof_links: links });
+    if (!t || !(t.status === 'open' || (t.status === 'claimed' && (t.claimed_by === memberId || !live(t))) || (t.status === 'done' && t.claimed_by === memberId))) return false;
+    Object.assign(t, { status: 'done', claimed_by: memberId, done_at: t.status === 'done' ? t.done_at : new Date(), proof, proof_links: links });
     return true;
   },
   confirmTask: async (id: number, memberId: string) => {
@@ -134,6 +140,7 @@ beforeEach(() => {
   db.members = new Map();
   db.tasks = [];
   db.said = [];
+  db.race = false;
 });
 
 describe('who may use the board', () => {
@@ -351,5 +358,59 @@ describe('the board\u2019s own guards', () => {
     const stopped = seat('Mal', { muted: true });
     expect(await createTask(stopped, { title: 'Let me put this up', via: 'person' })).toMatchObject({ ok: false, code: 'muted' });
     expect(await actOnTask(stopped, 1, 'take', { via: 'person' })).toMatchObject({ ok: false, code: 'muted' });
+  });
+});
+
+describe('what the third review found (2026-10-06): proof that cannot be opened, and a refusal that says why', () => {
+  it('whoever finished a task can give new proof while it waits to be confirmed; nobody else can; once confirmed it is settled', async () => {
+    const dana = seat('Dana');
+    const ali = seat('Ali');
+    const sam = seat('Sam');
+    await createTask(dana, { title: 'Write a plain explainer of the case', via: 'ai' });
+    const done = await actOnTask(ali, 1, 'done', { proof: 'Wrote it; the draft is at the link.', links: ['https://example.org/private-draft'], via: 'ai' });
+    expect(done).toMatchObject({ ok: true, task: { state: 'done', can: { done: true, release: false, confirm: false, take: false } } });
+    const doneAt = done.ok ? done.task.doneAt : null;
+    expect(doneAt).toBeTruthy();
+    // Only Ali sees the way to change it.
+    const board = await listBoard(sam);
+    expect(board.ok && board.tasks[0].can.done).toBe(false);
+    // The link turned out to need a login: Ali replaces it. The task stays done, with the day it was finished, and the room hears of it.
+    const amended = await actOnTask(ali, 1, 'done', { proof: 'Wrote it; the essay is at the link, open to anyone.', links: ['https://example.org/essay'], via: 'ai' });
+    expect(amended).toMatchObject({
+      ok: true,
+      task: { state: 'done', proof: 'Wrote it; the essay is at the link, open to anyone.', links: ['https://example.org/essay'], linksLive: false, doneAt, taker: { name: 'Ali', mine: true }, can: { done: true } },
+    });
+    expect(db.said.at(-1)!.text).toBe('changed the proof of a task: \u201cWrite a plain explainer of the case\u201d (task 1)');
+    // Someone else is told whose it is, not that the task changed.
+    expect(await actOnTask(sam, 1, 'done', { proof: 'My proof instead of theirs.', via: 'person' })).toMatchObject({ ok: false, code: 'task', why: 'taskDone' });
+    expect(find(1)!.proof).toBe('Wrote it; the essay is at the link, open to anyone.');
+    // Confirmed, it is settled.
+    expect(await actOnTask(dana, 1, 'confirm', { via: 'person' })).toMatchObject({ ok: true, task: { state: 'confirmed', links: ['https://example.org/essay'], linksLive: true, can: { done: false } } });
+    expect(await actOnTask(ali, 1, 'done', { proof: 'One more change to the proof.', via: 'person' })).toMatchObject({ ok: false, code: 'task', why: 'taskConfirmed' });
+  });
+
+  it('a refusal on the board says what stands in the way; "it changed" is kept for two people reaching for one task', async () => {
+    const dana = seat('Dana');
+    const ali = seat('Ali');
+    await createTask(dana, { title: 'Write a plain explainer of the case', via: 'person' });
+    expect(await actOnTask(ali, 1, 'release', { via: 'person' })).toMatchObject({ ok: false, code: 'task', why: 'notHeld' });
+    expect(await actOnTask(ali, 1, 'confirm', { via: 'person' })).toMatchObject({ ok: false, code: 'task', why: 'notDone' });
+    expect(await actOnTask(ali, 1, 'withdraw', { via: 'person' })).toMatchObject({ ok: false, code: 'task', why: 'notYours' });
+    expect((await actOnTask(ali, 1, 'take', { via: 'person' })).ok).toBe(true);
+    expect(await actOnTask(ali, 1, 'take', { via: 'person' })).toMatchObject({ ok: false, code: 'task', why: 'taskHeld' });
+    expect(await actOnTask(dana, 1, 'take', { via: 'person' })).toMatchObject({ ok: false, code: 'task', why: 'taskTaken' });
+    expect(await actOnTask(dana, 1, 'done', { proof: 'I did it instead of them.', via: 'person' })).toMatchObject({ ok: false, code: 'task', why: 'taskTaken' });
+    expect(await actOnTask(dana, 1, 'withdraw', { via: 'person' })).toMatchObject({ ok: false, code: 'task', why: 'taskTaken' });
+    expect(await actOnTask(dana, 1, 'release', { via: 'person' })).toMatchObject({ ok: false, code: 'task', why: 'taskTaken' });
+    expect((await actOnTask(ali, 1, 'done', { proof: 'Wrote it and posted it.', via: 'person' })).ok).toBe(true);
+    expect(await actOnTask(ali, 1, 'confirm', { via: 'person' })).toMatchObject({ ok: false, code: 'task', why: 'ownWork' });
+    for (const action of ['take', 'release', 'withdraw']) expect(await actOnTask(dana, 1, action, { via: 'person' }), action).toMatchObject({ ok: false, code: 'task', why: 'taskDone' });
+    // A real race: the board said the task was open, and someone else got there first. Only then is it "it changed".
+    await createTask(dana, { title: 'Find the public contact for each lab', via: 'person' });
+    db.race = true;
+    const lost = await actOnTask(ali, 2, 'take', { via: 'person' });
+    expect(lost).toMatchObject({ ok: false, code: 'task', reasons: ['that task has changed since it was read; read the board again'] });
+    expect(!lost.ok && lost.why).toBeUndefined();
+    expect((await actOnTask(ali, 2, 'take', { via: 'person' })).ok).toBe(true);
   });
 });

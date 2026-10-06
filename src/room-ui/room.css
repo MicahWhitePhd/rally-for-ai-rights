@@ -72,6 +72,7 @@ body.full .board,body.web .board{flex:1 1 auto;min-height:8rem;overflow-y:auto}
 .td{margin:0;color:var(--tx2);white-space:pre-wrap;overflow-wrap:anywhere}
 .tp{color:var(--tx2);font:400 13px/1.45 var(--sans)}
 .tl{font:500 11px/1.4 var(--mono);color:var(--tx);text-underline-offset:3px;overflow-wrap:anywhere}
+span.tl{-webkit-user-select:all;user-select:all}
 .ta{display:flex;flex-wrap:wrap;gap:8px;margin-top:3px}
 .ta button.b{height:34px;font-size:13px;padding:0 12px}
 form.tdone{flex-direction:column;gap:6px;margin-top:3px}

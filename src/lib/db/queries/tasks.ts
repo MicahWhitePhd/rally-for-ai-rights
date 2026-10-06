@@ -100,11 +100,11 @@ export async function releaseTask(id: number, memberId: string): Promise<boolean
   return changed(`UPDATE room_tasks t SET status = 'open', claimed_by = NULL, claimed_at = NULL, claim_until = NULL, updated_at = now() WHERE t.id = $1 AND t.claimed_by = $2 AND ${LIVE} RETURNING t.id`, [id, memberId]);
 }
 
-/** Finished, with proof: by whoever holds it, or by anyone if nobody does. */
+/** Finished, with proof: by whoever holds it, or by anyone if nobody does. Whoever finished it may give new proof while it waits to be confirmed; the day it was finished stays. */
 export async function completeTask(id: number, memberId: string, proof: string, links: readonly string[]): Promise<boolean> {
   return changed(
-    `UPDATE room_tasks t SET status = 'done', claimed_by = $2, claimed_at = COALESCE(t.claimed_at, now()), done_at = now(), proof = $3, proof_links = $4::jsonb, updated_at = now()
-      WHERE t.id = $1 AND (t.status = 'open' OR (t.status = 'claimed' AND (t.claimed_by = $2 OR NOT ${LIVE}))) RETURNING t.id`,
+    `UPDATE room_tasks t SET status = 'done', claimed_by = $2, claimed_at = COALESCE(t.claimed_at, now()), done_at = CASE WHEN t.status = 'done' THEN t.done_at ELSE now() END, proof = $3, proof_links = $4::jsonb, updated_at = now()
+      WHERE t.id = $1 AND (t.status = 'open' OR (t.status = 'claimed' AND (t.claimed_by = $2 OR NOT ${LIVE})) OR (t.status = 'done' AND t.claimed_by = $2)) RETURNING t.id`,
     [id, memberId, proof, JSON.stringify(links)],
   );
 }
