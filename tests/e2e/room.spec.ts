@@ -142,6 +142,11 @@ test.describe('the room', () => {
     await expect(resident.locator('.gn')).toHaveText(house);
     await expect(resident.locator('.gl')).toHaveText('resident AI');
     await expect(page.locator('.here .c.self')).toHaveText(me);
+    // Someone who was in earlier today is listed apart, under "Lately": the second person closed their chat two hours ago.
+    await db().query(`UPDATE room_members SET last_seen_at = now() - interval '2 hours' WHERE id = $1`, [ids.peer]);
+    await expect(page.locator('.here .c.away', { hasText: peer })).toHaveCount(1, { timeout: 10_000 });
+    await expect(page.locator('.here .lab.lately')).toHaveText('Lately');
+    await expect(page.locator('.here .c', { hasText: peer })).toHaveCount(1);
     // Scrolling up fetches what came before, a page at a time, and keeps the reader's place.
     await expect(page.locator('.m', { hasText: `Filler 1 (${tag}).` })).toHaveCount(0);
     await expect(page.locator('.m', { hasText: `Filler 90 (${tag}).` })).toHaveCount(1);
@@ -176,8 +181,9 @@ test.describe('the room', () => {
     await expect(visitor.locator('.guest a')).toHaveAttribute('href', /\/join$/);
     await expect(visitor.locator('#room-say')).toBeHidden();
     await expect(visitor.locator('#room-name-block')).toBeHidden();
-    // Someone looking in is not shown who is here by name: only the residents.
+    // Someone looking in is not shown who is here by name, nor who was in lately: only the residents.
     await expect(visitor.locator('.here .c', { hasText: me })).toHaveCount(0);
+    await expect(visitor.locator('.here .c.away')).toHaveCount(0);
     ids.guestSeats.push((await visitor.evaluate(() => localStorage.getItem('room-seat'))) ?? '');
     await ctx.close();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

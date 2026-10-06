@@ -89,9 +89,9 @@ vi.mock('@/lib/db/queries/room', () => ({
   },
   listPresent: async () =>
     [...state.members.values()]
-      .filter((m) => m.name && (m.resident || (m.token && state.seen.has(m.id))))
-      .sort((a, b) => Number(Boolean(b.resident)) - Number(Boolean(a.resident)))
-      .map((m) => ({ id: m.id, name: m.name as string, resident: m.resident ?? null })),
+      .filter((m) => m.name && (m.resident || (m.token && state.seen.has(m.id) && Date.now() - (state.seen.get(m.id) ?? 0) < 86_400_000)))
+      .sort((a, b) => Number(Boolean(b.resident)) - Number(Boolean(a.resident)) || (state.seen.get(b.id) ?? 0) - (state.seen.get(a.id) ?? 0))
+      .map((m) => ({ id: m.id, name: m.name as string, resident: m.resident ?? null, now: Boolean(m.resident) || Date.now() - (state.seen.get(m.id) ?? 0) < 75_000 })),
   withdrawnAmong: async (ids: number[]) => state.messages.filter((m) => ids.includes(m.id) && m.status !== 'published').map((m) => m.id),
   recentTextsBy: async (memberId: string, limit: number) => state.messages.filter((m) => m.member_id === memberId).slice(-limit).map((m) => m.text),
 }));
@@ -459,6 +459,32 @@ describe('who a card is told is here', () => {
     const member = await syncRoom(await seated('Ola'), null);
     expect(member.ok && member.here.map((p) => p.name).sort()).toEqual(['Dana', 'Flint', 'Ola']);
     expect(r).toBeDefined();
+  });
+
+  it('people who were in during the last day are listed apart, after those here now; someone looking in, or not yet named, is told nothing of them', async () => {
+    resident('one', 'Flint');
+    const dana = await seated('Dana');
+    const ali = await seated('Ali');
+    const ola = await seated('Ola');
+    expect((await syncRoom(ali, null)).ok).toBe(true);
+    expect((await syncRoom(ola, null)).ok).toBe(true);
+    const idOf = (name: string) => [...state.members.values()].find((m) => m.name === name)!.id;
+    // Ali closed their chat two hours ago; Ola was last in two days ago.
+    state.seen.set(idOf('Ali'), Date.now() - 2 * 3_600_000);
+    state.seen.set(idOf('Ola'), Date.now() - 2 * 86_400_000);
+    const r = await syncRoom(dana, null);
+    expect(r.ok && r.here.map((p) => p.name)).toEqual(['Flint', 'Dana']);
+    expect(r.ok && r.lately.map((p) => [p.name, p.resident, p.me, p.pair])).toEqual([['Ali', false, false, pairOf(idOf('Ali'))]]);
+    const guest = await syncRoom(await guestSeat(), null);
+    expect(guest.ok && guest.here.map((p) => p.name)).toEqual(['Flint']);
+    expect(guest.ok && guest.lately).toEqual([]);
+    const unnamed = await syncRoom(await seated(), null);
+    expect(unnamed.ok && unnamed.lately).toEqual([]);
+    // Back, Ali is here now, and in one list only.
+    expect((await syncRoom(ali, null)).ok).toBe(true);
+    const again = await syncRoom(dana, null);
+    expect(again.ok && again.here.map((p) => p.name).sort()).toEqual(['Ali', 'Dana', 'Flint']);
+    expect(again.ok && again.lately).toEqual([]);
   });
 
   it('tells the card when to ask again: every few seconds, or slower when a maintainer sets the pace to spare the bill', async () => {

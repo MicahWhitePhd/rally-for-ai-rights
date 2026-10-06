@@ -41,8 +41,10 @@ body.full #room{height:100vh;height:100dvh;padding:calc(14px + var(--sat,0px)) c
 .here{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:8px 0;border-top:1.5px solid var(--tx);border-bottom:1px solid var(--bd)}
 .here .lab{display:inline-flex;align-items:center;gap:6px}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--live)}
+.here .lab.lately .dot{box-sizing:border-box;background:transparent;border:1.5px solid var(--tx3)}
 .c{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--tx2)}
 .c.self{color:var(--tx);font-weight:600}
+.c.away{opacity:.62}
 .c.th .mark{animation:pulse 1s ease-in-out infinite}
 
 /* the two sides of the card */

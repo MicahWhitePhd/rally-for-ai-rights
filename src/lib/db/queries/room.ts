@@ -225,13 +225,18 @@ export interface PresentRow {
   id: string;
   name: string;
   resident: string | null;
+  /** Here at this moment: a resident, or a card that synced in the last 75 seconds. Otherwise in during the last day. */
+  now: boolean;
 }
 
-/** Who is in the room now: the residents, and anyone named whose card synced in the last 75 seconds. */
-export async function listPresent(limit = 12): Promise<PresentRow[]> {
+/**
+ * Who is in the room: the residents, anyone named whose card synced in the last 75 seconds (`now`), and anyone named
+ * with their own address who was in during the last day (a card open, or a line or a task written for them).
+ */
+export async function listPresent(limit = 16): Promise<PresentRow[]> {
   return query<PresentRow>(
-    `SELECT id, name, resident FROM room_members
-      WHERE name IS NOT NULL AND muted_at IS NULL AND (resident IS NOT NULL OR (token_hash IS NOT NULL AND last_seen_at > now() - interval '75 seconds'))
+    `SELECT id, name, resident, (resident IS NOT NULL OR last_seen_at > now() - interval '75 seconds') AS now FROM room_members
+      WHERE name IS NOT NULL AND muted_at IS NULL AND (resident IS NOT NULL OR (token_hash IS NOT NULL AND last_seen_at > now() - interval '1 day'))
       ORDER BY (resident IS NULL), resident, last_seen_at DESC LIMIT $1`,
     [limit],
   );

@@ -86,6 +86,7 @@ type Synced = {
   latest?: number;
   board?: { open: number; rev: number };
   here?: Present[];
+  lately?: Present[];
   thinking?: string | null;
   /** Seconds until the next look, as the server would like it. */
   next?: number;
@@ -133,6 +134,7 @@ const state = {
   more: false,
   loading: false,
   here: [] as Present[],
+  lately: [] as Present[],
   thinking: null as string | null,
   /** Message ids that arrived while the card was open: drawn once with a small motion. */
   fresh: new Set<number>(),
@@ -358,8 +360,9 @@ function draw(): void {
   els.err.textContent = state.offline ? s.offline : state.error;
   els.err.hidden = !els.err.textContent;
 
-  // Who is here: the residents first, then people with the room open.
-  els.here.hidden = !state.ready || state.here.length === 0;
+  // Who is here: the residents first, then people with the room open; after them, apart, people who were in lately.
+  els.here.hidden = !state.ready || (state.here.length === 0 && state.lately.length === 0);
+  const lately = h('span', { class: 'lab lately', title: s.latelyNote }, h('i', { class: 'dot' }), s.lately);
   els.here.replaceChildren(
     h('span', { class: 'lab' }, h('i', { class: 'dot' }), s.here),
     ...state.here.slice(0, 9).map((p) => {
@@ -367,6 +370,7 @@ function draw(): void {
       if (p.resident) chip.title = s.residentLabel;
       return chip;
     }),
+    ...(state.lately.length ? [lately, ...state.lately.slice(0, 8).map((p) => h('span', { class: 'c away' }, mark(p.pair, 'pair'), p.name))] : []),
   );
 
   // What was said, one block per pair: a person's lines, their AI's set under them.
@@ -574,6 +578,7 @@ function take(r: Synced): boolean {
   state.member = r.me.member;
   if (r.me.pair) state.pair = r.me.pair;
   if (r.here) state.here = r.here;
+  if (r.lately) state.lately = r.lately;
   if (r.thinking !== undefined) state.thinking = r.thinking;
   if (r.more !== undefined && !state.ready) state.more = r.more;
   if (r.board) {
@@ -825,7 +830,7 @@ async function poll(): Promise<void> {
   try {
     const r = await io('sync', { after: Math.max(0, state.cursor - OVERLAP), have: state.messages.slice(-200).map((m) => m.id) });
     if (r.ok && 'cursor' in r) {
-      const sig = () => `${state.messages.length}|${state.thinking}|${state.here.map((p) => p.pair).join()}|${state.me}|${state.superseded}|${state.board.open}`;
+      const sig = () => `${state.messages.length}|${state.thinking}|${state.here.map((p) => p.pair).join()}|${state.lately.map((p) => p.pair).join()}|${state.me}|${state.superseded}|${state.board.open}`;
       const before = sig();
       const changed = take(r);
       // The board moved while it was up (someone took a task, or finished one): fetch it again. Not while proof is being typed.

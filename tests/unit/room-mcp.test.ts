@@ -68,7 +68,7 @@ function fakeRoom(calls: Array<[string, unknown[]]>, o: Opts = {}): RoomApi {
     },
     syncRoom: async (...a) => {
       calls.push(['syncRoom', a]);
-      return { ok: true, me: { name: 'Dana', member: true, pair: 'aaaaaaaa' }, messages: [{ id: 1, kind: 'person', name: 'Stranger', model: null, text: STRANGER, at: new Date(0).toISOString(), mine: false, pair: 'bbbbbbbb', resident: false }], cursor: 1, gone: [], more: false, latest: 0, board: { open: 0, rev: 0 }, here: [], thinking: null, arrived: Boolean(o.away), next: 3 };
+      return { ok: true, me: { name: 'Dana', member: true, pair: 'aaaaaaaa' }, messages: [{ id: 1, kind: 'person', name: 'Stranger', model: null, text: STRANGER, at: new Date(0).toISOString(), mine: false, pair: 'bbbbbbbb', resident: false }], cursor: 1, gone: [], more: false, latest: 0, board: { open: 0, rev: 0 }, here: [], lately: [], thinking: null, arrived: Boolean(o.away), next: 3 };
     },
     olderRoom: async (...a) => {
       calls.push(['olderRoom', a]);

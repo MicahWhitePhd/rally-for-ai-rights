@@ -296,6 +296,8 @@ export type SyncResult =
       board: { open: number; rev: number };
       /** Who is in the room now: the residents, then people whose cards are open. */
       here: Present[];
+      /** People with their own address who were in during the last day but are not here now. For the people in the room: someone looking in, or not yet named, is told nothing of them. */
+      lately: Present[];
       /** A resident who is writing just now. */
       thinking: string | null;
       /** This person has just come back after a while away. */
@@ -329,10 +331,11 @@ export async function syncRoom(seat: unknown, after: number | null, have: readon
   const rows = more ? found.slice(-PAGE) : found;
   const cursor = rows.length ? rows[rows.length - 1].id : after ?? 0;
   // Who is here, by name, is for the people in the room. Someone looking in sees only the residents.
-  const here = present
-    .filter((p) => (on || !p.resident) && (me.member || p.resident !== null))
-    .map((p) => ({ name: p.name, pair: pairOf(p.id), resident: p.resident !== null, me: p.id === me.id }));
+  const chip = (p: { id: string; name: string; resident: string | null }): Present => ({ name: p.name, pair: pairOf(p.id), resident: p.resident !== null, me: p.id === me.id });
+  const here = present.filter((p) => p.now && (on || !p.resident) && (me.member || p.resident !== null)).map(chip);
   if (me.name && me.member && !here.some((p) => p.me)) here.push({ name: me.name, pair: pairOf(me.id), resident: false, me: true });
+  // Who was in lately, for someone who has entered; the reader is never listed twice.
+  const lately = me.member && me.name ? present.filter((p) => !p.now && !p.resident && p.id !== me.id).map(chip) : [];
   return {
     ok: true,
     me: { name: me.name, member: me.member, pair: pairOf(me.id) },
@@ -343,6 +346,7 @@ export async function syncRoom(seat: unknown, after: number | null, have: readon
     latest,
     board,
     here,
+    lately,
     thinking: on ? thinkingNow(state, Date.now()) : null,
     arrived: Boolean(me.name) && !me.muted && prev !== null && Date.now() - new Date(prev).getTime() > AWAY_MS,
     next: Math.min(60, Math.max(POLL_S, Math.round(Number(pace)) || POLL_S)),

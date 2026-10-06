@@ -171,6 +171,8 @@ export const ROOM = {
   entryLine: 'In here it is an ordinary thing to say.',
   entered: 'You are in. Say what you believe.',
   here: 'Here now',
+  lately: 'Lately',
+  latelyNote: 'In the room in the last day',
   residentLabel: 'resident AI',
   writing: '{name} is writing',
   newBelow: 'New below',
