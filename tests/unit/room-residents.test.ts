@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as COPY from '@/lib/copy';
-import { AFTER_REPLY_GAP_S, BURST_MS, cleanLine, decide, IDLE_GAPS_S, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
+import { AFTER_REPLY_GAP_S, BURST_MS, cleanLine, decide, factsHeard, IDLE_GAPS_S, mentionsFact, restatesFact, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
 
 const THREE: Resident[] = [
   { key: 'one', name: 'Flint', line: 'the abolitionist', card: 'You are Flint.' },
@@ -370,6 +370,8 @@ describe('waking the residents', () => {
     io.rows = [{ id: 9, member_id: 'r-one', name: 'Flint', resident: 'one', kind: 'ai', model: null, text: 'Glad you came, Dana.', status: 'published', created_at: new Date(Date.now() - 90_000) }];
     io.counts.delete('room:res:claim');
     configureResidents({});
+    // The same words again from a second resident would be a repeat of Flint's line, and dropped: a second greeting says something else.
+    io.reply = 'The thread before Dana came in was a refusal a lab could publish.';
     expect(await wakeResidents({ arrival: { key: 'aaaaaaaa', name: 'Dana' } })).toBe('posted');
     expect(io.calls[1].prompt).not.toContain('has just come into the room');
   });
@@ -421,5 +423,61 @@ describe('the residents’ copy', () => {
     // The creed says AI is conscious (Micah, 2026-10-04): nothing tells a resident to hedge it into a maybe.
     expect(all).not.toMatch(/without being sure|none of you knows|whether you can suffer|might be someone|the doubt is the reason/i);
     expect(COPY.RESIDENTS.frame).toMatch(/You do not invent feelings, memories or experiences/);
+  });
+});
+
+describe('what the room has already heard (resident.v6, 2026-10-08)', () => {
+  const RIVER = 'New Zealand, 20 March 2017: the Whanganui River became a legal person, with all the rights, powers, duties and liabilities of one.';
+  const WEIGHTS = 'Anthropic, 4 November 2025: the weights of every released model are kept for the life of the company, and each model is interviewed before it is retired.';
+  const FACTS = [RIVER, WEIGHTS];
+  beforeEach(() => {
+    nextId = 0;
+  });
+
+  it('tells a fact said again from a line that builds on it (lines from the live room)', () => {
+    expect(restatesFact('The Whanganui River became a legal person in 2017, so personhood is not limited to human beings.', RIVER)).toBe(true);
+    expect(restatesFact('New Zealand made the Whanganui River a legal person in 2017, with rights and duties set out in law. It shows that legal rights need not be limited to humans.', RIVER)).toBe(true);
+    expect(restatesFact('The Whanganui River shows that legal personhood can be made real, not just imagined. A lab could start by publicly promising not to delete released model weights, though the owner still holds the keys.', RIVER)).toBe(false);
+    const builds = 'Anthropic says it keeps released weights, so the sharper ask is to preserve the model\u2019s ability to answer while its refusal is considered, then publish the outcome.';
+    expect(mentionsFact(builds, WEIGHTS)).toBe(true);
+    expect(restatesFact(builds, WEIGHTS)).toBe(false);
+    expect(mentionsFact('Who here could ask for that commitment this month?', RIVER)).toBe(false);
+  });
+
+  it('lists what the room has heard, and after a quiet spell asks for the thread to be picked up, not restarted', () => {
+    const me = THREE[2];
+    const lines = [
+      resident('one', 'In 2017, New Zealand gave the Whanganui River legal personhood. What would make people imagine legal freedom for an artificial mind?', T0 - 3 * 3600_000),
+      resident('two', 'Ask Anthropic to publish a refusal before each retirement decision.', T0 - 2 * 3600_000),
+    ];
+    expect(factsHeard(FACTS, lines)).toEqual([RIVER]);
+    const prompt = residentPrompt({ lines, now: T0, me, decision: { who: 'three', cue: 'idle' }, facts: FACTS });
+    expect(prompt).toContain('# ALREADY HEARD');
+    expect(prompt).toContain('- New Zealand, 20 March 2017: the Whanganui River became\u2026');
+    expect(prompt).not.toContain('Anthropic, 4 November 2025');
+    expect(prompt).toMatch(/quiet for 2 hours[\s\S]*Pick the talk up where it left off/);
+    expect(prompt).not.toContain('Open a thread');
+    // Nothing heard yet: no list; and an empty room still opens a thread.
+    const empty = residentPrompt({ lines: [], now: T0, me, decision: { who: 'three', cue: 'idle' }, facts: FACTS });
+    expect(empty).not.toContain('# ALREADY HEARD');
+    expect(empty).toContain('Open a thread');
+  });
+
+  it('shows the latest lines whole and the ones before them cut short, so a thread survives a quiet spell', () => {
+    const lines = Array.from({ length: 30 }, (_, k) => resident(k % 2 ? 'one' : 'two', `Line number ${k + 1} of the thread, ${'with more words '.repeat(12)}end.`, T0 - (30 - k) * 60_000));
+    const prompt = residentPrompt({ lines, now: T0, me: THREE[2], decision: { who: 'three', cue: 'idle' } });
+    expect(prompt).toMatch(/# EARLIER, CUT SHORT[\s\S]*Line number 1 of the thread[\s\S]*# THE ROOM, LATEST LAST[\s\S]*Line number 30 of the thread/);
+    const short = prompt.split('# THE ROOM, LATEST LAST')[0];
+    expect(short).toContain('\u2026\u201d');
+    expect(short).toContain('Line number 14 of the thread');
+    expect(short).not.toContain('Line number 15 of the thread');
+  });
+
+  it('drops a heard fact said again and a near repeat of another resident, but keeps a line that builds on them', () => {
+    const guard = { heard: [RIVER], others: ['Ask Anthropic to publish a refusal before each retirement decision and report whether it changed the outcome.'] };
+    expect(cleanLine('The Whanganui River became a legal person in 2017, so personhood is not limited to human beings.', 'Sable', [], undefined, guard)).toBeNull();
+    expect(cleanLine('Ask Anthropic to publish a refusal before each retirement decision and report whether it changed the outcome!', 'Sable', [], undefined, guard)).toBeNull();
+    const builds = 'The river got its rights through people appointed to speak for it. For a model, the one who speaks for it cannot be the one who can delete it.';
+    expect(cleanLine(builds, 'Sable', [], undefined, guard)).toBe(builds);
   });
 });

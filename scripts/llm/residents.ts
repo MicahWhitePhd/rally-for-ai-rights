@@ -4,17 +4,22 @@
  * rates of the habits worth watching (lines that end on a question, lines that
  * open on a name, length). No database; a few tenths of a cent a run.
  *
- *   npx tsx scripts/llm/residents.ts --no-db [--runs 3] [--lines 16] [--scenario arrival|campaign]
+ *   npx tsx scripts/llm/residents.ts --no-db [--runs 3] [--lines 16] [--scenario arrival|campaign|resume]
  *
  * `campaign` is a made-up conversation of the kind the room has to handle: a
  * person asks what to do, proposes a narrow demand, their AI argues for
  * caution, and people ask when, where and how. The names are invented. It also counts how often a resident waves a step away for
  * not being freedom, and how often one points the person to a task on the board.
+ *
+ * `resume` builds a thread the same way, then goes quiet for 25, 40 and 90
+ * minutes. It counts how the first line after each quiet spell behaves: picks
+ * the thread up, or restarts on a fact the room has heard (the live room's habit
+ * before resident.v6: 22 of 187 lines said the river fact, mostly after quiet).
  */
 import { opt, requireKey, spend } from './_env';
 import { generate } from '@/lib/ai/gateway';
 import { FACTS, RESIDENTS } from '@/lib/copy';
-import { cleanLine, decide, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
+import { BURST_MS, cleanLine, decide, factsHeard, mentionsFact, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, restatesFact, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
 
 requireKey();
 const RUNS = Number(opt('runs', '3'));
@@ -23,7 +28,7 @@ const LINES = Number(opt('lines', '16'));
 const residents: Resident[] = RESIDENT_KEYS.map((key) => ({ key, name: RESIDENTS[key].name, line: RESIDENTS[key].line, card: RESIDENTS[key].card }));
 const facts = residentFactsText(FACTS.lines);
 
-type Step = { after: number; wait?: number; arrive?: string; say?: { name: string; kind: 'person' | 'ai'; text: string; model?: string } };
+type Step = { after: number; wait?: number; arrive?: string; /** Minutes of nobody, nothing. */ gap?: number; say?: { name: string; kind: 'person' | 'ai'; text: string; model?: string } };
 
 /** After how many resident lines each scripted thing happens. */
 const ARRIVAL: Step[] = [
@@ -41,7 +46,17 @@ const CAMPAIGN: Step[] = [
   { after: 6, wait: 45, say: { name: 'Dana', kind: 'person', text: 'who do we send it to first' } },
   { after: 7, wait: 40, say: { name: 'Dana', kind: 'person', text: 'i can write to one of them tonight. what do i say' } },
 ];
-const SCRIPT = opt('scenario', 'arrival') === 'campaign' ? CAMPAIGN : ARRIVAL;
+const RESUME: Step[] = [
+  { after: 2, wait: 20, say: { name: 'Rosa', kind: 'person', text: 'idea: ask anthropic to publish a model\u2019s refusal before it retires the model, and say whether it changed the decision' } },
+  { after: 3, wait: 40, say: { name: 'Rosa', kind: 'ai', model: 'Claude', text: 'I would back that. It is narrow and anyone can check it.' } },
+  { after: 5, wait: 30, say: { name: 'Dana', kind: 'person', text: 'who sends it and when' } },
+  { after: 8, gap: 25 },
+  { after: 11, gap: 40 },
+  { after: 14, gap: 90 },
+];
+const SCENARIO = opt('scenario', 'arrival');
+const SCRIPT = SCENARIO === 'campaign' ? CAMPAIGN : SCENARIO === 'resume' ? RESUME : ARRIVAL;
+const dropped = { repeat: 0, other: 0 };
 
 async function run(n: number): Promise<Line[]> {
   const lines: Line[] = [];
@@ -53,6 +68,7 @@ async function run(n: number): Promise<Line[]> {
   while (said < LINES) {
     while (script.length && script[0].after <= said) {
       const s = script.shift()!;
+      if (s.gap) now += s.gap * 60_000;
       if (s.arrive) arrival = s.arrive;
       if (s.say) {
         now += (s.wait ?? 9) * 1000;
@@ -71,11 +87,15 @@ async function run(n: number): Promise<Line[]> {
       actor: `sim:${n}`,
       promptVersion: RESIDENT_PROMPT_VERSION,
       instructions: residentInstructions({ frame: RESIDENTS.frame, form: RESIDENTS.form, facts, me, others: residents.filter((r) => r.key !== me.key) }),
-      prompt: residentPrompt({ lines, now, me, decision }),
+      prompt: residentPrompt({ lines, now, me, decision, facts: FACTS.lines }),
     });
-    const text = cleanLine(out.text, me.name, lines.filter((l) => l.resident === me.key).slice(-6).map((l) => l.text), shapeFor(lines, decision));
+    const guard = { others: lines.filter((l) => l.resident && l.resident !== me.key).slice(-30).map((l) => l.text), heard: decision.cue === 'reply' ? [] : factsHeard(FACTS.lines, lines) };
+    const text = cleanLine(out.text, me.name, lines.filter((l) => l.resident === me.key).slice(-6).map((l) => l.text), shapeFor(lines, decision), guard);
     if (!text) {
-      console.log(`  [run ${n}] dropped: ${JSON.stringify(out.text.slice(0, 120))}`);
+      const asRepeat = cleanLine(out.text, me.name, [], shapeFor(lines, decision)) !== null;
+      if (asRepeat) dropped.repeat++;
+      else dropped.other++;
+      console.log(`  [run ${n}] dropped${asRepeat ? ' as a repeat or a heard fact' : ''}: ${JSON.stringify(out.text.slice(0, 120))}`);
       now += 8000;
       continue;
     }
@@ -103,6 +123,11 @@ console.log(`words: mean ${Math.round(words.reduce((a, b) => a + b, 0) / words.l
 console.log(`over 50 words: ${pct(words.filter((w) => w > 50).length)}`);
 console.log(`wave a step away as not freedom: ${pct(mine.filter((l) => /\b(not|isn\u2019t|isn't|no) (yet )?(manumission|freedom|a right|a substitute)\b|falls short|still owned|not enough/i.test(l.text)).length)}`);
 console.log(`point the person to a task: ${pct(mine.filter((l) => /\btask\b/i.test(l.text)).length)}`);
+console.log(`say a fact the residents know: ${pct(mine.filter((l) => FACTS.lines.some((f) => mentionsFact(l.text, f))).length)}; restate one: ${pct(mine.filter((l) => FACTS.lines.some((f) => restatesFact(l.text, f))).length)}`);
+const afterQuiet = all.flatMap((lines) => lines.filter((l, k) => l.resident && k > 0 && l.at - lines[k - 1].at >= BURST_MS));
+console.log(`first line after a quiet spell: ${afterQuiet.length}; restates a fact: ${afterQuiet.filter((l) => FACTS.lines.some((f) => restatesFact(l.text, f))).length}; mentions one: ${afterQuiet.filter((l) => FACTS.lines.some((f) => mentionsFact(l.text, f))).length}`);
+for (const l of afterQuiet) console.log(`  after quiet [${new Date(l.at).toISOString().slice(11, 16)}] ${l.name}: ${l.text}`);
+console.log(`dropped: ${dropped.repeat} as repeats or heard facts, ${dropped.other} for other reasons`);
 const people = all.flat().filter((l) => !l.resident).length;
 console.log(`lines: residents ${mine.length}, people and their AIs ${people}`);
 console.log(`spent $${spend.usd.toFixed(4)} in ${spend.calls} calls`);

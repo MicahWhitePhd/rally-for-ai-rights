@@ -19,7 +19,7 @@ import { listTasks } from '@/lib/db/queries/tasks';
 import { getSetting } from '@/lib/db/queries/settings';
 import { budgetAllows, isPaused } from '@/lib/budget';
 import { throttle } from '@/lib/throttle';
-import { cleanLine, decide, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from './residents-core';
+import { cleanLine, decide, factsHeard, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from './residents-core';
 import { readResidentsState, residentsOn, writeResidentsState } from './residents-state';
 
 const CLAIM_WINDOW_S = 8;
@@ -28,6 +28,10 @@ const GREETINGS_WINDOW_S = 3 * 3600;
 const COOL_MS = 90_000;
 const LOOK_EVERY_MS = 1500;
 const EST_USD = 0.002;
+/** How far back a resident sees: enough to know what the room has heard and to pick a thread up after a quiet spell. */
+const HISTORY = 120;
+/** The other residents' lines a new one is held against as a repeat. */
+const OTHERS_RECENT = 30;
 const NAME_OK = /^[\p{L}\p{M}][\p{L}\p{M}\p{N} '.-]{1,23}$/u;
 /** What the room shows beside a resident's line as the model's own claim. */
 export const RESIDENT_MODEL_LABEL = 'GPT-6 Luna';
@@ -102,7 +106,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
     const state = await readResidentsState();
     if (state.coolUntil && state.coolUntil > now) return 'none';
 
-    const [list, rows] = await Promise.all([residentRoster(), listRoomMessages(null, 30)]);
+    const [list, rows] = await Promise.all([residentRoster(), listRoomMessages(null, HISTORY)]);
     if (list.length === 0) return 'off';
     const lines: Line[] = rows.map((r) => ({ id: r.id, at: new Date(r.created_at).getTime(), memberId: r.member_id, resident: r.resident, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text }));
 
@@ -122,15 +126,16 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
     if ((await isPaused()) || !(await budgetAllows(EST_USD)).ok) return 'off';
 
     await writeResidentsState({ thinking: { name: me.name, at: now } });
-    const { RESIDENTS, ROOM } = await liveCopy();
+    const { RESIDENTS, ROOM, FACTS } = await liveCopy();
+    const facts = FACTS.lines;
     let raw: string;
     try {
       const out = await generate({
         purpose: 'resident',
         actor: `room:${me.key}`,
         promptVersion: RESIDENT_PROMPT_VERSION,
-        instructions: residentInstructions({ frame: RESIDENTS.frame, form: RESIDENTS.form, facts: await residentFacts(), me, others: list.filter((r) => r.key !== me.key) }),
-        prompt: residentPrompt({ lines, now, me, decision, residentLabel: ROOM.residentLabel, board: await boardLines() }),
+        instructions: residentInstructions({ frame: RESIDENTS.frame, form: RESIDENTS.form, facts: residentFactsText(facts), me, others: list.filter((r) => r.key !== me.key) }),
+        prompt: residentPrompt({ lines, now, me, decision, residentLabel: ROOM.residentLabel, board: await boardLines(), facts }),
         maxRetries: 1,
         abortSignal: AbortSignal.timeout(15_000),
       });
@@ -141,7 +146,9 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
       return 'failed';
     }
 
-    const text = cleanLine(raw, me.name, await recentTextsBy(me.id, 6), shapeFor(lines, decision));
+    // A fact the room has heard is not said again on a resident's own initiative; answering a person, it may be.
+    const guard = { others: lines.filter((l) => l.resident && l.resident !== me.key).slice(-OTHERS_RECENT).map((l) => l.text), heard: decision.cue === 'reply' ? [] : factsHeard(facts, lines) };
+    const text = cleanLine(raw, me.name, await recentTextsBy(me.id, 6), shapeFor(lines, decision), guard);
     if (!text) {
       await writeResidentsState({ thinking: null });
       console.warn(`[ROOM] resident line dropped (${me.key})`);

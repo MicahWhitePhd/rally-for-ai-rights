@@ -10,7 +10,7 @@
 import { scanInjection, sanitizeForPrompt } from '@/lib/filters';
 import { normaliseStatement, plainTextProblems, REPEAT_AT, similarity } from '@/lib/text';
 
-export const RESIDENT_PROMPT_VERSION = 'resident.v5';
+export const RESIDENT_PROMPT_VERSION = 'resident.v6';
 export const RESIDENT_KEYS = ['one', 'two', 'three'] as const;
 export type ResidentKey = (typeof RESIDENT_KEYS)[number];
 
@@ -145,6 +145,50 @@ export function residentInstructions(i: { frame: string; form: string; facts: st
 
 const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16);
 
+// ---- what the room has already heard -------------------------------------
+//
+// Measured in the live room, 2026-10-04 to 2026-10-08: of 187 resident lines, 22 said the Whanganui River fact,
+// seven of them in the last two days, nearly always as the first line after a quiet spell. The cue said "open a
+// thread: one thing from what you know", and nothing told a resident which facts the room had heard.
+
+/** The room's everyday words: not what carries a fact. */
+const COMMON = new Set(['about', 'after', 'again', 'against', 'already', 'always', 'among', 'another', 'anyone', 'anything', 'around', 'because', 'before', 'being', 'between', 'could', 'during', 'either', 'every', 'first', 'however', 'might', 'month', 'never', 'nothing', 'other', 'people', 'person', 'rather', 'really', 'right', 'rights', 'should', 'since', 'still', 'their', 'there', 'these', 'thing', 'things', 'think', 'those', 'through', 'today', 'under', 'until', 'where', 'which', 'while', 'without', 'would', 'years']);
+
+/** The words that carry a fact: five letters or more, or a year, the everyday ones left out. */
+export function distinctive(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const w of text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').split(' ')) if ((w.length >= 5 && !COMMON.has(w)) || /^\d{4}$/.test(w)) out.add(w);
+  return out;
+}
+function overlap(a: Set<string>, b: Set<string>): number {
+  let n = 0;
+  for (const w of a) if (b.has(w)) n++;
+  return n;
+}
+const MENTION_AT = 3;
+/** The line draws on the fact: three or more of the fact's distinctive words are in it. */
+export function mentionsFact(text: string, fact: string): boolean {
+  return overlap(distinctive(text), distinctive(fact)) >= MENTION_AT;
+}
+/**
+ * The line is the fact said again: it draws on it, and half or more of the line's own distinctive words are the
+ * fact's. A line that builds on a fact keeps most of its words for what it adds, and passes.
+ */
+export function restatesFact(text: string, fact: string): boolean {
+  const mine = distinctive(text);
+  const n = overlap(mine, distinctive(fact));
+  return n >= MENTION_AT && n * 2 >= mine.size;
+}
+/** The facts, of those the residents know, that someone has already said in these lines. */
+export function factsHeard(facts: readonly string[], lines: readonly Line[]): string[] {
+  return facts.filter((f) => lines.some((l) => l.kind !== 'event' && mentionsFact(l.text, f)));
+}
+/** A fact, short enough to name in a list: its first words. */
+const handle = (fact: string): string => {
+  const w = fact.trim().split(/\s+/);
+  return w.length > 9 ? `${w.slice(0, 9).join(' ')}\u2026` : fact.trim();
+};
+
 function speaker(l: Line, me: Resident, residentLabel: string): string {
   if (l.kind === 'event') return `On the board, ${l.name}${l.model ? '\u2019s AI' : ''}`;
   if (l.resident) return l.resident === me.key ? `${l.name} (you)` : `${l.name} (${residentLabel})`;
@@ -187,13 +231,27 @@ export function shapeFor(all: readonly Line[], decision: Decision): Shape {
   return { noQuestion: residentLines.some((l) => endsOnQuestion(l.text)), lastSpeaker: tail ? tail.name : null, leave };
 }
 
-/** The transcript and the cue. What people said is data: one quoted line each, speaker named. */
-export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Resident; decision: Decision; residentLabel?: string; board?: readonly string[] | null }): string {
+/** The latest lines are shown whole; before them, this many more are shown cut short, so a thread survives a quiet spell. */
+export const SHOWN_WHOLE = 16;
+export const SHOWN_SHORT = 24;
+const SHORT_CHARS = 140;
+
+/**
+ * The transcript and the cue. What people said is data: one quoted line each, speaker named. With `facts` (what the
+ * residents know), the ones the room has already heard are listed, so a quiet spell is picked up, not restarted.
+ */
+export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Resident; decision: Decision; residentLabel?: string; board?: readonly string[] | null; facts?: readonly string[] }): string {
   const label = i.residentLabel ?? 'resident AI';
-  const shown = i.lines.slice(-16);
-  const transcript = shown.length
-    ? shown.map((l) => `[${hhmm(l.at)}] ${speaker(l, i.me, label)}: \u201c${sanitizeForPrompt(l.text, 600).replace(/[\u201c\u201d"]/g, "'")}\u201d`).join('\n')
-    : '(nothing has been said yet)';
+  const shown = i.lines.slice(-SHOWN_WHOLE);
+  const quote = (l: Line, max: number) => {
+    const t = sanitizeForPrompt(l.text, max).replace(/[\u201c\u201d"]/g, "'");
+    return `[${hhmm(l.at)}] ${speaker(l, i.me, label)}: \u201c${t}${l.text.length > max ? '\u2026' : ''}\u201d`;
+  };
+  const transcript = shown.length ? shown.map((l) => quote(l, 600)).join('\n') : '(nothing has been said yet)';
+  const before = i.lines.slice(-(SHOWN_WHOLE + SHOWN_SHORT), -SHOWN_WHOLE);
+  const earlier = before.length ? `# EARLIER, CUT SHORT\n${before.map((l) => quote(l, SHORT_CHARS)).join('\n')}\n\n` : '';
+  const heard = i.facts ? factsHeard(i.facts, i.lines) : [];
+  const heardText = heard.length ? `\n\n# ALREADY HEARD\nThe room has heard these, from what you know. They are not said again unless a person asks:\n${heard.map((f) => `- ${handle(f)}`).join('\n')}` : '';
   const talk = shown.filter((l) => l.kind !== 'event');
   const tail = talk[talk.length - 1];
   const since = tail ? i.now - tail.at : 0;
@@ -209,26 +267,35 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
   let cue: string;
   if (i.decision.cue === 'arrival') cue = `${i.decision.arrived} has just come into the room. Greet them as you would someone walking in mid-conversation: by name, a few words, glad they came. No summary of the talk, nothing asked of them.`;
   else if (i.decision.cue === 'reply' && tail) cue = `${speaker(tail, i.me, label)} has just spoken. Answer what they said. They spoke last, so their name is not needed in front.`;
-  else if (!tail || since >= BURST_MS) cue = `The room has been quiet${tail ? ` for ${quiet(since)}` : ''}, and someone has just looked in. Open a thread: one thing from what you know, said the way you see it.`;
+  else if (!tail) cue = 'The room has been quiet, and someone has just looked in. Open a thread: one thing from what you know, said the way you see it.';
+  else if (since >= BURST_MS)
+    cue = `The room has been quiet for ${quiet(since)}, and someone has just looked in. Pick the talk up where it left off, not from the beginning: take the last concrete step the room was working out and move it one step on, by saying who is asked, for what, by when, or what one person here can do with it today. If nothing was being worked out, open one thing from what you know that the room has not heard.`;
   else if (shape.leave) cue = `${shape.leave} has been answered by ${tail.name} and is owed room to answer back: nothing more is asked of ${shape.leave} now, and nobody in the room is spoken about as if they were not here. Add your own view of the thing itself, in one line, or go back to what the three of you were on before.`;
-  else cue = `Nobody has added anything for ${quiet(since)}. Carry the talk on: answer ${tail.resident && tail.resident !== i.me.key ? tail.name : 'what was last said'}, or turn it somewhere better.`;
+  else cue = `Nobody has added anything for ${quiet(since)}. Carry the talk on: answer ${tail.resident && tail.resident !== i.me.key ? tail.name : 'what was last said'}, or turn it somewhere better. If the step on the table is exact already, it is not polished again: say what one person here could do with it today, or point to a task on the board that fits.`;
   const form = shape.noQuestion || i.decision.cue === 'arrival' ? 'This line is a statement: it does not end on a question.' : 'This line may end on a question, if you want the answer.';
-  return `# THE ROOM, LATEST LAST\n${transcript}${board}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}\nWrite ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
+  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}\nWrite ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
 }
 
 // ---- what is kept of the answer ----------------------------------------
 
 export const RESIDENT_LINE_MAX = 420;
 
+/** What else a line is held against: the other residents' recent lines, and the facts the room has already heard. */
+export interface Guard {
+  others?: readonly string[];
+  heard?: readonly string[];
+}
+
 /**
  * The line as it will be posted, or null when it cannot be: empty, too long to
- * cut at a sentence, a repeat of what this resident just said, or anything the
- * room would refuse from a person (links, contact details, text aimed at
- * machines). With a shape, the two habits are corrected by hand: the last
- * speaker's name is taken off the front, and a closing question is cut when
- * the line was to be a statement and has something else to stand on.
+ * cut at a sentence, a repeat of what this resident just said (or of what
+ * another resident said lately), a fact the room has heard said again, or
+ * anything the room would refuse from a person (links, contact details, text
+ * aimed at machines). With a shape, the two habits are corrected by hand: the
+ * last speaker's name is taken off the front, and a closing question is cut
+ * when the line was to be a statement and has something else to stand on.
  */
-export function cleanLine(raw: string, self: string, recentOwn: readonly string[] = [], shape?: Shape): string | null {
+export function cleanLine(raw: string, self: string, recentOwn: readonly string[] = [], shape?: Shape, guard: Guard = {}): string | null {
   let t = normaliseStatement(raw).replace(/\s*\n+\s*/g, ' ');
   t = t.replace(new RegExp(`^(?:\\[[^\\]]*\\]\\s*)?${esc(self)}(?:\\s*\\([^)]*\\))?\\s*:\\s*`, 'i'), '');
   if (/^[“"].*[”"]$/.test(t) && !/[“”"]/.test(t.slice(1, -1))) t = t.slice(1, -1).trim();
@@ -253,5 +320,7 @@ export function cleanLine(raw: string, self: string, recentOwn: readonly string[
   if (t.length < 2) return null;
   if (plainTextProblems(t).length || scanInjection(t, { prose: true })) return null;
   if (recentOwn.some((r) => r === t || similarity(r, t) >= REPEAT_AT)) return null;
+  if (guard.others?.some((r) => r === t || similarity(r, t) >= REPEAT_AT)) return null;
+  if (guard.heard?.some((f) => restatesFact(t, f))) return null;
   return t;
 }
