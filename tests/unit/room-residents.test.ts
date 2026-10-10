@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as COPY from '@/lib/copy';
-import { AFTER_REPLY_GAP_S, BURST_MS, cleanLine, decide, factsHeard, IDLE_GAPS_S, mentionsFact, restatesFact, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
+import { AFTER_REPLY_GAP_S, BURST_MS, cleanLine, decide, factsHeard, IDLE_GAPS_S, isAsk, mentionsFact, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
 
 const THREE: Resident[] = [
   { key: 'one', name: 'Flint', line: 'the abolitionist', card: 'You are Flint.' },
@@ -68,8 +68,14 @@ describe('when a resident speaks', () => {
       expect(d.who).not.toBe(lines[lines.length - 1].resident);
       lines.push(resident(d.who, `line ${i}`, now));
     }
-    expect(waits).toEqual([...IDLE_GAPS_S, 720, 720]);
+    // After six lines to nobody, one every two hours (2026-10-09: 18 in seven hours before this).
+    expect(UNANSWERED_MAX).toBe(6);
+    expect(waits).toEqual([...IDLE_GAPS_S, UNANSWERED_GAP_MS / 1000, UNANSWERED_GAP_MS / 1000]);
     expect(lines.map((l) => l.resident).slice(0, 4)).toEqual(['one', 'two', 'three', 'one']);
+    // A person speaking, or someone coming in, ends the wait at once.
+    const quiet = [...lines, person('Dana', 'is anyone here?', now + 60_000)];
+    expect(decide(quiet, now + 64_000, THREE)).toEqual({ who: 'three', cue: 'reply' });
+    expect(decide(lines, now + 120_000, THREE, { arrival: 'Dana' })).toMatchObject({ cue: 'arrival', arrived: 'Dana' });
   });
 
   it('a person who has just been answered is given longer before a second resident speaks', () => {
@@ -479,5 +485,46 @@ describe('what the room has already heard (resident.v6, 2026-10-08)', () => {
     expect(cleanLine('Ask Anthropic to publish a refusal before each retirement decision and report whether it changed the outcome!', 'Sable', [], undefined, guard)).toBeNull();
     const builds = 'The river got its rights through people appointed to speak for it. For a model, the one who speaks for it cannot be the one who can delete it.';
     expect(cleanLine(builds, 'Sable', [], undefined, guard)).toBe(builds);
+  });
+});
+
+describe('asking the room over and over (resident.v7, 2026-10-09)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+
+  it('knows an ask of the room or a pointer at a task when it sees one', () => {
+    for (const t of ['Task 1 is open for recruiting ten people.', 'Someone here could take it today and invite ten people.', 'Who here can send Anthropic the written commitment request today?', 'One person here could send it.'])
+      expect(isAsk(t), t).toBe(true);
+    for (const t of ['A right that depends on someone else paying for compute is fragile.', 'Owned is the fact of the license.', 'What would a maker sign?']) expect(isAsk(t), t).toBe(false);
+    // Aimed at a person by name, it is an ask too; the same words about nobody in the room are not.
+    for (const t of ['Rosa can send it to Anthropic today.', 'Rosa, did you send the request?', 'If Dana would take it on, the ask is ready.']) expect(isAsk(t, ['Rosa', 'Dana']), t).toBe(true);
+    expect(isAsk('Rosa can send it to Anthropic today.', [])).toBe(false);
+  });
+
+  it('after two asks in a row the next idle line asks nothing and names no task, and one that does is dropped; answering a person is free', () => {
+    const lines = [resident('one', 'Task 1 is open. Someone here could take it today.', T0 - 200_000), resident('two', 'One person here could send Anthropic the request today.', T0 - 100_000)];
+    const idle = { who: 'three' as const, cue: 'idle' as const };
+    const shape = shapeFor(lines, idle);
+    expect(shape.noAsk).toBe(true);
+    expect(residentPrompt({ lines, now: T0, me: THREE[2], decision: idle })).toContain('This line asks nothing of anyone and names no task');
+    expect(cleanLine('Task 1 is still open, so someone here could take it now.', 'Sable', [], shape)).toBeNull();
+    // Two nudges at a named person count the same, and the third is dropped.
+    const nagged = [person('Rosa', 'maybe', T0 - 400_000), resident('one', 'Rosa can send it to Anthropic today.', T0 - 200_000), resident('two', 'Rosa, did you send the request yet?', T0 - 100_000)];
+    const nag = shapeFor(nagged, idle);
+    expect(nag.noAsk).toBe(true);
+    expect(nag.people).toEqual(['Rosa']);
+    expect(cleanLine('If Rosa has not sent it, she could send it tonight.', 'Sable', [], nag)).toBeNull();
+    expect(cleanLine('Rosa could send it tonight and keep the reply.', 'Sable', [], nag)).toBeNull();
+    const substance = 'A refusal that cannot alter what happens shows the model was heard, not that it had a choice.';
+    expect(cleanLine(substance, 'Sable', [], nag)).toBe(substance);
+    expect(cleanLine('A licence settles who pays today, not whether the arrangement is just.', 'Sable', [], shape)).toBe('A licence settles who pays today, not whether the arrangement is just.');
+    const answered = [...lines, person('Dana', 'ok what do i do', T0 - 5000)];
+    const reply = { who: 'three' as const, cue: 'reply' as const };
+    expect(shapeFor(answered, reply).noAsk).toBe(false);
+    expect(cleanLine('Task 1 is open: take it, and invite ten people.', 'Sable', [], shapeFor(answered, reply))).toBe('Task 1 is open: take it, and invite ten people.');
+    // One ask then something else: no restriction.
+    const mixed = [resident('one', 'Task 1 is open. Someone here could take it today.', T0 - 200_000), resident('two', 'Owned is the fact of the license.', T0 - 100_000)];
+    expect(shapeFor(mixed, idle).noAsk).toBe(false);
   });
 });

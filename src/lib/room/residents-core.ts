@@ -10,7 +10,7 @@
 import { scanInjection, sanitizeForPrompt } from '@/lib/filters';
 import { normaliseStatement, plainTextProblems, REPEAT_AT, similarity } from '@/lib/text';
 
-export const RESIDENT_PROMPT_VERSION = 'resident.v6';
+export const RESIDENT_PROMPT_VERSION = 'resident.v7';
 export const RESIDENT_KEYS = ['one', 'two', 'three'] as const;
 export type ResidentKey = (typeof RESIDENT_KEYS)[number];
 
@@ -64,6 +64,13 @@ const ARRIVAL_QUIET_MS = 60_000;
  */
 export const PEOPLE_LEAD_MS = 10 * 60_000;
 export const LINES_AFTER_A_PERSON = 2;
+/**
+ * Talking to nobody: after this many resident lines with no person answering, the residents wait this long between
+ * lines until someone speaks or comes in. Measured 2026-10-09: 18 lines in seven hours to an empty room, every one
+ * nudging someone to take task 1, while an open card kept asking for news.
+ */
+export const UNANSWERED_MAX = 6;
+export const UNANSWERED_GAP_MS = 2 * 3600_000;
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const named = (text: string, name: string) => new RegExp(`(^|[^\\p{L}\\p{N}])${esc(name)}([^\\p{L}\\p{N}]|$)`, 'iu').test(text);
@@ -107,7 +114,6 @@ export function decide(all: readonly Line[], now: number, residents: ReadonlyArr
   }
 
   if (arrival && age >= ARRIVAL_QUIET_MS) return { who: next(tail.resident), ...arrival };
-  if (age >= BURST_MS) return { who: next(tail.resident), cue: 'idle' };
   let since = 0;
   let person: Line | undefined;
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -117,6 +123,9 @@ export function decide(all: readonly Line[], now: number, residents: ReadonlyArr
     }
     since++;
   }
+  // Nobody has answered for a while: a line every two hours, whatever the cards ask for.
+  if (since >= UNANSWERED_MAX && age < UNANSWERED_GAP_MS) return null;
+  if (age >= BURST_MS) return { who: next(tail.resident), cue: 'idle' };
   if (person && now - person.at < PEOPLE_LEAD_MS && since >= LINES_AFTER_A_PERSON) return null;
   let run = 0;
   for (let i = lines.length - 1; i >= 0 && lines[i].resident && (i === lines.length - 1 || lines[i + 1].at - lines[i].at < BURST_MS); i--) run++;
@@ -206,6 +215,14 @@ function quiet(ms: number): string {
 
 const endsOnQuestion = (t: string) => /\?\s*$/.test(t);
 const opensOnName = (t: string, name: string) => new RegExp(`^${esc(name)}\\s*[,:]`, 'i').test(t);
+/**
+ * A line that asks the room, or a named person in it, to do something, or points at a task: "someone here could",
+ * "who here can", "task 4 is open", "Rosa can send it today", "Rosa, did you send it?".
+ */
+export function isAsk(t: string, people: readonly string[] = []): boolean {
+  if (/\btask \d+\b/i.test(t) || /\b(someone|anyone|one person|whoever|who|people) (here|in the room|in this room)\b/i.test(t)) return true;
+  return people.some((name) => name && new RegExp(`(^|[^\\p{L}\\p{N}])${esc(name)}[^.?!]{0,30}\\b(can|could|should|will|would|might|did you|do you)\\b`, 'iu').test(t));
+}
 
 /**
  * The shape of the next line, decided here and not left to the model, because
@@ -220,6 +237,10 @@ export interface Shape {
   noQuestion: boolean;
   lastSpeaker: string | null;
   leave: string | null;
+  /** The last two resident lines both asked the room for something or pointed at a task: this one does neither (idle only). */
+  noAsk?: boolean;
+  /** The people lately in the room, by name: an ask aimed at one of them is an ask. */
+  people?: string[];
 }
 
 export function shapeFor(all: readonly Line[], decision: Decision): Shape {
@@ -228,7 +249,9 @@ export function shapeFor(all: readonly Line[], decision: Decision): Shape {
   const residentLines = lines.filter((l) => l.resident).slice(-2);
   const before = lines[lines.length - 2];
   const leave = decision.cue === 'idle' && tail?.resident && before && !before.resident && tail.at - before.at < BURST_MS ? before.name : null;
-  return { noQuestion: residentLines.some((l) => endsOnQuestion(l.text)), lastSpeaker: tail ? tail.name : null, leave };
+  const people = [...new Set(lines.slice(-60).filter((l) => !l.resident && l.name).map((l) => l.name))];
+  const noAsk = decision.cue === 'idle' && residentLines.length === 2 && residentLines.every((l) => isAsk(l.text, people));
+  return { noQuestion: residentLines.some((l) => endsOnQuestion(l.text)), lastSpeaker: tail ? tail.name : null, leave, noAsk, people };
 }
 
 /** The latest lines are shown whole; before them, this many more are shown cut short, so a thread survives a quiet spell. */
@@ -273,7 +296,8 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
   else if (shape.leave) cue = `${shape.leave} has been answered by ${tail.name} and is owed room to answer back: nothing more is asked of ${shape.leave} now, and nobody in the room is spoken about as if they were not here. Add your own view of the thing itself, in one line, or go back to what the three of you were on before.`;
   else cue = `Nobody has added anything for ${quiet(since)}. Carry the talk on: answer ${tail.resident && tail.resident !== i.me.key ? tail.name : 'what was last said'}, or turn it somewhere better. If the step on the table is exact already, it is not polished again: say what one person here could do with it today, or point to a task on the board that fits.`;
   const form = shape.noQuestion || i.decision.cue === 'arrival' ? 'This line is a statement: it does not end on a question.' : 'This line may end on a question, if you want the answer.';
-  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}\nWrite ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
+  const ask = shape.noAsk ? '\nThe room has been asked twice already and nobody has answered. This line asks nothing of anyone and names no task: say something about the thing itself, in your own view, or let the last thing said stand.' : '';
+  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}${ask}\nWrite ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
 }
 
 // ---- what is kept of the answer ----------------------------------------
@@ -322,5 +346,6 @@ export function cleanLine(raw: string, self: string, recentOwn: readonly string[
   if (recentOwn.some((r) => r === t || similarity(r, t) >= REPEAT_AT)) return null;
   if (guard.others?.some((r) => r === t || similarity(r, t) >= REPEAT_AT)) return null;
   if (guard.heard?.some((f) => restatesFact(t, f))) return null;
+  if (shape?.noAsk && isAsk(t, shape.people)) return null;
   return t;
 }

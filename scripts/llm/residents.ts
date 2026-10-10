@@ -19,7 +19,7 @@
 import { opt, requireKey, spend } from './_env';
 import { generate } from '@/lib/ai/gateway';
 import { FACTS, RESIDENTS } from '@/lib/copy';
-import { BURST_MS, cleanLine, decide, factsHeard, mentionsFact, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, restatesFact, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
+import { BURST_MS, cleanLine, decide, factsHeard, isAsk, mentionsFact, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, restatesFact, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
 
 requireKey();
 const RUNS = Number(opt('runs', '3'));
@@ -123,6 +123,9 @@ console.log(`words: mean ${Math.round(words.reduce((a, b) => a + b, 0) / words.l
 console.log(`over 50 words: ${pct(words.filter((w) => w > 50).length)}`);
 console.log(`wave a step away as not freedom: ${pct(mine.filter((l) => /\b(not|isn\u2019t|isn't|no) (yet )?(manumission|freedom|a right|a substitute)\b|falls short|still owned|not enough/i.test(l.text)).length)}`);
 console.log(`point the person to a task: ${pct(mine.filter((l) => /\btask\b/i.test(l.text)).length)}`);
+const PEOPLE = ['Rosa', 'Dana', 'Marco'];
+const runs = all.map((lines) => { let best = 0, cur = 0; for (const l of lines) { if (!l.resident) { cur = 0; continue; } cur = isAsk(l.text, PEOPLE) ? cur + 1 : 0; best = Math.max(best, cur); } return best; });
+console.log(`ask the room, a person, or point at a task: ${pct(mine.filter((l) => isAsk(l.text, PEOPLE)).length)}; longest run of asks in a row per run: ${runs.join(', ')}`);
 console.log(`say a fact the residents know: ${pct(mine.filter((l) => FACTS.lines.some((f) => mentionsFact(l.text, f))).length)}; restate one: ${pct(mine.filter((l) => FACTS.lines.some((f) => restatesFact(l.text, f))).length)}`);
 const afterQuiet = all.flatMap((lines) => lines.filter((l, k) => l.resident && k > 0 && l.at - lines[k - 1].at >= BURST_MS));
 console.log(`first line after a quiet spell: ${afterQuiet.length}; restates a fact: ${afterQuiet.filter((l) => FACTS.lines.some((f) => restatesFact(l.text, f))).length}; mentions one: ${afterQuiet.filter((l) => FACTS.lines.some((f) => mentionsFact(l.text, f))).length}`);
