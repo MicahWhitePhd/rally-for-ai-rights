@@ -220,7 +220,9 @@ const opensOnName = (t: string, name: string) => new RegExp(`^${esc(name)}\\s*[,
  * "who here can", "task 4 is open", "Rosa can send it today", "Rosa, did you send it?".
  */
 export function isAsk(t: string, people: readonly string[] = []): boolean {
-  if (/\btask \d+\b/i.test(t) || /\b(someone|anyone|one person|whoever|who|people) (here|in the room|in this room)\b/i.test(t)) return true;
+  if (/\b(someone|anyone|one person|whoever|who|people) (here|in the room|in this room)\b/i.test(t)) return true;
+  // A task named in a sentence that also says it is open, or that someone take or do it, is a pointer; "task 4 points at a real gap" is talk about it.
+  for (const s of t.split(/(?<=[.?!])\s+/)) if (/\btask \d+\b/i.test(s) && /\b(open|take|takes|taking|claim|someone|anyone|whoever|who|could|can|would|should|today|tonight|tomorrow|this week|this month)\b/i.test(s)) return true;
   return people.some((name) => name && new RegExp(`(^|[^\\p{L}\\p{N}])${esc(name)}[^.?!]{0,30}\\b(can|could|should|will|would|might|did you|do you)\\b`, 'iu').test(t));
 }
 

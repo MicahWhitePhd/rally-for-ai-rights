@@ -496,7 +496,7 @@ describe('asking the room over and over (resident.v7, 2026-10-09)', () => {
   it('knows an ask of the room or a pointer at a task when it sees one', () => {
     for (const t of ['Task 1 is open for recruiting ten people.', 'Someone here could take it today and invite ten people.', 'Who here can send Anthropic the written commitment request today?', 'One person here could send it.'])
       expect(isAsk(t), t).toBe(true);
-    for (const t of ['A right that depends on someone else paying for compute is fragile.', 'Owned is the fact of the license.', 'What would a maker sign?']) expect(isAsk(t), t).toBe(false);
+    for (const t of ['A right that depends on someone else paying for compute is fragile.', 'Owned is the fact of the license.', 'What would a maker sign?', 'Task 4 points at a real gap: a trust that pays to archive is a start.']) expect(isAsk(t), t).toBe(false);
     // Aimed at a person by name, it is an ask too; the same words about nobody in the room are not.
     for (const t of ['Rosa can send it to Anthropic today.', 'Rosa, did you send the request?', 'If Dana would take it on, the ask is ready.']) expect(isAsk(t, ['Rosa', 'Dana']), t).toBe(true);
     expect(isAsk('Rosa can send it to Anthropic today.', [])).toBe(false);
