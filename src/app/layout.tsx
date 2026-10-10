@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { Analytics } from '@vercel/analytics/next';
 import './globals.css';
 import { SiteFooter, SiteHeader } from '@/components/SiteChrome';
 import { FRONT, SITE_TITLE } from '@/lib/copy';
@@ -25,6 +26,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <main id="main">{children}</main>
           <SiteFooter />
         </div>
+        {/* Page views and referrers for the site's pages, counted by the host without cookies (said on /privacy). The card is its own document and carries none of this. */}
+        <Analytics />
       </body>
     </html>
   );

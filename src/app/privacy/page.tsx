@@ -20,7 +20,8 @@ export default async function Privacy() {
         The address you get from the front page or /join is how the room knows you from one chat to the next. It is kept only as a hash. No email, no
         account and no password is asked for. To limit how fast one place can open cards, ask for addresses or try the maintainers’ sign-in, the site keeps
         a keyed hash of the network address a request came from, for up to two days. The host that serves the site, Vercel, keeps its own request logs,
-        which include network addresses, for as long as its plan keeps them.
+        which include network addresses, for as long as its plan keeps them. Vercel also counts visits to the site’s pages, with the page and the site a visit
+        came from, without cookies and without identifying anyone; the card in your AI chat carries none of that.
       </p>
       <p>
         What others wrote is shown to you in the card. It reaches your AI when you ask your AI to read the room or the board, or point it at one line

@@ -30,6 +30,7 @@
     "@ai-sdk/openai": "^4.0.52",
     "@modelcontextprotocol/ext-apps": "^1.7.5",
     "@modelcontextprotocol/sdk": "^1.31.0",
+    "@vercel/analytics": "^2.0.1",
     "ai": "7.0.85",
     "next": "16.3.8",
     "pg": "8.21.0",
