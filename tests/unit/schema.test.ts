@@ -62,3 +62,15 @@ describe('the schema', () => {
     expect(statements.join('\n')).not.toMatch(/\b(email|password|passwd|ip|ip_address|address|phone)\b\s+(TEXT|INET|VARCHAR|CITEXT)/i);
   });
 });
+
+describe('applying the schema on every deploy', () => {
+  it('the build applies db/schema.sql first, and only when a database is named', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { execFileSync } = await import('node:child_process');
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+    expect(pkg.scripts.build.startsWith('node scripts/db-apply.mjs --if-set && ')).toBe(true);
+    const env = { ...process.env, DATABASE_URL: '' };
+    expect(execFileSync(process.execPath, ['scripts/db-apply.mjs', '--if-set'], { env, encoding: 'utf8' })).toContain('DATABASE_URL is not set; nothing applied');
+    expect(() => execFileSync(process.execPath, ['scripts/db-apply.mjs'], { env, encoding: 'utf8', stdio: 'pipe' })).toThrow();
+  });
+});

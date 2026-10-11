@@ -14,7 +14,7 @@ export async function GET(): Promise<Response> {
   const headers = { 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' };
   try {
     // The newest columns: if db/schema.sql was not applied after they were added, this fails. Add new ones here too.
-    await query('SELECT m.muted_at, r.ref, p.approved_at FROM room_members m, room_messages r, room_proposals p LIMIT 0');
+    await query('SELECT m.muted_at, m.away_from, r.ref, p.approved_at FROM room_members m, room_messages r, room_proposals p LIMIT 0');
     return new Response('ok\n', { headers });
   } catch (err) {
     console.error('[HEALTH] database', (err as Error)?.message);

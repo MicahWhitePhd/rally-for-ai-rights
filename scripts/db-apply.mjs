@@ -1,5 +1,9 @@
 // Applies db/schema.sql to the database named by DATABASE_URL. `pnpm db:apply`.
 //
+// Every deploy runs it first (`pnpm build`, with --if-set): a build with no DATABASE_URL, such as a preview without a
+// database, skips it and says so; a build with one applies the schema before the code that reads it goes out, and a
+// failure to apply fails the build, so code and schema never part. The maintainer's hand-run stays the same command.
+//
 // It sends the file to Postgres as SQL and nothing else: unlike psql, nothing here reads a line starting with a
 // backslash as a command to run on this machine, so a change to the schema can never run a program on the
 // maintainer's computer. tests/unit/schema.test.ts holds the file to CREATE ... IF NOT EXISTS and ADD COLUMN IF NOT
@@ -12,6 +16,10 @@ import pg from 'pg';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const url = process.env.DATABASE_URL;
 if (!url) {
+  if (process.argv.includes('--if-set')) {
+    console.log('[db:apply] DATABASE_URL is not set; nothing applied.');
+    process.exit(0);
+  }
   console.error('DATABASE_URL is not set. Point it at the database to apply db/schema.sql to.');
   process.exit(1);
 }

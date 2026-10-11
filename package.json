@@ -11,7 +11,7 @@
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "dev": "node scripts/build-room-ui.mjs && node scripts/build-code-index.mjs && next dev -p 3950",
-    "build": "node scripts/build-room-ui.mjs && node scripts/build-code-index.mjs && next build",
+    "build": "node scripts/db-apply.mjs --if-set && node scripts/build-room-ui.mjs && node scripts/build-code-index.mjs && next build",
     "start": "next start",
     "typecheck": "node scripts/build-room-ui.mjs && tsc --noEmit",
     "test": "node scripts/build-room-ui.mjs && vitest run",

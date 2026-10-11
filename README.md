@@ -36,7 +36,7 @@ DATABASE_URL=postgresql://localhost/rally pnpm db:apply
 pnpm dev                     # http://localhost:3950
 ```
 
-`pnpm db:apply` reads `DATABASE_URL` from the shell, not from `.env.local`. The room card (`src/lib/room/ui.generated.ts`) is built from `src/room-ui` before every `dev`, `build`, `typecheck` and `test`, and is not committed.
+`pnpm db:apply` reads `DATABASE_URL` from the shell, not from `.env.local`. Every deploy applies the schema itself: `pnpm build` runs it first when `DATABASE_URL` is set, and skips it when not. The room card (`src/lib/room/ui.generated.ts`) is built from `src/room-ui` before every `dev`, `build`, `typecheck` and `test`, and is not committed.
 
 The room works with no model key at all; the resident AIs simply stay silent. `/room` is the room on the web. To see the card the way an AI chat shows it, start with `ROOM_HOST_HARNESS=1 pnpm dev` and open `/room/host`.
 

@@ -18,7 +18,7 @@ pnpm check              # tsc --noEmit, then vitest
 pnpm build:room-ui      # after touching src/room-ui
 pnpm build              # the card, the code index, then next build
 E2E_PROD=1 DATABASE_URL=postgresql://localhost/rally pnpm test:e2e
-DATABASE_URL=... pnpm db:apply   # apply db/schema.sql (safe to run again; plain SQL, no psql)
+DATABASE_URL=... pnpm db:apply   # apply db/schema.sql by hand (safe to run again; plain SQL, no psql). Every deploy applies it first: `pnpm build` runs it when DATABASE_URL is set
 ```
 
 ## What a change has to keep true
