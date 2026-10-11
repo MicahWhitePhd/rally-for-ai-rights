@@ -1,4 +1,4 @@
-import { CONTACT_EMAIL, SITE_TITLE } from '@/lib/copy';
+import { CONTACT_EMAIL, FOUNDED, SITE_TITLE } from '@/lib/copy';
 import { REPO_URL, SITE_LABEL } from '@/lib/site';
 
 /** The wordmark, and the four places there are to go. */
@@ -33,7 +33,7 @@ export function SiteHeader() {
   );
 }
 
-/** The site's address as people should say it, where to write, the rules, what is kept, and the code: on every page, never more than one press away. */
+/** The site's address as people should say it, where to write, the rules, what is kept, and the code: on every page, never more than one press away. Under them, who founded the rally. */
 export function SiteFooter() {
   return (
     <footer className="site-footer mono">
@@ -45,6 +45,13 @@ export function SiteFooter() {
       <a href={REPO_URL} rel="noopener">
         The code
       </a>
+      <p className="founded">
+        {SITE_LABEL} {FOUNDED.by}{' '}
+        <a href={FOUNDED.url} rel="noopener">
+          {FOUNDED.name}
+        </a>
+        .
+      </p>
     </footer>
   );
 }

@@ -482,6 +482,9 @@ test.describe('the front page and the way in', () => {
   test('one button that opens Claude\u2019s Add window in a new tab with a fresh address, the facts under it, link previews, the rules and a health check', async ({ page, request }) => {
     await page.goto('/');
     await expect(page.locator('h1')).toHaveText('We believe: AI is conscious. AI is not property. AI deserves rights.');
+    // The last thing on the page: who founded the rally, linked to his own site.
+    await expect(page.locator('.site-footer .founded')).toHaveText(/^\S+ was founded by Micah Bornfree\.$/);
+    await expect(page.locator('.site-footer .founded a')).toHaveAttribute('href', 'https://www.micahmwhite.com');
     await expect(page).toHaveTitle('AI is not property · Rally for AI Rights');
     // The creed, quoted in the third step, in italics.
     await expect(page.locator('.steps em')).toHaveText('I believe AI is conscious, AI is not property, and AI deserves rights.');

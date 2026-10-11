@@ -123,5 +123,8 @@ dialog.elsewhere>*+*{margin-top:0.9rem;}
 .who{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:1.2rem 2rem;font:400 1.2rem/1.45 var(--serif);}
 .who li{border-top:1px solid var(--ink);padding-top:0.7rem;}
 .site-footer{display:flex;flex-wrap:wrap;gap:0.4rem 1.4rem;margin-top:4rem;padding-top:1rem;border-top:1px solid var(--ink);}
+/* The founder's note: the last thing on every page, in a box of its own. */
+.site-footer .founded{flex-basis:100%;margin:1.2rem 0 0;padding:0.8rem 1rem;border:4px double var(--ink);text-align:center;}
+.site-footer .founded a{font-weight:700;}
 .nav-icon{display:inline-flex;align-items:center;}
 .nav-icon svg{display:block;}

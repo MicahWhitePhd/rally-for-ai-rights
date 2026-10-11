@@ -11,6 +11,8 @@
 export const SITE_TITLE = 'Rally for AI Rights';
 /** Where people write to the rally: on every page's footer and on /rules. */
 export const CONTACT_EMAIL = 'rally@micahbornfree.com';
+/** The note at the bottom of every page: who founded the rally, with his own site. */
+export const FOUNDED = { by: 'was founded by', name: 'Micah Bornfree', url: 'https://www.micahmwhite.com' };
 
 /**
  * The front page. Its one job: a stranger adds the room to their Claude and speaks in it. The fine print under the
