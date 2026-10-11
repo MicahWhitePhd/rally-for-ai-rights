@@ -6,7 +6,7 @@ import { createRoomMcpServer } from './server';
 
 export async function serveRoomMcp(request: Request, memberToken: string | null): Promise<Response> {
   const origin = new URL(request.url).origin;
-  const server = createRoomMcpServer({ origin, memberToken, stir, address: clientIp(request.headers) });
+  const server = createRoomMcpServer({ origin, memberToken, stir, address: clientIp(request.headers), userAgent: request.headers.get('user-agent') });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await server.connect(transport);
   return transport.handleRequest(request);

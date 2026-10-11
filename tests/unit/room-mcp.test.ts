@@ -418,6 +418,27 @@ describe('the room connector', () => {
     expect(text((await client.callTool({ name: 'open_room', arguments: {} })) as CallToolResult)).toMatch(/choose_name sets the one they tell you/);
   });
 
+  it('logs who connects, once per handshake: the host’s own name and version, its user agent, guest or member, and never the address', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const guest = createRoomMcpServer({ origin: 'https://room.example', memberToken: null, userAgent: 'Claude-User/1.0 (+https://example)\u0007\n  evil', room: fakeRoom([], {}), board: fakeBoard([], {}) });
+      const [a, b] = InMemoryTransport.createLinkedPair();
+      await Promise.all([guest.connect(a), new Client({ name: 'host-under-test', version: '9.9' }).connect(b)]);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(log).toHaveBeenCalledWith('[MCP] client host-under-test 9.9; agent Claude-User/1.0 (+https://example) evil; guest');
+      const token = `r${'x'.repeat(40)}`;
+      const member = createRoomMcpServer({ origin: 'https://room.example', memberToken: token, room: fakeRoom([], {}), board: fakeBoard([], {}) });
+      const [c, d] = InMemoryTransport.createLinkedPair();
+      await Promise.all([member.connect(c), new Client({ name: 'another', version: '1' }).connect(d)]);
+      await new Promise((r) => setTimeout(r, 20));
+      const line = log.mock.calls.map((l) => String(l[0])).find((l) => l.includes('another'));
+      expect(line).toBe('[MCP] client another 1; agent -; member');
+      expect(log.mock.calls.flat().join('\n')).not.toContain(token);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('says nothing to the model in the imperative', async () => {
     const { client } = await connect({ named: true });
     const { tools } = await client.listTools();

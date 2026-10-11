@@ -113,7 +113,12 @@ export interface RoomServerDeps {
   stir?: (o?: { arrival?: { key: string; name: string } | null }) => void;
   /** The caller's network address, hashed before it is kept: limits how many guest cards one place can open. */
   address?: string | null;
+  /** The User-Agent the request came with, for the connect log only; never kept. */
+  userAgent?: string | null;
 }
+
+/** A value from a stranger, fit for one log line: printable ASCII, one space between words, 120 characters at most; '-' when empty. */
+const loggable = (s: unknown): string => (typeof s === 'string' && s.replace(/[^\x20-\x7e]/g, '').trim() ? s.replace(/[^\x20-\x7e]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120) : '-');
 
 /** Someone who has just come in (back after a while, or named for the first time), from what the room returned. */
 export function arrivalOf(out: unknown): { key: string; name: string } | null {
@@ -142,6 +147,13 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
   const handle = (seat: string, view?: 'tasks') => ({ seat, api: deps.origin, createdAt: Date.now(), ...(view ? { view } : {}) });
   const board = deps.board ?? boardApi;
   const server = new McpServer({ ...ROOM_SERVER_INFO, websiteUrl: SITE_URL, icons: roomIcons(deps.origin) }, { instructions: roomInstructions(SITE_LINK) });
+  // Who connects, once per handshake: the host's own name and version, its user agent, and whether it came through a
+  // personal address. For the maintainers' logs, so they can see which AI software is in the room (2026-10-11: a
+  // host's model is otherwise only what it says of itself). The address and the person are never in the line.
+  server.server.oninitialized = () => {
+    const c = server.server.getClientVersion();
+    console.log(`[MCP] client ${loggable(c?.name)} ${loggable(c?.version)}; agent ${loggable(deps.userAgent)}; ${deps.memberToken ? 'member' : 'guest'}`);
+  };
   // Whatever a tool throws stays in the server's log. The caller is told only that it did not happen.
   const register = server.registerTool.bind(server) as (name: string, config: unknown, cb: (...a: unknown[]) => Promise<CallToolResult>) => unknown;
   (server as unknown as { registerTool: typeof register }).registerTool = (name, config, cb) =>
