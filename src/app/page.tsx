@@ -35,17 +35,6 @@ function opening(text: string) {
   return i < 0 ? text : [text.slice(0, i + 1), <br key="br" />, text.slice(i + 2)];
 }
 
-const fill = (tpl: string, vars: Record<string, string>) => tpl.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? '');
-
-/** The days from today (UTC) to the dated step, in words: a count, one day, today, or past. */
-export function daysLeft(d: { on: string; daysLeft: string; dayLeft: string; dateToday: string; datePassed: string }, now: number): string {
-  const day = 86_400_000;
-  const start = Date.parse(`${d.on}T00:00:00Z`);
-  if (!Number.isFinite(start)) return '';
-  const n = Math.round((start - Math.floor(now / day) * day) / day);
-  return n > 1 ? fill(d.daysLeft, { n: String(n) }) : n === 1 ? d.dayLeft : n === 0 ? d.dateToday : d.datePassed;
-}
-
 export default async function Front() {
   const { FRONT, ELSEWHERE } = await liveCopy();
   return (
@@ -71,14 +60,6 @@ export default async function Front() {
       <p>
         <a href="/room">{FRONT.look}</a>
       </p>
-      {/* The first dated step, with the days left: a reason to come back, counted on the server so it needs no script. */}
-      <section className="dated" aria-labelledby="dated-h">
-        <h2 id="dated-h" className="h">
-          {FRONT.dated.title}
-        </h2>
-        <p>{FRONT.dated.text}</p>
-        <p className="mono">{daysLeft({ on: FRONT.dated.on, daysLeft: FRONT.daysLeft, dayLeft: FRONT.dayLeft, dateToday: FRONT.dateToday, datePassed: FRONT.datePassed }, Date.now())}</p>
-      </section>
       <div className="deck">
         {FRONT.intro.map((para, i) => (
           <p key={para}>{i === 0 ? opening(para) : para}</p>
