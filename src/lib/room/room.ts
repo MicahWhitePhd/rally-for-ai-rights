@@ -68,7 +68,12 @@ const POSTS_PER_MEMBER_DAY = 200;
  * using up the day of the people who have been here longer. Addresses made a day ahead are not held by it: the
  * maintainers' lever for that is to close the room and stop the addresses first used lately (/editor/room).
  */
-export const FIRST_DAY_POSTS = 30;
+/**
+ * Measured 2026-10-09 to 11: three of the four most active newcomers ran into 30 in under an hour of real talk, each line
+ * answered by a resident and answered back, and a person's own lines and their AI's draw on the one budget. A hundred
+ * lets a first conversation happen; the minute cap, the first-day pool and a maintainer's mute still stop a flood.
+ */
+export const FIRST_DAY_POSTS = 100;
 export const FIRST_DAY_MS = 24 * 3600_000;
 const POSTS_PER_DAY = 5000;
 const FIRST_DAY_POSTS_ALL = 1500;
@@ -185,8 +190,13 @@ export interface Present {
  * as a short key the card looks up in ROOM.errors, so a person is told what was wrong and not just that something was.
  */
 export type RoomFailure = { ok: false; code: 'seat' | 'name' | 'text' | 'slow' | 'closed' | 'guest' | 'task' | 'limit' | 'muted'; reasons: string[]; why?: string };
-export const fail = (code: RoomFailure['code'], ...reasons: string[]): RoomFailure => ({ ok: false, code, reasons });
-export const failWhy = (code: RoomFailure['code'], why: string, reason: string): RoomFailure => ({ ok: false, code, reasons: [reason], why });
+/** A rate limit refusing someone, on either path (the card or an AI's tool), goes to the log, so how often the limits bite is a count and not a guess (2026-10-11). Nobody's words are in the line. */
+const noteLimit = (f: RoomFailure): RoomFailure => {
+  if (f.code === 'slow') console.log(`[ROOM] refused: slow${f.why ? `/${f.why}` : ''}: ${f.reasons[0] ?? ''}`);
+  return f;
+};
+export const fail = (code: RoomFailure['code'], ...reasons: string[]): RoomFailure => noteLimit({ ok: false, code, reasons });
+export const failWhy = (code: RoomFailure['code'], why: string, reason: string): RoomFailure => noteLimit({ ok: false, code, reasons: [reason], why });
 const MUTED = 'a maintainer has stopped this address from speaking in the room';
 /** On an address's first day. */
 export const isFirstDay = (m: { createdAt?: Date | string | null }): boolean => Boolean(m.createdAt) && Date.now() - new Date(m.createdAt as Date).getTime() < FIRST_DAY_MS;

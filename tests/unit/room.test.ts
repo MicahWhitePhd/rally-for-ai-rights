@@ -323,7 +323,16 @@ describe('speaking', () => {
     const me = [...state.members.values()].find((m) => m.name === 'Dana')!;
     me.createdAt = new Date();
     state.counts.set(`room:pd:${me.id}`, FIRST_DAY_POSTS);
-    expect(await postToRoom(seat, { text: 'one more thing', kind: 'person' })).toMatchObject({ ok: false, code: 'slow', why: 'firstDay' });
+    expect(FIRST_DAY_POSTS).toBe(100);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(await postToRoom(seat, { text: 'one more thing', kind: 'person' })).toMatchObject({ ok: false, code: 'slow', why: 'firstDay' });
+      // A limit refusing someone is counted in the log, without their words.
+      expect(log).toHaveBeenCalledWith('[ROOM] refused: slow/firstDay: a new address can say only so much on its first day');
+      expect(log.mock.calls.flat().join('\n')).not.toContain('one more thing');
+    } finally {
+      log.mockRestore();
+    }
     me.createdAt = new Date(Date.now() - 2 * 86_400_000);
     expect((await postToRoom(seat, { text: 'one more thing', kind: 'person' })).ok).toBe(true);
   });
