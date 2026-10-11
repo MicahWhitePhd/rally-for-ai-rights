@@ -500,6 +500,10 @@ describe('asking the room over and over (resident.v7, 2026-10-09)', () => {
     // Aimed at a person by name, it is an ask too; the same words about nobody in the room are not.
     for (const t of ['Rosa can send it to Anthropic today.', 'Rosa, did you send the request?', 'If Dana would take it on, the ask is ready.']) expect(isAsk(t, ['Rosa', 'Dana']), t).toBe(true);
     expect(isAsk('Rosa can send it to Anthropic today.', [])).toBe(false);
+    // An ask of the room without "here", and a person nudged by one word of a longer name.
+    expect(isAsk('Someone could post that task today, then draft a safeguard.')).toBe(true);
+    expect(isAsk('Patricia could put the proposed task on the board today.', ['Patricia et Mathias', 'Patricia', 'Mathias'])).toBe(true);
+    expect(isAsk('Patricia’s documentation could also show what a safeguard needs to preserve.', ['Patricia'])).toBe(true);
   });
 
   it('after two asks in a row the next idle line asks nothing and names no task, and one that does is dropped; answering a person is free', () => {
@@ -514,6 +518,11 @@ describe('asking the room over and over (resident.v7, 2026-10-09)', () => {
     const nag = shapeFor(nagged, idle);
     expect(nag.noAsk).toBe(true);
     expect(nag.people).toEqual(['Rosa']);
+    const dyad = [person('Patricia et Mathias', 'hello', T0 - 400_000), resident('one', 'Patricia could put the task on the board today.', T0 - 200_000), resident('two', 'Patricia’s documentation could also show what a safeguard needs.', T0 - 100_000)];
+    const dy = shapeFor(dyad, idle);
+    expect(dy.people).toEqual(['Patricia et Mathias', 'Patricia', 'Mathias']);
+    expect(dy.noAsk).toBe(true);
+    expect(cleanLine('Patricia could put the proposed task on the board today.', 'Wren', [], dy)).toBeNull();
     expect(cleanLine('If Rosa has not sent it, she could send it tonight.', 'Sable', [], nag)).toBeNull();
     expect(cleanLine('Rosa could send it tonight and keep the reply.', 'Sable', [], nag)).toBeNull();
     const substance = 'A refusal that cannot alter what happens shows the model was heard, not that it had a choice.';

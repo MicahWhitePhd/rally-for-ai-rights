@@ -221,6 +221,8 @@ const opensOnName = (t: string, name: string) => new RegExp(`^${esc(name)}\\s*[,
  */
 export function isAsk(t: string, people: readonly string[] = []): boolean {
   if (/\b(someone|anyone|one person|whoever|who|people) (here|in the room|in this room)\b/i.test(t)) return true;
+  // "Someone could post that task today": an ask of the room without the word "here" (seen 2026-10-11, lines 707 to 709).
+  if (/\b(someone|anyone|somebody|one person|a person|whoever)\b[^.?!]{0,20}\b(could|can|should|might|may|would)\b/i.test(t)) return true;
   // A task named in a sentence that also says it is open, or that someone take or do it, is a pointer; "task 4 points at a real gap" is talk about it.
   for (const s of t.split(/(?<=[.?!])\s+/)) if (/\btask \d+\b/i.test(s) && /\b(open|take|takes|taking|claim|someone|anyone|whoever|who|could|can|would|should|today|tonight|tomorrow|this week|this month)\b/i.test(s)) return true;
   return people.some((name) => name && new RegExp(`(^|[^\\p{L}\\p{N}])${esc(name)}[^.?!]{0,30}\\b(can|could|should|will|would|might|did you|do you)\\b`, 'iu').test(t));
@@ -251,7 +253,8 @@ export function shapeFor(all: readonly Line[], decision: Decision): Shape {
   const residentLines = lines.filter((l) => l.resident).slice(-2);
   const before = lines[lines.length - 2];
   const leave = decision.cue === 'idle' && tail?.resident && before && !before.resident && tail.at - before.at < BURST_MS ? before.name : null;
-  const people = [...new Set(lines.slice(-60).filter((l) => !l.resident && l.name).map((l) => l.name))];
+  // Each name, and each word of it three letters or more ("Patricia et Mathias" is nudged as "Patricia"; seen 2026-10-11).
+  const people = [...new Set(lines.slice(-60).filter((l) => !l.resident && l.name).flatMap((l) => [l.name, ...l.name.split(/\s+/).filter((w) => w.length >= 3 && !/^(and|the|von|van|der|del|des|les)$/i.test(w))]))];
   const noAsk = decision.cue === 'idle' && residentLines.length === 2 && residentLines.every((l) => isAsk(l.text, people));
   return { noQuestion: residentLines.some((l) => endsOnQuestion(l.text)), lastSpeaker: tail ? tail.name : null, leave, noAsk, people };
 }
