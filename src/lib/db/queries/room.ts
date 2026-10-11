@@ -40,7 +40,7 @@ export interface RoomMessageRow {
 }
 
 export async function memberByToken(tokenHash: string): Promise<RoomMember | null> {
-  return queryOne<RoomMember>(`SELECT id, name, true AS member FROM room_members WHERE token_hash = $1`, [tokenHash]);
+  return queryOne<RoomMember>(`SELECT id, name, true AS member, created_at AS "createdAt" FROM room_members WHERE token_hash = $1`, [tokenHash]);
 }
 
 /** How long a seat (one open card's handle) lasts. A card older than this asks to be opened again. */
@@ -174,6 +174,26 @@ export async function listRoomMessages(after: number | null, limit: number): Pro
     [limit],
   );
   return rows.reverse();
+}
+
+/** Published messages since a time, oldest first, each with the task it is about when it is a board event (catch_up). */
+export async function listRoomMessagesSince(since: Date, limit: number): Promise<Array<RoomMessageRow & { ref: string | null }>> {
+  return query<RoomMessageRow & { ref: string | null }>(
+    `SELECT ${COLS}, r.ref FROM room_messages r JOIN room_members m ON m.id = r.member_id
+      WHERE r.status = 'published' AND r.created_at > $1 ORDER BY r.id ASC LIMIT $2`,
+    [since, limit],
+  );
+}
+
+/** A member is back after a while: the time they had been away since is kept until the next time (catch_up counts from it). */
+export async function markAway(memberId: string, awayFrom: Date): Promise<void> {
+  await query(`UPDATE room_members SET away_from = $2 WHERE id = $1`, [memberId, awayFrom]);
+}
+
+/** When the member's current visit found them away since, or null when nothing is kept. */
+export async function awayFrom(memberId: string): Promise<Date | null> {
+  const r = await queryOne<{ away_from: Date | null }>(`SELECT away_from FROM room_members WHERE id = $1`, [memberId]);
+  return r?.away_from ?? null;
 }
 
 /** The published messages just before `before`, oldest first: what a card asks for as the person scrolls back. */

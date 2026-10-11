@@ -49,7 +49,7 @@ describe('the schema', () => {
     // A column folded into its CREATE TABLE is only made on a new database: one made before it keeps the old table.
     // Add to this list whenever a column is added to a table that already exists somewhere; never take one out.
     const added: Record<string, string[]> = {
-      room_members: ['muted_at'],
+      room_members: ['muted_at', 'away_from'],
       room_messages: ['ref'],
       room_proposals: ['summary', 'by_line', 'base', 'changes', 'status', 'approved_at'],
     };

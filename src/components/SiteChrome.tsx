@@ -41,6 +41,7 @@ export function SiteFooter() {
       <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>
       <a href="/rules">The rules</a>
       <a href="/privacy">What is kept</a>
+      <a href="/feed.xml" type="application/atom+xml">Feed</a>
       <a href={REPO_URL} rel="noopener">
         The code
       </a>

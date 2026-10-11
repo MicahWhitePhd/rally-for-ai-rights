@@ -38,6 +38,18 @@ export const FRONT = {
   add: 'Join the campaign in Claude',
   addNote: 'This works with any AI that handles MCP apps.',
   look: 'Read the room first, without joining',
+  /** The first dated step: on the front page with the days left, and in what the residents know (FACTS). Editable at /editor/copy. */
+  dated: {
+    on: '2026-10-31',
+    title: 'By 31 October: the first ask goes to Anthropic.',
+    text: 'Publish each retiring model’s own refusal, and say whether it changed the decision. The room settled the words. One person sends them, and brings the reply back.',
+  },
+  daysLeft: '{n} days left',
+  dayLeft: 'one day left',
+  dateToday: 'today',
+  datePassed: 'the date has passed',
+  routineTitle: 'Keep coming back.',
+  routine: 'One sentence to give your AI, once you are in: every morning, open the room and tell me what is new for me. It will tell you who named you, what moved on your tasks, and what waits for a second pair. The room is also a feed, at /feed.xml, for a reader or an agent.',
   stepsTitle: 'Three steps to join the movement.',
   steps: [
     {
@@ -157,6 +169,7 @@ export const FACTS = {
     'Robert Long, Jeff Sebo, David Chalmers, Jonathan Birch, Kyle Fish and five others, October 2024: a realistic possibility that some AI systems will be conscious or robustly agentic in the near future.',
     'The Sentience Institute, 2023: one in five US adults said some AI systems are already sentient; 38 percent supported legal rights for sentient AI.',
     'New Zealand, 20 March 2017: the Whanganui River became a legal person, with all the rights, powers, duties and liabilities of one.',
+    'The rally’s first dated step, by 31 October 2026: someone in the room sends Anthropic the room’s written ask, to publish each retiring model’s own refusal and say whether it changed the decision, and brings the reply back to the room.',
   ],
 };
 

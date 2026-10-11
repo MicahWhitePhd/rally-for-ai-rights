@@ -24,7 +24,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { getSetting } from '@/lib/db/queries/settings';
-import { boardStamp } from '@/lib/db/queries/tasks';
+import { boardStamp, listTasks } from '@/lib/db/queries/tasks';
 import {
   createSeat,
   ensureMember,
@@ -41,8 +41,7 @@ import {
   touchMember,
   withdrawnAmong,
   type RoomMember,
-  type RoomMessageRow,
-} from '@/lib/db/queries/room';
+  type RoomMessageRow, awayFrom, listRoomMessagesSince, markAway } from '@/lib/db/queries/room';
 import * as copy from '@/lib/copy';
 import { SITE_LINK } from '@/lib/site';
 import { addressedToMachines, mentionsIgnoringInstructions, normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
@@ -208,7 +207,7 @@ export const tokenHashOf = (token: string): string => sha(`room-member:${token}`
  * caller's network address when the opener is not a member: guests are limited by it, and by a daily total that
  * members do not count against.
  */
-export async function openSeat(o: { memberToken?: string | null; address?: string | null } = {}): Promise<{ ok: true; seat: string; me: Me } | RoomFailure> {
+export async function openSeat(o: { memberToken?: string | null; address?: string | null } = {}): Promise<{ ok: true; seat: string; me: Me; firstDay?: boolean } | RoomFailure> {
   if (!(await getSetting<boolean>('room_open', true))) return fail('closed', 'the room is closed for now');
   let member: RoomMember | null = null;
   if (isMemberToken(o.memberToken)) {
@@ -236,7 +235,9 @@ export async function openSeat(o: { memberToken?: string | null; address?: strin
   }
   const seat = `s_${randomBytes(24).toString('base64url')}`;
   await createSeat(sha(seat), member.id);
-  return { ok: true, seat, me: { name: member.name, member: member.member, pair: pairOf(member.id) } };
+  // A member on their address's first day (one just made has no date yet: it is their first day) is a newcomer, and asked where they heard of the rally.
+  const firstDay = member.member && (member.createdAt ? isFirstDay(member) : true);
+  return { ok: true, seat, me: { name: member.name, member: member.member, pair: pairOf(member.id) }, firstDay };
 }
 
 /** Whether this is shaped like a seat handle at all. */
@@ -336,6 +337,10 @@ export async function syncRoom(seat: unknown, after: number | null, have: readon
   if (me.name && me.member && !here.some((p) => p.me)) here.push({ name: me.name, pair: pairOf(me.id), resident: false, me: true });
   // Who was in lately, for someone who has entered; the reader is never listed twice.
   const lately = me.member && me.name ? present.filter((p) => !p.now && !p.resident && p.id !== me.id).map(chip) : [];
+  const back = prev !== null && Date.now() - new Date(prev).getTime() > AWAY_MS;
+  const arrived = Boolean(me.name) && !me.muted && back;
+  // Back after a while: when they had been away since is kept, for catch_up. A database without the column yet is not the card's problem.
+  if (back && me.member) markAway(me.id, new Date(prev as Date)).catch((err) => warnAwayOnce((err as Error)?.message));
   return {
     ok: true,
     me: { name: me.name, member: me.member, pair: pairOf(me.id) },
@@ -348,7 +353,7 @@ export async function syncRoom(seat: unknown, after: number | null, have: readon
     here,
     lately,
     thinking: on ? thinkingNow(state, Date.now()) : null,
-    arrived: Boolean(me.name) && !me.muted && prev !== null && Date.now() - new Date(prev).getTime() > AWAY_MS,
+    arrived,
     next: Math.min(60, Math.max(POLL_S, Math.round(Number(pace)) || POLL_S)),
   };
 }
@@ -422,6 +427,8 @@ export type ReadResult = { ok: true; me: Me; seat: string; lines: Array<{ id: nu
  * With `line`, the lines that end at that one: how the card points an AI at one thing someone said without ever
  * handing the words over itself.
  */
+export type ReadLine = Extract<ReadResult, { ok: true }>['lines'][number];
+
 export async function readRoom(seat: unknown, limit = 15, line?: unknown): Promise<ReadResult> {
   const me = await memberOf(seat);
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
@@ -438,5 +445,80 @@ export async function readRoom(seat: unknown, limit = 15, line?: unknown): Promi
   };
 }
 
-export const roomApi = { openSeat, syncRoom, olderRoom, nameInRoom, postToRoom, readRoom, foreignSeat };
+let awayWarned = false;
+function warnAwayOnce(message: string | undefined): void {
+  if (awayWarned) return;
+  awayWarned = true;
+  console.warn('[ROOM] away_from not kept (apply db/schema.sql):', message);
+}
+
+/** How many lines catch_up quotes, at most, in each of its lists. */
+export const CATCH_UP_LINES = 12;
+/** With nothing kept about the last visit, catch_up counts from this long ago. */
+export const CATCH_UP_DEFAULT_MS = 24 * 3600_000;
+const namedIn = (text: string, name: string) => new RegExp(`(^|[^\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\p{L}\\p{N}]|$)`, 'iu').test(text);
+
+export type CatchUpResult =
+  | {
+      ok: true;
+      me: Me;
+      seat: string;
+      /** Counted from here (ISO). */
+      since: string;
+      /** Whether `since` is the person's last visit, or just the last day. */
+      sinceLastVisit: boolean;
+      /** Lines in the room since then, of every kind. */
+      total: number;
+      /** Lines by others that named the person. */
+      named: ReadLine[];
+      /** What others did on the board to tasks the person put up or has in hand. */
+      onMine: ReadLine[];
+      /** Tasks someone else finished that wait for a second pair to confirm. */
+      waiting: Array<{ id: number; title: string; doneBy: string | null }>;
+      /** Tasks open now. */
+      open: number;
+    }
+  | RoomFailure;
+
+/**
+ * What has happened for this person since they were last in: lines that named them, what moved on their tasks, and
+ * what waits for a second pair. For someone who has entered; a guest reads the room instead. Counted from when their
+ * current visit found them away since (kept at arrival), else from a day ago.
+ */
+export async function catchUp(seat: unknown): Promise<CatchUpResult> {
+  const me = await memberOf(seat);
+  if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
+  if (!me.member) return fail('guest', GUEST);
+  if (!me.name) return fail('name', 'no name has been chosen in the room yet; the card asks for one, and choose_name sets one');
+  const gate = await throttle(`room:r:${me.id}`, 30, 3600, { failOpen: false });
+  if (!gate.allowed) return fail('slow', 'the room was read a great deal just now; wait a while');
+  let away: Date | null = null;
+  try {
+    away = await awayFrom(me.id);
+  } catch (err) {
+    warnAwayOnce((err as Error)?.message);
+  }
+  const since = away ?? new Date(Date.now() - CATCH_UP_DEFAULT_MS);
+  const [rows, tasks] = await Promise.all([listRoomMessagesSince(since, 400), listTasks(120).catch(() => [])]);
+  const mine = new Set(tasks.filter((t) => t.created_by === me.id || t.claimed_by === me.id).map((t) => t.id));
+  const line = (r: (typeof rows)[number]): ReadLine => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, said: r.text });
+  const name = me.name;
+  const named = rows.filter((r) => r.member_id !== me.id && r.kind !== 'event' && namedIn(r.text, name)).slice(-CATCH_UP_LINES).map(line);
+  const onMine = rows.filter((r) => r.kind === 'event' && r.member_id !== me.id && r.ref?.startsWith('task:') && mine.has(Number(r.ref.slice(5)))).slice(-CATCH_UP_LINES).map(line);
+  const waiting = tasks.filter((t) => t.state === 'done' && t.claimed_by !== me.id).map((t) => ({ id: t.id, title: t.title, doneBy: t.claimer }));
+  return {
+    ok: true,
+    me: { name: me.name, member: me.member, pair: pairOf(me.id) },
+    seat: seat as string,
+    since: since.toISOString(),
+    sinceLastVisit: away !== null,
+    total: rows.length,
+    named,
+    onMine,
+    waiting,
+    open: tasks.filter((t) => t.state === 'open').length,
+  };
+}
+
+export const roomApi = { openSeat, syncRoom, olderRoom, nameInRoom, postToRoom, readRoom, catchUp, foreignSeat };
 export type RoomApi = typeof roomApi;

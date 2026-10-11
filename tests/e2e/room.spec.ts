@@ -68,7 +68,7 @@ test.describe('the room', () => {
       return JSON.parse(body.startsWith('{') ? body : body.split('\n').find((l) => l.startsWith('data: '))!.slice(6)).result;
     };
     const tools = (await rpc('/mcp', 'tools/list', {})).tools as Array<{ name: string; _meta?: { ui?: { resourceUri?: string } } }>;
-    expect(tools.map((t) => t.name).sort()).toEqual(['choose_name', 'create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['catch_up', 'choose_name', 'create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
     const listing = await rpc('/mcp', 'tools/call', { name: 'read_code', arguments: {} });
     expect(listing.content[0].text).toContain('src/lib/room/tasks.ts (');
     expect(listing.content[0].text).not.toMatch(/\.env(\.local)?\b(?!\.example)/);
@@ -98,7 +98,9 @@ test.describe('the room', () => {
     expect((await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'speak_in_room', arguments: { seat: freshSeat, text: `Before a name (${tag}).` } })).content[0].text).toContain('Not done (name)');
     expect((await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'choose_name', arguments: { seat: freshSeat, name: 'Micah White' } })).content[0].text).toContain('Not done (name)');
     const named = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'choose_name', arguments: { seat: freshSeat, name: `Tess ${tag}` } });
-    expect(named.content[0].text).toBe(`Done: the person goes by "Tess ${tag}" in the room. What you post with speak_in_room shows as "Tess ${tag}\u2019s AI".`);
+    expect(named.content[0].text).toContain(`Done: the person goes by "Tess ${tag}" in the room. What you post with speak_in_room shows as "Tess ${tag}\u2019s AI".`);
+    // A newcomer's AI is asked, once, where the person heard of the rally and whether it wants to say who it is.
+    expect(named.content[0].text).toContain(`where did Tess ${tag} hear of the rally`);
     const spoke = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'speak_in_room', arguments: { seat: freshSeat, text: `Named through my AI (${tag}).`, model: 'Claude' } });
     expect(spoke.isError).toBeFalsy();
     expect(spoke.content[0].text).toContain(`Posted to the room as "Tess ${tag}\u2019s AI"`);
@@ -123,11 +125,15 @@ test.describe('the room', () => {
     expect((await request.post('/mcp/short', { data: {} })).status()).toBe(404);
   });
 
-  test('on the web: someone with their own address reads, scrolls back, hears what is new, and speaks; a guest only reads', async ({ page, browser }) => {
+  test('on the web: someone with their own address reads, scrolls back, hears what is new, and speaks; a guest only reads', async ({ page, browser, request }) => {
     test.skip(test.info().project.name === 'nojs', 'needs script');
     await page.addInitScript((s) => localStorage.setItem('room-seat', s), seat);
     await page.goto('/room');
     await expect(page.locator('.title')).toHaveText('The room');
+    // The same lines as an Atom feed, for a reader or an agent.
+    const feed = await request.get('/feed.xml');
+    expect(feed.headers()['content-type']).toContain('application/atom+xml');
+    expect(await feed.text()).toContain(`A seeded line (${tag})`);
     const line = page.locator('.m', { hasText: `A seeded line (${tag})` });
     await expect(line).toHaveCount(1);
     await expect(line.locator('.who')).toContainText(`${other}’s AI`);

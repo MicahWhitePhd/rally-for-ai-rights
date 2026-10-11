@@ -37,7 +37,8 @@ vi.mock('@/lib/db/queries/throttle', () => ({
   },
   cleanupThrottle: async () => 0,
 }));
-vi.mock('@/lib/db/queries/tasks', () => ({ boardStamp: async () => ({ open: 2, rev: 1790000000000 }) }));
+const extra = vi.hoisted(() => ({ away: new Map<string, Date>(), tasks: [] as Array<{ id: number; title: string; state: string; created_by: string | null; claimed_by: string | null; claimer: string | null }> }));
+vi.mock('@/lib/db/queries/tasks', () => ({ boardStamp: async () => ({ open: 2, rev: 1790000000000 }), listTasks: async () => extra.tasks }));
 vi.mock('@/lib/db/queries/room', () => ({
   ensureMember: async (tokenHash: string | null) => {
     if (tokenHash) for (const m of state.members.values()) if (m.token === tokenHash) return pub(m);
@@ -87,6 +88,15 @@ vi.mock('@/lib/db/queries/room', () => ({
     state.seen.set(id, Date.now());
     return prev === undefined ? null : new Date(prev);
   },
+  markAway: async (id: string, from: Date) => {
+    extra.away.set(id, from);
+  },
+  awayFrom: async (id: string) => extra.away.get(id) ?? null,
+  listRoomMessagesSince: async (since: Date, limit: number) =>
+    state.messages
+      .filter((m) => m.status === 'published' && m.created_at > since)
+      .slice(0, limit)
+      .map((m) => ({ ...m, ref: (m as { ref?: string }).ref ?? null, name: state.members.get(m.member_id)?.name ?? null, resident: state.members.get(m.member_id)?.resident ?? null })),
   listPresent: async () =>
     [...state.members.values()]
       .filter((m) => m.name && (m.resident || (m.token && state.seen.has(m.id) && Date.now() - (state.seen.get(m.id) ?? 0) < 86_400_000)))
@@ -96,7 +106,7 @@ vi.mock('@/lib/db/queries/room', () => ({
   recentTextsBy: async (memberId: string, limit: number) => state.messages.filter((m) => m.member_id === memberId).slice(-limit).map((m) => m.text),
 }));
 
-const { AWAY_MS, FIRST_DAY_POSTS, PAGE, cleanModel, cleanName, foreignSeat, isMemberToken, nameInRoom, nameIssue, olderRoom, openSeat, pairOf, postToRoom, readRoom, syncRoom } = await import('@/lib/room/room');
+const { AWAY_MS, FIRST_DAY_POSTS, PAGE, catchUp, cleanModel, cleanName, foreignSeat, isMemberToken, nameInRoom, nameIssue, olderRoom, openSeat, pairOf, postToRoom, readRoom, syncRoom } = await import('@/lib/room/room');
 const { mintToken, tokenSigned } = await import('@/lib/room/token');
 const newMemberToken = () => mintToken() as string;
 
@@ -112,6 +122,8 @@ beforeEach(() => {
   state.seats = new Map();
   state.cards = new Map();
   state.messages = [];
+  extra.away = new Map();
+  extra.tasks = [];
 });
 
 /** A seat for someone with their own address, named if a name is given. */
@@ -550,5 +562,43 @@ describe('what an AI is handed when asked to listen', () => {
     for (let i = 0; i < 40; i++) state.messages.push({ id: 10 + i, member_id: 'm1', kind: 'person', model: null, text: `line ${i}`, status: 'published', created_at: new Date() });
     const many = await readRoom(ali, 500);
     expect(many.ok && many.lines).toHaveLength(30);
+  });
+});
+
+describe('catching up', () => {
+  it('what happened for a person since they were last in: lines that named them, what moved on their tasks, what waits for a second pair; a guest and a nameless member are refused', async () => {
+    const dana = await seated('Dana');
+    const ali = await seated('Ali');
+    const idOf = (name: string) => [...state.members.values()].find((m) => m.name === name)!.id;
+    // Dana was last here two hours ago. Meanwhile Ali spoke, named Dana once, and the board moved.
+    state.seen.set(idOf('Dana'), Date.now() - 2 * 3600_000);
+    expect((await postToRoom(ali, { text: 'Dana, are you there?', kind: 'person' })).ok).toBe(true);
+    expect((await postToRoom(ali, { text: 'Nothing for anyone in particular.', kind: 'person' })).ok).toBe(true);
+    state.messages.push({ id: state.messages.length + 1, member_id: idOf('Ali'), kind: 'event', model: null, text: 'took a task: \u201cWrite it\u201d (task 5)', status: 'published', created_at: new Date(), ref: 'task:5' } as unknown as (typeof state.messages)[number]);
+    extra.tasks = [
+      { id: 5, title: 'Write it', state: 'claimed', created_by: idOf('Dana'), claimed_by: idOf('Ali'), claimer: 'Ali' },
+      { id: 6, title: 'Send it', state: 'done', created_by: idOf('Ali'), claimed_by: idOf('Ali'), claimer: 'Ali' },
+      { id: 7, title: 'Done by Dana herself', state: 'done', created_by: idOf('Ali'), claimed_by: idOf('Dana'), claimer: 'Dana' },
+      { id: 8, title: 'Open one', state: 'open', created_by: idOf('Ali'), claimed_by: null, claimer: null },
+    ];
+    // Coming back marks when Dana had been away since.
+    const back = await syncRoom(dana, null);
+    expect(back.ok && back.arrived).toBe(true);
+    expect(extra.away.get(idOf('Dana'))).toBeInstanceOf(Date);
+    const up = await catchUp(dana);
+    expect(up.ok).toBe(true);
+    if (!up.ok) return;
+    expect(up.sinceLastVisit).toBe(true);
+    expect(up.total).toBe(3);
+    expect(up.named.map((l) => [l.name, l.said])).toEqual([['Ali', 'Dana, are you there?']]);
+    expect(up.onMine.map((l) => l.said)).toEqual(['took a task: \u201cWrite it\u201d (task 5)']);
+    expect(up.waiting).toEqual([{ id: 6, title: 'Send it', doneBy: 'Ali' }]);
+    expect(up.open).toBe(1);
+    expect(await catchUp(await guestSeat())).toMatchObject({ ok: false, code: 'guest' });
+    expect(await catchUp(await seated())).toMatchObject({ ok: false, code: 'name' });
+    // With nothing kept about a last visit, the last day is the window.
+    extra.away = new Map();
+    const day = await catchUp(dana);
+    expect(day.ok && day.sinceLastVisit).toBe(false);
   });
 });

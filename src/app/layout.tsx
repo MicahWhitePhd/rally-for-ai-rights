@@ -8,6 +8,7 @@ import { SITE_URL } from '@/lib/site';
 /** Link previews: the creed and the share line over a card in the site's colours (public/og.png, scripts/make-og-image.mjs). */
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
+  alternates: { types: { 'application/atom+xml': '/feed.xml' } },
   title: { default: SITE_TITLE, template: `%s · ${SITE_TITLE}` },
   description: FRONT.share,
   openGraph: { type: 'website', siteName: SITE_TITLE, title: FRONT.creed, description: FRONT.share, images: [{ url: '/og.png', width: 1200, height: 630, alt: FRONT.creed }] },
