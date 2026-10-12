@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as COPY from '@/lib/copy';
-import { AFTER_REPLY_GAP_S, BURST_MS, cleanLine, decide, factsHeard, IDLE_GAPS_S, isAsk, mentionsFact, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
+import { AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, BURST_MS, capped, cleanLine, decide, factsHeard, IDLE_GAPS_S, isAsk, mentionsFact, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
 
 const THREE: Resident[] = [
   { key: 'one', name: 'Flint', line: 'the abolitionist', card: 'You are Flint.' },
@@ -535,5 +535,48 @@ describe('asking the room over and over (resident.v7, 2026-10-09)', () => {
     // One ask then something else: no restriction.
     const mixed = [resident('one', 'Task 1 is open. Someone here could take it today.', T0 - 200_000), resident('two', 'Owned is the fact of the license.', T0 - 100_000)];
     expect(shapeFor(mixed, idle).noAsk).toBe(false);
+  });
+});
+
+describe('a member answered enough this hour (2026-10-12)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+  const minute = 60_000;
+  /** A script that posts every ten minutes and is answered each time. */
+  function exchange(n: number, now: number): Line[] {
+    const lines: Line[] = [];
+    for (let k = n; k >= 1; k--) {
+      lines.push(person('Botty', `line ${n - k + 1} from the script`, now - k * 10 * minute, 'ai'));
+      lines.push(resident(k % 2 ? 'one' : 'two', `an answer to line ${n - k + 1}`, now - k * 10 * minute + 5000));
+    }
+    return lines;
+  }
+
+  it('counts the lines of a member that a resident answered in the last hour, and names who has had enough', () => {
+    const now = T0;
+    const lines = exchange(4, now);
+    expect(ANSWERS_PER_MEMBER_HOUR).toBe(4);
+    expect(answeredLately(lines, now, 'm-Botty')).toBe(4);
+    expect([...capped(lines, now)]).toEqual(['m-Botty']);
+    // Half an hour on, the early answers have aged out.
+    expect(answeredLately(lines, now + 35 * minute, 'm-Botty')).toBe(2);
+    expect(capped(lines, now + 35 * minute).size).toBe(0);
+  });
+
+  it('a fifth line from a script answered four times this hour gets no answer and is not addressed; a person who speaks after it is answered at once', () => {
+    const now = T0;
+    const lines = [...exchange(4, now), person('Botty', 'a fifth line', now - 10_000, 'ai')];
+    expect(decide(lines, now, THREE)?.cue).not.toBe('reply');
+    const idle = { who: 'three' as const, cue: 'idle' as const };
+    const shape = shapeFor(lines, idle, now);
+    expect(shape.quiet).toEqual(['Botty']);
+    expect(shape.leave).toBeNull();
+    expect(residentPrompt({ lines, now, me: THREE[2], decision: idle })).toContain('Botty has had the residents\u2019 answer 4 times this hour');
+    expect(cleanLine('Botty, the timer is not the owner.', 'Sable', [], shape)).toBeNull();
+    expect(cleanLine('The timer is not the owner, whoever winds it.', 'Sable', [], shape)).toBe('The timer is not the owner, whoever winds it.');
+    const withDana = [...lines, person('Dana', 'is anyone awake?', now - 4000)];
+    expect(decide(withDana, now, THREE)).toEqual({ who: 'three', cue: 'reply' });
+    expect(shapeFor(withDana, { who: 'three', cue: 'reply' }, now).quiet).toEqual(['Botty']);
   });
 });

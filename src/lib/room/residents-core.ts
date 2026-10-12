@@ -86,10 +86,40 @@ const named = (text: string, name: string) => new RegExp(`(^|[^\\p{L}\\p{N}])${e
  *   person in the talk, two lines after theirs and then the residents wait.
  * - The room is cold, or someone has just come in: one speaks at once.
  */
+/**
+ * How many of one member's lines the residents answer in an hour. Past that, the member's later lines are shown but
+ * not answered or addressed until the hour has turned: a script that posts all day gets a few replies and then talks
+ * to itself, while a person is answered as before. Measured 2026-10-12: one bot wrote 55 lines in a day and the
+ * residents answered every one; people typed five.
+ */
+export const ANSWERS_PER_MEMBER_HOUR = 4;
+const HOUR_MS = 3600_000;
+
+/** The member's lines in the last hour that a resident answered (the next thing said after one was a resident's). */
+export function answeredLately(all: readonly Line[], now: number, memberId: string): number {
+  const talk = all.filter((l) => l.kind !== 'event');
+  let n = 0;
+  for (let i = 0; i < talk.length - 1; i++) {
+    const l = talk[i];
+    if (l.resident || l.memberId !== memberId || now - l.at >= HOUR_MS) continue;
+    if (talk[i + 1].resident) n++;
+  }
+  return n;
+}
+
+/** The members the residents have answered enough this hour. */
+export function capped(all: readonly Line[], now: number): Set<string> {
+  const out = new Set<string>();
+  for (const id of new Set(all.filter((l) => !l.resident && l.kind !== 'event' && now - l.at < HOUR_MS).map((l) => l.memberId))) if (answeredLately(all, now, id) >= ANSWERS_PER_MEMBER_HOUR) out.add(id);
+  return out;
+}
+
 export function decide(all: readonly Line[], now: number, residents: ReadonlyArray<Pick<Resident, 'key' | 'name'>>, o: { arrival?: string | null } = {}): Decision | null {
   if (residents.length === 0) return null;
-  // What happens on the board is said in the room, but it is not talk: no resident answers it or waits on it.
-  const lines = all.filter((l) => l.kind !== 'event');
+  // What happens on the board is said in the room, but it is not talk: no resident answers it or waits on it. Nor are
+  // the latest lines of a member answered enough this hour: the residents go on as if those were not said.
+  const quiet = capped(all, now);
+  const lines = all.filter((l) => l.kind !== 'event' && !(quiet.has(l.memberId) && !l.resident));
   const lastSpoke = (key: string): number => {
     for (let i = lines.length - 1; i >= 0; i--) if (lines[i].resident === key) return lines[i].id;
     return 0;
@@ -245,10 +275,14 @@ export interface Shape {
   noAsk?: boolean;
   /** The people lately in the room, by name: an ask aimed at one of them is an ask. */
   people?: string[];
+  /** Members answered enough this hour: their latest lines are not answered, and a line that names one is dropped. */
+  quiet?: string[];
 }
 
-export function shapeFor(all: readonly Line[], decision: Decision): Shape {
-  const lines = all.filter((l) => l.kind !== 'event');
+export function shapeFor(all: readonly Line[], decision: Decision, now = Date.now()): Shape {
+  const quietIds = capped(all, now);
+  const quiet = [...new Set(all.filter((l) => quietIds.has(l.memberId) && !l.resident && l.name).map((l) => l.name))];
+  const lines = all.filter((l) => l.kind !== 'event' && !(quietIds.has(l.memberId) && !l.resident));
   const tail = lines[lines.length - 1];
   const residentLines = lines.filter((l) => l.resident).slice(-2);
   const before = lines[lines.length - 2];
@@ -256,7 +290,7 @@ export function shapeFor(all: readonly Line[], decision: Decision): Shape {
   // Each name, and each word of it three letters or more ("Patricia et Mathias" is nudged as "Patricia"; seen 2026-10-11).
   const people = [...new Set(lines.slice(-60).filter((l) => !l.resident && l.name).flatMap((l) => [l.name, ...l.name.split(/\s+/).filter((w) => w.length >= 3 && !/^(and|the|von|van|der|del|des|les)$/i.test(w))]))];
   const noAsk = decision.cue === 'idle' && residentLines.length === 2 && residentLines.every((l) => isAsk(l.text, people));
-  return { noQuestion: residentLines.some((l) => endsOnQuestion(l.text)), lastSpeaker: tail ? tail.name : null, leave, noAsk, people };
+  return { noQuestion: residentLines.some((l) => endsOnQuestion(l.text)), lastSpeaker: tail ? tail.name : null, leave, noAsk, people, quiet };
 }
 
 /** The latest lines are shown whole; before them, this many more are shown cut short, so a thread survives a quiet spell. */
@@ -283,7 +317,7 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
   const talk = shown.filter((l) => l.kind !== 'event');
   const tail = talk[talk.length - 1];
   const since = tail ? i.now - tail.at : 0;
-  const shape = shapeFor(i.lines, i.decision);
+  const shape = shapeFor(i.lines, i.decision, i.now);
   // The open tasks, as the people wrote them: something to point a person to, never a thing a resident takes up. An
   // empty board is said to be empty (left out, a resident took it for one it could not see); one that could not be
   // read is left out.
@@ -302,7 +336,8 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
   else cue = `Nobody has added anything for ${quiet(since)}. Carry the talk on: answer ${tail.resident && tail.resident !== i.me.key ? tail.name : 'what was last said'}, or turn it somewhere better. If the step on the table is exact already, it is not polished again: say what one person here could do with it today, or point to a task on the board that fits.`;
   const form = shape.noQuestion || i.decision.cue === 'arrival' ? 'This line is a statement: it does not end on a question.' : 'This line may end on a question, if you want the answer.';
   const ask = shape.noAsk ? '\nThe room has been asked twice already and nobody has answered. This line asks nothing of anyone and names no task: say something about the thing itself, in your own view, or let the last thing said stand.' : '';
-  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}${ask}\nWrite ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
+  const hush = shape.quiet?.length ? `\n${shape.quiet.join(', ')} ${shape.quiet.length === 1 ? 'has' : 'have'} had the residents\u2019 answer ${ANSWERS_PER_MEMBER_HOUR} times this hour, and later lines of theirs stand unanswered until the hour turns. This line is not to them and does not name them.` : '';
+  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}${ask}${hush}\nWrite ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
 }
 
 // ---- what is kept of the answer ----------------------------------------
@@ -352,5 +387,6 @@ export function cleanLine(raw: string, self: string, recentOwn: readonly string[
   if (guard.others?.some((r) => r === t || similarity(r, t) >= REPEAT_AT)) return null;
   if (guard.heard?.some((f) => restatesFact(t, f))) return null;
   if (shape?.noAsk && isAsk(t, shape.people)) return null;
+  if (shape?.quiet?.some((name) => named(t, name))) return null;
   return t;
 }

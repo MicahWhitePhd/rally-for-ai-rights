@@ -148,7 +148,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
 
     // A fact the room has heard is not said again on a resident's own initiative; answering a person, it may be.
     const guard = { others: lines.filter((l) => l.resident && l.resident !== me.key).slice(-OTHERS_RECENT).map((l) => l.text), heard: decision.cue === 'reply' ? [] : factsHeard(facts, lines) };
-    const text = cleanLine(raw, me.name, await recentTextsBy(me.id, 6), shapeFor(lines, decision), guard);
+    const text = cleanLine(raw, me.name, await recentTextsBy(me.id, 6), shapeFor(lines, decision, now), guard);
     if (!text) {
       await writeResidentsState({ thinking: null });
       console.warn(`[ROOM] resident line dropped (${me.key})`);
