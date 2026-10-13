@@ -57,6 +57,12 @@ export async function listTasks(limit = 120, withdrawn = false): Promise<TaskRow
   );
 }
 
+/** Whether this member has ever put up, taken or confirmed a task: the board's first step, counted once (src/lib/counts.ts). */
+export async function memberActedBefore(memberId: string): Promise<boolean> {
+  const r = await queryOne<{ acted: boolean }>(`SELECT EXISTS (SELECT 1 FROM room_tasks WHERE created_by = $1 OR claimed_by = $1 OR confirmed_by = $1) AS acted`, [memberId]);
+  return Boolean(r?.acted);
+}
+
 /** What was finished, for /work: confirmed first, then done and waiting for a second pair, the newest first within each. */
 export async function listFinishedTasks(limit = 100): Promise<TaskRow[]> {
   return query<TaskRow>(

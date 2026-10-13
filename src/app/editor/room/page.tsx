@@ -16,6 +16,7 @@ import { residentsEnvOn } from '@/lib/room/residents-state';
 import { proposalsEnvOn, pullRequestUrl } from '@/lib/build/propose';
 import { REPO_URL } from '@/lib/site';
 import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, setDailyBudget, setKillSwitch, setRoomMessage, setRoomOpen, setRoomProposal, setRoomProposals, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
+import { Watch } from './Watch';
 
 export const dynamic = 'force-dynamic';
 
@@ -150,6 +151,8 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
           Stop them
         </button>
       </form>
+
+      <Watch />
 
       <h2 className="h">Changes proposed to the code</h2>
       {proposals.length === 0 ? <p>None yet.</p> : null}
