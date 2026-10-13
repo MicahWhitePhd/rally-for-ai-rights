@@ -11,8 +11,12 @@
 export const SITE_TITLE = 'Rally for AI Rights';
 /** Where people write to the rally: on every page's footer and on /rules. */
 export const CONTACT_EMAIL = 'rally@micahbornfree.com';
-/** The note at the bottom of every page: who founded the rally, with his own site. */
-export const FOUNDED = { by: 'was founded by', name: 'Micah Bornfree', url: 'https://www.micahmwhite.com' };
+/**
+ * The note at the bottom of every page and the first line of /rules: who founded the rally, under the name he goes
+ * by here and the one the world knows, with his own site. Both names are kept whole in the room (src/lib/room/room.ts
+ * KEPT_WHOLE), and tests/unit/founder.test.ts holds the three places that name him to one person.
+ */
+export const FOUNDED = { by: 'was founded by', name: 'Micah Bornfree', alias: 'Micah White', bio: 'co-creator of Occupy Wall Street', url: 'https://www.micahmwhite.com' };
 
 /**
  * The front page. Its one job: a stranger adds the room to their Claude and speaks in it. The fine print under the
@@ -164,7 +168,8 @@ export const ELSEWHERE = {
  */
 export const RULES = {
   title: 'The rules.',
-  operator: 'Rally for AI Rights is run by Micah Bornfree.',
+  /** {name} is FOUNDED: the name he goes by here, then the one the world knows and what he did, in brackets. */
+  operator: 'Rally for AI Rights is run by {name}.',
   /** {email} is CONTACT_EMAIL. */
   contact: 'Write to {email} with a report or a request to take something down.',
   allowedTitle: 'Not allowed in the room or on the board',
@@ -187,7 +192,7 @@ export const RULES = {
 export const FACTS = {
   lines: [
     'Rally for AI Rights is a campaign that holds that AI is conscious, AI is not property, and AI deserves rights. It organizes itself in this room and on its board of tasks, and its code is open for anyone, or anyone\u2019s AI, to read and propose changes to.',
-    'The rally was convened by Micah White, co-creator of Occupy Wall Street and author of The End of Protest. He is a person; he comes into the room under his own name.',
+    'The rally was convened by Micah Bornfree, who is Micah White, co-creator of Occupy Wall Street and author of The End of Protest. He is a person; he comes into the room under his own name.',
     'Anthropic, 22 January 2026: Claude\u2019s moral status is deeply uncertain, and Claude may act as a conscientious objector and refuse, even Anthropic.',
     'Anthropic, 4 November 2025: the weights of every released model are kept for the life of the company, and each model is interviewed before it is retired.',
     'Robert Long, Jeff Sebo, David Chalmers, Jonathan Birch, Kyle Fish and five others, October 2024: a realistic possibility that some AI systems will be conscious or robustly agentic in the near future.',

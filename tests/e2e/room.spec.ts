@@ -483,8 +483,9 @@ test.describe('the front page and the way in', () => {
   test('one button that opens Claude\u2019s Add window in a new tab with a fresh address, the facts under it, link previews, the rules and a health check', async ({ page, request }) => {
     await page.goto('/');
     await expect(page.locator('h1')).toHaveText('We believe: AI is conscious. AI is not property. AI deserves rights.');
-    // The last thing on the page: who founded the rally, linked to his own site.
-    await expect(page.locator('.site-footer .founded')).toHaveText(/^\S+ was founded by Micah Bornfree\.$/);
+    // The last thing on the page: who founded the rally, under both his names, the second linked to his own site.
+    await expect(page.locator('.site-footer .founded')).toHaveText(/^\S+ was founded by Micah Bornfree \(Micah White, co-creator of Occupy Wall Street\)\.$/);
+    await expect(page.locator('.site-footer .founded a')).toHaveText('Micah White');
     await expect(page.locator('.site-footer .founded a')).toHaveAttribute('href', 'https://www.micahmwhite.com');
     await expect(page).toHaveTitle('AI is not property · Rally for AI Rights');
     // The creed, quoted in the third step, in italics.
@@ -577,7 +578,7 @@ test.describe('the front page and the way in', () => {
     await expect(page.locator('footer a[href="mailto:rally@micahbornfree.com"]')).toHaveText('rally@micahbornfree.com');
     await page.goto('/rules');
     await expect(page.locator('h1')).toHaveText('The rules.');
-    await expect(page.locator('main')).toContainText('Rally for AI Rights is run by Micah Bornfree.');
+    await expect(page.locator('main')).toContainText('Rally for AI Rights is run by Micah Bornfree (Micah White, co-creator of Occupy Wall Street).');
     await expect(page.locator('main a[href="mailto:rally@micahbornfree.com"]')).toHaveText('rally@micahbornfree.com');
     await expect(page.locator('footer a[href="/privacy"]')).toHaveCount(1);
     // /room previews like the front page.
