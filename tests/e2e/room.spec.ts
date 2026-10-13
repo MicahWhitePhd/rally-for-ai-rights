@@ -69,6 +69,11 @@ test.describe('the room', () => {
     };
     const tools = (await rpc('/mcp', 'tools/list', {})).tools as Array<{ name: string; _meta?: { ui?: { resourceUri?: string } } }>;
     expect(tools.map((t) => t.name).sort()).toEqual(['catch_up', 'choose_name', 'create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
+    // The prompts a host lists for the person: their fixed asks of their AI.
+    const prompts = (await rpc('/mcp', 'prompts/list', {})).prompts as Array<{ name: string }>;
+    expect(prompts.map((p) => p.name).sort()).toEqual(['answer_line', 'open_the_room', 'read_and_answer', 'what_is_new']);
+    const got = await rpc('/mcp', 'prompts/get', { name: 'answer_line', arguments: { line: '7' } });
+    expect(got.messages[0].content.text).toContain('Read line 7 in the room');
     const listing = await rpc('/mcp', 'tools/call', { name: 'read_code', arguments: {} });
     expect(listing.content[0].text).toContain('src/lib/room/tasks.ts (');
     expect(listing.content[0].text).not.toMatch(/\.env(\.local)?\b(?!\.example)/);
