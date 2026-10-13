@@ -22,6 +22,7 @@ export function SiteHeader() {
       <nav className="site-nav" aria-label="Site">
         <a href="/room">Room</a>
         <a href="/tasks">Tasks</a>
+        <a href="/work">Work</a>
         <a href="/join">Join</a>
         <a href={REPO_URL} rel="noopener" className="nav-icon" aria-label="The code, on GitHub" title="The code, on GitHub">
           {/* GitHub's mark (Octicons mark-github, MIT), drawn here so nothing is loaded from elsewhere. */}
