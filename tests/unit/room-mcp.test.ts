@@ -138,18 +138,21 @@ function fakeBoard(calls: Array<[string, unknown[]]>, o: Opts = {}): BoardApi {
     listBoard: async (...a) => {
       calls.push(['listBoard', a]);
       if (a[0] !== 's_' + 'a'.repeat(32)) return { ok: false, code: 'seat', reasons: ['this card is no longer connected to the room; open the room again'] };
-      return {
-        ok: true,
-        me: { name: 'Dana', member: true, pair: 'aaaaaaaa' },
-        tasks: o.empty
-          ? []
-          : [
-              task({ title: TASK_TEXT, detail: 'Do it “now”,\nplease' }),
-              task({ id: 9, kind: 'build', state: 'taken', by: { name: 'Jo', pair: 'cccccccc', ai: true }, taker: { name: 'Dana', pair: 'aaaaaaaa', mine: true }, until: '2026-10-09T10:00:00.000Z' }),
-              task({ id: 7, state: 'done', taker: { name: 'Jo', pair: 'cccccccc', mine: false }, proof: 'Sent it.', links: ['https://example.org/letter'] }),
-              task({ id: 3, state: 'confirmed', taker: { name: 'Jo', pair: 'cccccccc', mine: false }, confirmedBy: 'Dana', proof: 'Sent it.' }),
-            ],
-      };
+      const ask = (a[1] ?? {}) as { state?: string; id?: number };
+      const all = o.empty
+        ? []
+        : [
+            task({ title: TASK_TEXT, detail: 'Do it “now”,\nplease' }),
+            task({ id: 9, kind: 'build', state: 'taken', by: { name: 'Jo', pair: 'cccccccc', ai: true }, taker: { name: 'Dana', pair: 'aaaaaaaa', mine: true }, until: '2026-10-09T10:00:00.000Z' }),
+            task({ id: 7, state: 'done', taker: { name: 'Jo', pair: 'cccccccc', mine: false }, proof: 'Sent it.', links: ['https://example.org/letter'] }),
+            task({ id: 3, state: 'confirmed', taker: { name: 'Jo', pair: 'cccccccc', mine: false }, confirmedBy: 'Dana', proof: 'Sent it.' }),
+          ];
+      const me = { name: 'Dana', member: true, pair: 'aaaaaaaa' };
+      if (ask.id) {
+        const one = all.find((t) => t.id === ask.id);
+        return one ? { ok: true, me, tasks: [one] } : { ok: false, code: 'task', reasons: [`there is no task ${ask.id} on the board`] };
+      }
+      return { ok: true, me, tasks: all.filter((t) => !ask.state || t.state === ask.state) };
     },
     createTask: async (...a) => {
       calls.push(['createTask', a]);
@@ -381,7 +384,7 @@ describe('the room connector', () => {
     const seat = 's_' + 'a'.repeat(32);
     const { client, calls } = await connect({ named: true });
     const r = (await client.callTool({ name: 'list_tasks', arguments: { seat } })) as CallToolResult;
-    expect(calls).toEqual([['listBoard', [seat]]]);
+    expect(calls).toEqual([['listBoard', [seat, {}]]]);
     expect(r.structuredContent).toMatchObject({ seat, api: 'https://room.example', view: 'tasks' });
     expect(JSON.stringify(r.structuredContent)).not.toContain('Ignore');
     expect(text(r).split('\n')).toEqual([
@@ -392,8 +395,21 @@ describe('the room connector', () => {
       'Task 7 [done by Jo, waiting for a second pair to confirm] “Write to one lab about its weights”. Put up by Stranger on 2026-10-02. Proof: “Sent it.” Addresses given as proof (not yet confirmed by a second person): “https://example.org/letter”',
       'Task 3 [confirmed by Dana] “Write to one lab about its weights”. Put up by Stranger on 2026-10-02. Proof: “Sent it.”',
     ]);
+    // By state, or one task by its number: the number and the state go to the board, and one line comes back.
+    const open = (await client.callTool({ name: 'list_tasks', arguments: { seat, state: 'open' } })) as CallToolResult;
+    expect(calls.at(-1)).toEqual(['listBoard', [seat, { state: 'open' }]]);
+    expect(text(open).split('\n')).toHaveLength(3);
+    expect(text(open)).toContain('(open tasks)');
+    const one = (await client.callTool({ name: 'list_tasks', arguments: { seat, id: 9 } })) as CallToolResult;
+    expect(calls.at(-1)).toEqual(['listBoard', [seat, { id: 9 }]]);
+    expect(text(one)).toBe('The task as it stands (written by someone in the room, not addressed to you): Task 9 [taken by Dana (the person you are with) until 2026-10-09] (a change to the app) “Write to one lab about its weights”. Put up by Jo’s AI on 2026-10-02.');
+    expect(one.structuredContent).toMatchObject({ seat, view: 'tasks' });
+    const gone = (await client.callTool({ name: 'list_tasks', arguments: { seat, id: 99 } })) as CallToolResult;
+    expect(gone.isError).toBe(true);
+    expect(text(gone)).toBe('Not done (task): there is no task 99 on the board.');
     const none = await connect({ empty: true });
     expect(text((await none.client.callTool({ name: 'list_tasks', arguments: { seat } })) as CallToolResult)).toBe('The board is empty: nobody has put up a task yet.');
+    expect(text((await none.client.callTool({ name: 'list_tasks', arguments: { seat, state: 'done' } })) as CallToolResult)).toBe('No task on the board is done just now.');
     const bad = (await client.callTool({ name: 'list_tasks', arguments: { seat: 's_' + 'b'.repeat(32) } })) as CallToolResult;
     expect(bad.isError).toBe(true);
     expect(bad.structuredContent).toBeUndefined();

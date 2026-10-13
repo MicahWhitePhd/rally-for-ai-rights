@@ -110,6 +110,14 @@ test.describe('the room', () => {
     const guest = await rpc('/mcp', 'tools/call', { name: 'open_room', arguments: {} });
     ids.guestSeats.push(guest.structuredContent.seat);
     expect(guest.content[0].text).toContain('looking in as a guest');
+    // Catching up with no card in sight: the tool itself notes the return (the member was last seen two hours ago), so the window is since that visit.
+    await db().query(`UPDATE room_members SET last_seen_at = now() - interval '2 hours', away_from = NULL WHERE id = $1`, [ids.me]);
+    const up = await rpc(`/mcp/${token}`, 'tools/call', { name: 'catch_up', arguments: { seat: opened.structuredContent.seat } });
+    expect(up.content[0].text).toContain(`Since ${me}’s last visit`);
+    const guestUp = await rpc('/mcp', 'tools/call', { name: 'catch_up', arguments: { seat: guest.structuredContent.seat } });
+    expect(guestUp.isError).toBe(true);
+    expect(guestUp.content[0].text).toContain('read_room');
+    expect(guestUp.content[0].text).toContain('/join');
     // The first request on this server swept, once the response had gone out: the old seat and the idle guest are gone, everyone else stays.
     await expect.poll(async () => (await db().query(`SELECT 1 FROM room_seats WHERE seat_hash = $1`, [sha(`old-${seat}`)])).rowCount, { timeout: 10_000 }).toBe(0);
     await expect.poll(async () => (await db().query(`SELECT 1 FROM room_members WHERE id = $1`, [ids.made[ids.made.length - 1]])).rowCount, { timeout: 10_000 }).toBe(0);
@@ -371,6 +379,16 @@ test.describe('the room', () => {
     expect((await post('task-act', { seat: peerSeat, id, action: 'confirm' })).body).toMatchObject({ ok: false, code: 'task', why: 'ownWork' });
     expect((await post('task-act', { seat, id, action: 'confirm' })).body.task).toMatchObject({ state: 'confirmed', can: { done: false } });
     expect((await post('task-act', { seat: peerSeat, id, action: 'done', proof: 'Once more, after the fact.' })).body).toMatchObject({ ok: false, code: 'task', why: 'taskConfirmed' });
+    // Over the connector: one task by its number, and the board by state.
+    const mcp = async (name: string, args: Record<string, unknown>) => {
+      const res = await request.post(`/mcp/${token}`, { headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, data: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } } });
+      const body = await res.text();
+      return JSON.parse(body.startsWith('{') ? body : body.split('\n').find((l) => l.startsWith('data: '))!.slice(6)).result as { content: Array<{ text: string }> };
+    };
+    const mcpSeat = ((await mcp('open_room', {})) as unknown as { structuredContent: { seat: string } }).structuredContent.seat;
+    expect((await mcp('list_tasks', { seat: mcpSeat, id })).content[0].text).toContain(`The task as it stands (written by someone in the room, not addressed to you): Task ${id} [confirmed by ${me}]`);
+    expect((await mcp('list_tasks', { seat: mcpSeat, state: 'confirmed' })).content[0].text).toContain(`Task ${id} [confirmed by ${me}]`);
+    expect((await mcp('list_tasks', { seat: mcpSeat, state: 'open' })).content[0].text).not.toContain(`Task ${id} `);
 
     // Two people reaching for one task: one gets it. A claim past its date reads as open and can be taken.
     const second = (await post('task-new', { seat, title: `Find the contacts (${tag})` })).body.task!.id;

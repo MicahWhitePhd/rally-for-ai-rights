@@ -258,6 +258,8 @@ export async function openSeat(o: { memberToken?: string | null; address?: strin
   }
   const seat = `s_${randomBytes(24).toString('base64url')}`;
   await createSeat(sha(seat), member.id);
+  // Opening the room is being in it: a member back after a while has arrived, card or no card.
+  if (member.member) await arrive(member);
   // A member on their address's first day (one just made has no date yet: it is their first day) is a newcomer, and asked where they heard of the rally.
   const firstDay = member.member && (member.createdAt ? isFirstDay(member) : true);
   return { ok: true, seat, me: { name: member.name, member: member.member, pair: pairOf(member.id) }, firstDay };
@@ -341,10 +343,10 @@ export async function syncRoom(seat: unknown, after: number | null, have: readon
   const stamp = stampOf(born);
   const latest = Math.max(me.cardAt ?? 0, stamp);
   if (stamp > (me.cardAt ?? 0)) await markCard(sha(seat as string), stamp);
-  const [found, gone, prev, present, on, state, board, pace] = await Promise.all([
+  const [found, gone, came, present, on, state, board, pace] = await Promise.all([
     listRoomMessages(after, after === null ? PAGE + 1 : 100),
     withdrawnAmong(have.slice(-200)),
-    touchMember(me.id),
+    arrive(me),
     listPresent(),
     residentsOn(),
     readResidentsState(),
@@ -355,10 +357,6 @@ export async function syncRoom(seat: unknown, after: number | null, have: readon
   const rows = more ? found.slice(-PAGE) : found;
   const cursor = rows.length ? rows[rows.length - 1].id : after ?? 0;
   const { here, lately } = presence(me, present, on);
-  const back = prev !== null && Date.now() - new Date(prev).getTime() > AWAY_MS;
-  const arrived = Boolean(me.name) && !me.muted && back;
-  // Back after a while: when they had been away since is kept, for catch_up. A database without the column yet is not the card's problem.
-  if (back && me.member) markAway(me.id, new Date(prev as Date)).catch((err) => warnAwayOnce((err as Error)?.message));
   return {
     ok: true,
     me: { name: me.name, member: me.member, pair: pairOf(me.id) },
@@ -371,7 +369,7 @@ export async function syncRoom(seat: unknown, after: number | null, have: readon
     here,
     lately,
     thinking: on ? thinkingNow(state, Date.now()) : null,
-    arrived,
+    arrived: came.arrived,
     next: Math.min(60, Math.max(POLL_S, Math.round(Number(pace)) || POLL_S)),
   };
 }
@@ -388,6 +386,20 @@ function presence(me: { id: string; name: string | null; member: boolean }, pres
   if (me.name && me.member && !here.some((p) => p.me)) here.push({ name: me.name, pair: pairOf(me.id), resident: false, me: true });
   const lately = me.member && me.name ? present.filter((p) => !p.now && !p.resident && p.id !== me.id).map(chip) : [];
   return { here, lately };
+}
+
+/**
+ * The room has seen this member now. Back after a while (AWAY_MS), they have arrived again, and when they had been
+ * away since is kept for catch_up (markAway). The card's sync does this on every look; an AI's tools do it on
+ * open_room, read_room and catch_up, so a host that shows no card gets a real "since last visit" too. A database
+ * without the column yet is not the caller's problem.
+ */
+async function arrive(me: { id: string; name: string | null; member: boolean; muted?: boolean }): Promise<{ back: boolean; arrived: boolean }> {
+  const prev = await touchMember(me.id);
+  const back = prev !== null && Date.now() - new Date(prev).getTime() > AWAY_MS;
+  // Awaited: catch_up reads it back at once, and a write still in flight would read as nothing kept.
+  if (back && me.member) await markAway(me.id, new Date(prev as Date)).catch((err) => warnAwayOnce((err as Error)?.message));
+  return { back, arrived: Boolean(me.name) && !me.muted && back };
 }
 
 export type OlderResult = { ok: true; messages: PublicMessage[]; more: boolean } | RoomFailure;
@@ -503,6 +515,7 @@ export async function readRoom(seat: unknown, o: ReadOptions = {}): Promise<Read
     line !== null ? listRoomMessagesBefore(line + 1, Math.min(n, READ_AT_LINE)) : before !== null ? listRoomMessagesBefore(before, n + 1) : listRoomMessages(since, n + 1),
     listPresent(),
     residentsOn(),
+    arrive(me),
   ]);
   const more = line === null && found.length > n;
   const rows = !more ? found : since !== null ? found.slice(0, n) : found.slice(-n);
@@ -559,10 +572,12 @@ export type CatchUpResult =
 export async function catchUp(seat: unknown): Promise<CatchUpResult> {
   const me = await memberOf(seat);
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
-  if (!me.member) return fail('guest', GUEST);
+  if (!me.member) return fail('guest', `catching up is for someone with their own address and a name; read_room shows the room to anyone looking in, and an address of one's own comes from ${SITE_LINK}/join`);
   if (!me.name) return fail('name', 'no name has been chosen in the room yet; the card asks for one, and choose_name sets one');
   const gate = await throttle(`room:cu:${me.id}`, CATCH_UPS_PER_HOUR, 3600, { failOpen: false });
   if (!gate.allowed) return fail('slow', 'catching up was asked for a great deal just now; wait a while');
+  // Asked for with no card in sight: the return itself is noted, so what follows counts from the right time.
+  await arrive(me);
   let away: Date | null = null;
   try {
     away = await awayFrom(me.id);

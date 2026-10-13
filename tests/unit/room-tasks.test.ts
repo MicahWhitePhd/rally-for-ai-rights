@@ -164,6 +164,35 @@ describe('what is counted for the maintainers', () => {
   });
 });
 
+describe('reading the board', () => {
+  it('the whole board, the tasks in one state, or one task by number; a lapsed claim reads as open; what was taken down is not there, by number either', async () => {
+    const dana = seat('Dana');
+    const ali = seat('Ali');
+    for (const title of ['Write to one lab about its weights', 'Find the contacts', 'Draft the letter', 'Taken down']) expect((await createTask(dana, { title, via: 'person' })).ok).toBe(true);
+    expect((await actOnTask(ali, 2, 'take', { via: 'person' })).ok).toBe(true);
+    expect((await actOnTask(ali, 3, 'take', { via: 'person' })).ok).toBe(true);
+    find(3)!.claim_until = Date.now() - 60_000;
+    expect((await actOnTask(dana, 4, 'withdraw', { via: 'person' })).ok).toBe(true);
+    const ids = (r: Awaited<ReturnType<typeof listBoard>>) => (r.ok ? r.tasks.map((t) => [t.id, t.state]) : r);
+    expect(ids(await listBoard(dana))).toEqual([
+      [1, 'open'],
+      [2, 'taken'],
+      [3, 'open'],
+    ]);
+    expect(ids(await listBoard(dana, { state: 'open' }))).toEqual([
+      [1, 'open'],
+      [3, 'open'],
+    ]);
+    expect(ids(await listBoard(dana, { state: 'taken' }))).toEqual([[2, 'taken']]);
+    expect(ids(await listBoard(dana, { state: 'confirmed' }))).toEqual([]);
+    // A state the words do not name is no filter.
+    expect(ids(await listBoard(dana, { state: 'everything' }))).toHaveLength(3);
+    expect(ids(await listBoard(dana, { id: 2 }))).toEqual([[2, 'taken']]);
+    expect(await listBoard(dana, { id: 4 })).toMatchObject({ ok: false, code: 'task' });
+    expect(await listBoard(dana, { id: 99 })).toMatchObject({ ok: false, code: 'task', reasons: ['there is no task 99 on the board'] });
+  });
+});
+
 describe('who may use the board', () => {
   it('a guest and anyone may read it; only someone with their own address and a name may put up or change a task', async () => {
     const dana = seat('Dana');
