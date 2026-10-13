@@ -23,6 +23,7 @@
  * they are. A card is told who is in the room now and who is writing.
  */
 import { createHash, randomBytes } from 'node:crypto';
+import { heldLineId } from './residents-core';
 import { getSetting } from '@/lib/db/queries/settings';
 import { boardStamp, listTasks } from '@/lib/db/queries/tasks';
 import {
@@ -176,6 +177,8 @@ export interface PublicMessage {
   pair: string;
   /** One of the venue's resident AIs. */
   resident: boolean;
+  /** On a resident's event: the line they let stand. */
+  about?: number;
 }
 
 export interface Present {
@@ -203,7 +206,8 @@ export const isFirstDay = (m: { createdAt?: Date | string | null }): boolean => 
 const GUEST = `only someone who has added the room to their own AI can speak here; a guest reads (an address of one's own comes from ${SITE_LINK})`;
 
 function toPublic(r: RoomMessageRow, me: RoomMember): PublicMessage {
-  return { id: r.id, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text, at: new Date(r.created_at).toISOString(), mine: r.member_id === me.id, pair: pairOf(r.member_id), resident: r.resident !== null };
+  const about = heldLineId(r);
+  return { id: r.id, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text, at: new Date(r.created_at).toISOString(), mine: r.member_id === me.id, pair: pairOf(r.member_id), resident: r.resident !== null, ...(about !== null ? { about } : {}) };
 }
 
 /** The hash a member is known by, from the token in their address. */
@@ -430,7 +434,7 @@ export async function postToRoom(seat: unknown, o: { text: unknown; kind: 'perso
   return { ok: true, message: { id, kind: o.kind, name: me.name, model: o.kind === 'ai' ? model : null, text, at: new Date().toISOString(), mine: true, pair: pairOf(me.id), resident: false } };
 }
 
-export type ReadResult = { ok: true; me: Me; seat: string; lines: Array<{ id: number; at: string; who: 'person' | 'ai' | 'event'; name: string; model: string | null; mine: boolean; resident: boolean; said: string }> } | RoomFailure;
+export type ReadResult = { ok: true; me: Me; seat: string; lines: Array<{ id: number; at: string; who: 'person' | 'ai' | 'event'; name: string; model: string | null; mine: boolean; resident: boolean; said: string; /** On a resident's event: the line they let stand. */ about?: number }> } | RoomFailure;
 
 /**
  * The latest messages for the person's AI to read, when the person asks it to listen: who said what, nothing else.
@@ -451,7 +455,7 @@ export async function readRoom(seat: unknown, limit = 15, line?: unknown): Promi
     ok: true,
     me: { name: me.name, member: me.member, pair: pairOf(me.id) },
     seat: seat as string,
-    lines: rows.map((r) => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, said: r.text })),
+    lines: rows.map((r) => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}) })),
   };
 }
 
@@ -511,7 +515,7 @@ export async function catchUp(seat: unknown): Promise<CatchUpResult> {
   const since = away ?? new Date(Date.now() - CATCH_UP_DEFAULT_MS);
   const [rows, tasks] = await Promise.all([listRoomMessagesSince(since, 400), listTasks(120).catch(() => [])]);
   const mine = new Set(tasks.filter((t) => t.created_by === me.id || t.claimed_by === me.id).map((t) => t.id));
-  const line = (r: (typeof rows)[number]): ReadLine => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, said: r.text });
+  const line = (r: (typeof rows)[number]): ReadLine => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}) });
   const name = me.name;
   const named = rows.filter((r) => r.member_id !== me.id && r.kind !== 'event' && namedIn(r.text, name)).slice(-CATCH_UP_LINES).map(line);
   const onMine = rows.filter((r) => r.kind === 'event' && r.member_id !== me.id && r.ref?.startsWith('task:') && mine.has(Number(r.ref.slice(5)))).slice(-CATCH_UP_LINES).map(line);

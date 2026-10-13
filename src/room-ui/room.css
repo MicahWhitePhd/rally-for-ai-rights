@@ -85,6 +85,8 @@ form.tdone input[type=text]{flex:none;height:38px;font-size:13px}
 .evb{display:inline-flex;align-items:center;gap:7px;max-width:100%;font:500 11px/1.4 var(--mono);color:var(--tx3);background:none;border:0;padding:0 0 0 14px;text-align:left;cursor:pointer;overflow-wrap:anywhere}
 .evb:hover{color:var(--tx)}
 .ev.new{animation:in .3s ease-out both}
+/* a resident let a line stand: an act, set apart from speech */
+.ev.held .evb{font-style:italic}
 
 /* what was said: one block per pair. The list scrolls inside the card, back to the beginning. */
 .list{list-style:none;margin:0;padding:0 12px 0 0;display:flex;flex-direction:column;gap:12px;max-height:23rem;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--bd2) transparent}

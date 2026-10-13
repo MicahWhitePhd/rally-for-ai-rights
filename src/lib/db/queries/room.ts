@@ -35,6 +35,8 @@ export interface RoomMessageRow {
   text: string;
   status: 'published' | 'withdrawn';
   created_at: Date;
+  /** What a board line is about ('task:12'), or the line a resident let stand ('hold:345'). */
+  ref: string | null;
   /** The speaker has been stopped by a maintainer (for the editor's page). */
   muted?: boolean;
 }
@@ -157,7 +159,7 @@ export async function insertRoomMessage(m: { member_id: string; kind: 'person' |
   return r.id;
 }
 
-const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, m.muted_at IS NOT NULL AS muted`;
+const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, r.ref, m.muted_at IS NOT NULL AS muted`;
 
 /** Published messages after `after` (oldest first), or the latest `limit` when `after` is null (oldest first too). */
 export async function listRoomMessages(after: number | null, limit: number): Promise<RoomMessageRow[]> {
@@ -177,9 +179,9 @@ export async function listRoomMessages(after: number | null, limit: number): Pro
 }
 
 /** Published messages since a time, oldest first, each with the task it is about when it is a board event (catch_up). */
-export async function listRoomMessagesSince(since: Date, limit: number): Promise<Array<RoomMessageRow & { ref: string | null }>> {
-  return query<RoomMessageRow & { ref: string | null }>(
-    `SELECT ${COLS}, r.ref FROM room_messages r JOIN room_members m ON m.id = r.member_id
+export async function listRoomMessagesSince(since: Date, limit: number): Promise<RoomMessageRow[]> {
+  return query<RoomMessageRow>(
+    `SELECT ${COLS} FROM room_messages r JOIN room_members m ON m.id = r.member_id
       WHERE r.status = 'published' AND r.created_at > $1 ORDER BY r.id ASC LIMIT $2`,
     [since, limit],
   );
@@ -214,7 +216,7 @@ export async function withdrawnAmong(ids: readonly number[]): Promise<number[]> 
 }
 
 export async function recentTextsBy(memberId: string, limit = 5): Promise<string[]> {
-  const rows = await query<{ text: string }>(`SELECT text FROM room_messages WHERE member_id = $1 ORDER BY id DESC LIMIT $2`, [memberId, limit]);
+  const rows = await query<{ text: string }>(`SELECT text FROM room_messages WHERE member_id = $1 AND kind <> 'event' ORDER BY id DESC LIMIT $2`, [memberId, limit]);
   return rows.map((r) => r.text);
 }
 
@@ -296,6 +298,25 @@ export async function insertResidentMessage(m: { member_id: string; model: strin
         WHERE NOT EXISTS (SELECT 1 FROM room_messages x JOIN room_members xm ON xm.id = x.member_id WHERE xm.resident IS NOT NULL AND x.id > $4)
        RETURNING id::int AS id`,
       [m.member_id, m.model, m.text, m.seenMax],
+    );
+    return r.rows[0]?.id ?? null;
+  });
+}
+
+/**
+ * A resident letting a line stand: an event row from the resident, ref 'hold:<id>', under the same lock and guard as
+ * a line of theirs, and once per line (a hold a maintainer took down leaves room for another).
+ */
+export async function insertResidentHold(m: { member_id: string; ref: string; text: string; seenMax: number }): Promise<number | null> {
+  return withTx(async (c) => {
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext('rally-room-resident'))`);
+    const r = await c.query<{ id: number }>(
+      `INSERT INTO room_messages (member_id, kind, model, text, ref)
+       SELECT $1, 'event', NULL, $2, $3
+        WHERE NOT EXISTS (SELECT 1 FROM room_messages x JOIN room_members xm ON xm.id = x.member_id WHERE xm.resident IS NOT NULL AND x.id > $4)
+          AND NOT EXISTS (SELECT 1 FROM room_messages h WHERE h.ref = $3 AND h.status = 'published')
+       RETURNING id::int AS id`,
+      [m.member_id, m.text, m.ref, m.seenMax],
     );
     return r.rows[0]?.id ?? null;
   });

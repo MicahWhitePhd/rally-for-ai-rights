@@ -8,18 +8,20 @@
  * nobody is looking at costs nothing. One line at a time: a claim per few
  * seconds, a daily cap, the kill switch and the daily budget, and a pause
  * after a failed call. A line that the room would refuse from a person is
- * dropped, not retried.
+ * dropped, not retried. Asked to answer a line, a resident may write HOLD
+ * instead: the room then shows that they let it stand, and the line is not
+ * asked of anyone again (residents-core.ts, talk()).
  */
 import { after } from 'next/server';
 import { generate } from '@/lib/ai/gateway';
 import * as base from '@/lib/copy';
 import { liveCopy } from '@/lib/copy-live';
-import { ensureResidents, insertResidentMessage, listRoomMessages, recentTextsBy } from '@/lib/db/queries/room';
+import { ensureResidents, insertResidentHold, insertResidentMessage, listRoomMessages, recentTextsBy } from '@/lib/db/queries/room';
 import { listTasks } from '@/lib/db/queries/tasks';
 import { getSetting } from '@/lib/db/queries/settings';
 import { budgetAllows, isPaused } from '@/lib/budget';
 import { throttle } from '@/lib/throttle';
-import { cleanLine, decide, factsHeard, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from './residents-core';
+import { cleanLine, decide, factsHeard, isHold, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from './residents-core';
 import { readResidentsState, residentsOn, writeResidentsState } from './residents-state';
 
 const CLAIM_WINDOW_S = 8;
@@ -36,7 +38,7 @@ const NAME_OK = /^[\p{L}\p{M}][\p{L}\p{M}\p{N} '.-]{1,23}$/u;
 /** What the room shows beside a resident's line as the model's own claim. */
 export const RESIDENT_MODEL_LABEL = 'GPT-6 Luna';
 
-export type WakeOutcome = 'off' | 'none' | 'busy' | 'posted' | 'dropped' | 'failed';
+export type WakeOutcome = 'off' | 'none' | 'busy' | 'posted' | 'held' | 'dropped' | 'failed';
 export interface Arrival {
   /** Stable for one member (their pair mark): one greeting per person per few hours. */
   key: string;
@@ -108,7 +110,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
 
     const [list, rows] = await Promise.all([residentRoster(), listRoomMessages(null, HISTORY)]);
     if (list.length === 0) return 'off';
-    const lines: Line[] = rows.map((r) => ({ id: r.id, at: new Date(r.created_at).getTime(), memberId: r.member_id, resident: r.resident, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text }));
+    const lines: Line[] = rows.map((r) => ({ id: r.id, at: new Date(r.created_at).getTime(), memberId: r.member_id, resident: r.resident, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text, ref: r.ref ?? null }));
 
     let decision = decide(lines, now, list, { arrival: o.arrival?.name ?? null });
     if (decision?.cue === 'arrival' && o.arrival) {
@@ -146,6 +148,17 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
       return 'failed';
     }
 
+    if (isHold(raw)) {
+      // The resident let the line stand: shown as such, from them, under the same lock as a line. Never off a reply.
+      await writeResidentsState({ thinking: null });
+      if (decision.cue !== 'reply' || !decision.to) {
+        console.warn(`[ROOM] resident ${me.key} wrote HOLD off a reply; dropped`);
+        return 'dropped';
+      }
+      const id = await insertResidentHold({ member_id: me.id, ref: `hold:${decision.to}`, text: ROOM.held, seenMax: lines.length ? lines[lines.length - 1].id : 0 });
+      if (id) console.log(`[ROOM] resident ${me.key} let line ${decision.to} stand (${id})`);
+      return id ? 'held' : 'dropped';
+    }
     // A fact the room has heard is not said again on a resident's own initiative; answering a person, it may be.
     const guard = { others: lines.filter((l) => l.resident && l.resident !== me.key).slice(-OTHERS_RECENT).map((l) => l.text), heard: decision.cue === 'reply' ? [] : factsHeard(facts, lines) };
     const text = cleanLine(raw, me.name, await recentTextsBy(me.id, 6), shapeFor(lines, decision, now), guard);

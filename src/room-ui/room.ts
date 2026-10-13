@@ -47,6 +47,8 @@ interface Msg {
   mine: boolean;
   pair: string;
   resident: boolean;
+  /** On a resident's event: the line they let stand. */
+  about?: number;
 }
 interface Present {
   name: string;
@@ -398,8 +400,17 @@ function draw(): void {
     if (d !== day && !entering && (d !== today || day !== '')) items.push(h('li', { class: 'day' }, dayName.format(new Date(first.at))));
     day = d;
     if (first.kind === 'event') {
+      const ev = h('li', { class: `ev${first.resident ? ' held' : ''}${state.fresh.has(first.id) ? ' new' : ''}` });
+      if (first.resident) {
+        // A resident let a line stand: shown as the act it is, from them. Pressing it shows the line.
+        const go = h('button', { class: 'evb', type: 'button' }, mark(first.pair, 'res'), `${first.name} ${first.text}`);
+        go.onclick = () => (first.about ? els.list.querySelector(`[data-id="${first.about}"]`) : null)?.scrollIntoView({ block: 'center' });
+        ev.dataset.id = String(first.id);
+        ev.append(go);
+        items.push(ev);
+        continue;
+      }
       // A line of the room's own: who did what on the board. Pressing it turns the card to the board.
-      const ev = h('li', { class: `ev${state.fresh.has(first.id) ? ' new' : ''}` });
       const go = h('button', { class: 'evb', type: 'button' }, mark(first.pair, first.model ? 'ai' : 'person'), `${first.model ? fill(s.aiLabel, { name: first.name }) : first.name} ${first.text}`);
       go.onclick = () => show('tasks');
       ev.dataset.id = String(first.id);

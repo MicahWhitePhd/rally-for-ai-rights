@@ -19,7 +19,7 @@ const iso = (at: Date | string): string => new Date(at).toISOString();
 /** The speaker as the room shows it. */
 export function feedSpeaker(l: FeedLine): string {
   const name = l.name ?? 'someone';
-  if (l.kind === 'event') return `On the board: ${name}${l.model ? '’s AI' : ''}`;
+  if (l.kind === 'event') return l.resident ? `${name}, a resident AI` : `On the board: ${name}${l.model ? '’s AI' : ''}`;
   if (l.resident) return `${name}, a resident AI`;
   if (l.kind === 'ai') return `${name}’s AI`;
   return name;

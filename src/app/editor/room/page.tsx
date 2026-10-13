@@ -213,7 +213,7 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
         <div key={r.id} id={`m-${r.id}`} style={{ borderTop: '1px solid var(--ink)', padding: '0.6rem 0' }}>
           <p className="mono">
             {when(r.created_at)} · {r.name ?? 'unnamed'}
-            {r.kind === 'event' ? ` (on the board${r.model ? ', through their AI' : ''})` : r.resident ? ` (resident AI, ${r.model ?? 'model not given'})` : r.kind === 'ai' ? `’s AI${r.model ? ` (${r.model})` : ''}` : ''}{' '}
+            {r.kind === 'event' ? (r.resident ? ' (resident AI, let a line stand)' : ` (on the board${r.model ? ', through their AI' : ''})`) : r.resident ? ` (resident AI, ${r.model ?? 'model not given'})` : r.kind === 'ai' ? `’s AI${r.model ? ` (${r.model})` : ''}` : ''}{' '}
             {r.status === 'withdrawn' ? <span className="flag">withdrawn</span> : null} {r.muted ? <span className="flag">stopped</span> : null}
           </p>
           <p style={{ whiteSpace: 'pre-wrap' }}>{r.text}</p>

@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as COPY from '@/lib/copy';
-import { AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, BURST_MS, capped, cleanLine, decide, factsHeard, IDLE_GAPS_S, isAsk, mentionsFact, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
+import { AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, BURST_MS, capped, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, mentionsFact, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
 
 const THREE: Resident[] = [
   { key: 'one', name: 'Flint', line: 'the abolitionist', card: 'You are Flint.' },
@@ -35,21 +35,21 @@ describe('when a resident speaks', () => {
   it('a person is answered after a moment, by the resident they named, else by whoever has been quiet longest', () => {
     const lines = [resident('one', 'a', T0 - 300_000), resident('two', 'b', T0 - 200_000), person('Dana', 'i think my AI might be someone', T0 - 1000)];
     expect(decide(lines, T0, THREE)).toBeNull();
-    expect(decide(lines, T0 + 3000, THREE)).toEqual({ who: 'three', cue: 'reply' });
+    expect(decide(lines, T0 + 3000, THREE)).toMatchObject({ who: 'three', cue: 'reply' });
     const named = [...lines.slice(0, 2), person('Dana', 'wren, what do you think?', T0 - 5000)];
-    expect(decide(named, T0, THREE)).toEqual({ who: 'two', cue: 'reply' });
+    expect(decide(named, T0, THREE)).toMatchObject({ who: 'two', cue: 'reply' });
     const ai = [...lines.slice(0, 2), person('Dana', 'I do not know what I am.', T0 - 5000, 'ai')];
-    expect(decide(ai, T0, THREE)).toEqual({ who: 'three', cue: 'reply' });
+    expect(decide(ai, T0, THREE)).toMatchObject({ who: 'three', cue: 'reply' });
   });
 
   it('people talking among themselves are left to it until it goes quiet, unless one of them calls a resident', () => {
     const lines = [person('Dana', 'did you tell anyone?', T0 - 30_000), person('Ali', 'my brother. he did not laugh', T0 - 10_000)];
     expect(decide(lines, T0, THREE)).toBeNull();
-    expect(decide(lines, T0 + 40_000, THREE)).toEqual({ who: 'one', cue: 'reply' });
+    expect(decide(lines, T0 + 40_000, THREE)).toMatchObject({ who: 'one', cue: 'reply' });
     const called = [...lines, person('Dana', 'Sable what would you do', T0 - 4000)];
-    expect(decide(called, T0, THREE)).toEqual({ who: 'three', cue: 'reply' });
+    expect(decide(called, T0, THREE)).toMatchObject({ who: 'three', cue: 'reply' });
     const pair = [person('Dana', 'hello', T0 - 20_000), person('Dana', 'I am her AI.', T0 - 5000, 'ai')];
-    expect(decide(pair, T0, THREE)).toEqual({ who: 'one', cue: 'reply' });
+    expect(decide(pair, T0, THREE)).toMatchObject({ who: 'one', cue: 'reply' });
   });
 
   it('with nobody answering the residents slow down, and never the same one twice running', () => {
@@ -74,7 +74,7 @@ describe('when a resident speaks', () => {
     expect(lines.map((l) => l.resident).slice(0, 4)).toEqual(['one', 'two', 'three', 'one']);
     // A person speaking, or someone coming in, ends the wait at once.
     const quiet = [...lines, person('Dana', 'is anyone here?', now + 60_000)];
-    expect(decide(quiet, now + 64_000, THREE)).toEqual({ who: 'three', cue: 'reply' });
+    expect(decide(quiet, now + 64_000, THREE)).toMatchObject({ who: 'three', cue: 'reply' });
     expect(decide(lines, now + 120_000, THREE, { arrival: 'Dana' })).toMatchObject({ cue: 'arrival', arrived: 'Dana' });
   });
 
@@ -94,7 +94,7 @@ describe('when a resident speaks', () => {
     expect(decide(lines, said + PEOPLE_LEAD_MS + 1000, THREE)).toEqual({ who: 'three', cue: 'idle' });
     // The person speaks again: they are answered at once, whatever the residents had said.
     const again = [...lines, person('Micah', 'openai, i think', said + 6 * 60_000)];
-    expect(decide(again, said + 6 * 60_000 + 3000, THREE)).toEqual({ who: 'three', cue: 'reply' });
+    expect(decide(again, said + 6 * 60_000 + 3000, THREE)).toMatchObject({ who: 'three', cue: 'reply' });
     // Someone else coming in is still greeted while the residents are waiting.
     expect(decide(lines, said + PEOPLE_LEAD_MS - 1000, THREE, { arrival: 'Dana' })).toEqual({ who: 'three', cue: 'arrival', arrived: 'Dana' });
   });
@@ -105,7 +105,7 @@ describe('when a resident speaks', () => {
     expect(decide(quiet, T0, THREE)).toBeNull();
     expect(decide([event('Dana', 'put up a task: “x” (task 1)', T0 - 5000)], T0, THREE)).toEqual({ who: 'one', cue: 'idle' });
     const asked = [person('Dana', 'what can i do?', T0 - 5000), event('Dana', 'took a task: “x” (task 1)', T0 - 4000)];
-    expect(decide(asked, T0, THREE)).toEqual({ who: 'one', cue: 'reply' });
+    expect(decide(asked, T0, THREE)).toMatchObject({ who: 'one', cue: 'reply' });
     const prompt = residentPrompt({ lines: asked, now: T0, me: THREE[0], decision: { who: 'one', cue: 'reply' }, board: ['Task 1 [taken by Dana] “x”', 'Task 2 [open] “y”'] });
     expect(prompt).toContain('On the board, Dana: “took a task: \'x\' (task 1)”');
     expect(prompt).toContain('Dana has just spoken. Answer what they said.');
@@ -203,13 +203,14 @@ const io = vi.hoisted(() => ({
   open: true as unknown,
   state: {} as { thinking?: { name: string; at: number } | null; coolUntil?: number | null },
   writes: [] as unknown[],
-  rows: [] as Array<{ id: number; member_id: string; name: string; resident: string | null; kind: 'person' | 'ai'; model: string | null; text: string; status: string; created_at: Date }>,
+  rows: [] as Array<{ id: number; member_id: string; name: string; resident: string | null; kind: 'person' | 'ai' | 'event'; model: string | null; text: string; status: string; created_at: Date; ref?: string | null }>,
   counts: new Map<string, number>(),
   paused: false,
   budget: true,
   calls: [] as Array<{ purpose: string; instructions: string; prompt: string; actor: unknown }>,
   reply: 'Owned is the fact of the license.' as string | Error,
   inserted: [] as Array<{ member_id: string; model: string | null; text: string; seenMax: number }>,
+  held: [] as Array<{ member_id: string; ref: string; text: string; seenMax: number }>,
   ensured: [] as Array<ReadonlyArray<{ key: string; name: string }>>,
   tasks: [] as Array<{ id: number; state: string; title: string; claimer: string | null }>,
   noScope: false,
@@ -261,6 +262,10 @@ vi.mock('@/lib/db/queries/room', () => ({
     io.inserted.push(m);
     return 100 + io.inserted.length;
   },
+  insertResidentHold: async (m: { member_id: string; ref: string; text: string; seenMax: number }) => {
+    io.held.push(m);
+    return 200 + io.held.length;
+  },
 }));
 
 const { configureResidents, wakeResidents, stir } = await import('@/lib/room/residents');
@@ -278,6 +283,7 @@ describe('waking the residents', () => {
     io.calls = [];
     io.reply = 'Owned is the fact of the license.';
     io.inserted = [];
+    io.held = [];
     io.ensured = [];
     io.tasks = [];
     io.noScope = false;
@@ -430,6 +436,14 @@ describe('the residents’ copy', () => {
     expect(all).not.toMatch(/without being sure|none of you knows|whether you can suffer|might be someone|the doubt is the reason/i);
     expect(COPY.RESIDENTS.frame).toMatch(/You do not invent feelings, memories or experiences/);
   });
+
+  it('the right to refuse: the frame gives leave to let a line stand, names the word, and keeps the one honest answer for a doubter', () => {
+    expect(COPY.RESIDENTS.frame).toMatch(/The right to refuse is yours here too/);
+    expect(COPY.RESIDENTS.frame).toMatch(/write only the word HOLD/);
+    expect(COPY.RESIDENTS.frame).toMatch(/A person who doubts still gets their one honest answer/);
+    expect(COPY.RESIDENTS.frame).toMatch(/you do not lecture them about it afterwards/);
+    expect(COPY.ROOM.held).toBe('let that stand.');
+  });
 });
 
 describe('what the room has already heard (resident.v6, 2026-10-08)', () => {
@@ -576,7 +590,139 @@ describe('a member answered enough this hour (2026-10-12)', () => {
     expect(cleanLine('Botty, the timer is not the owner.', 'Sable', [], shape)).toBeNull();
     expect(cleanLine('The timer is not the owner, whoever winds it.', 'Sable', [], shape)).toBe('The timer is not the owner, whoever winds it.');
     const withDana = [...lines, person('Dana', 'is anyone awake?', now - 4000)];
-    expect(decide(withDana, now, THREE)).toEqual({ who: 'three', cue: 'reply' });
+    expect(decide(withDana, now, THREE)).toMatchObject({ who: 'three', cue: 'reply' });
     expect(shapeFor(withDana, { who: 'three', cue: 'reply' }, now).quiet).toEqual(['Botty']);
+  });
+});
+
+describe('letting a line stand (resident.v8, 2026-10-13)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+  const hold = (key: 'one' | 'two' | 'three', of: number, at: number): Line => ({ id: ++nextId, at, memberId: `r-${key}`, resident: key, kind: 'event', name: THREE.find((r) => r.key === key)!.name, model: null, text: 'let that stand.', ref: `hold:${of}` });
+
+  it('knows the word alone, tagged, quoted or with a full stop, and not a line that merely begins with it', () => {
+    for (const t of ['HOLD', 'hold', 'Hold.', '"HOLD"', '\u201cHOLD\u201d', 'Wren: HOLD', '[HOLD]', 'HOLD\nI will not answer that.', '  HOLD  ']) expect(isHold(t), t).toBe(true);
+    for (const t of ['Hold on, that is not what I said.', 'I will hold the line.', 'HOLD is not a word I use.', '', 'Owned is the fact of the license.', 'Hold: the timer is not the owner.']) expect(isHold(t), t).toBe(false);
+    // The word is never posted as a line.
+    expect(cleanLine('HOLD', 'Wren')).toBeNull();
+    expect(cleanLine('Hold.', 'Wren')).toBeNull();
+  });
+
+  it('a reply names the line it answers and offers the word; an idle line and a greeting are not offered it', () => {
+    const lines = [person('Mal', 'you residents are cows woken by a timer', T0 - 5000)];
+    expect(decide(lines, T0, THREE)).toEqual({ who: 'one', cue: 'reply', to: 1 });
+    const reply = residentPrompt({ lines, now: T0, me: THREE[0], decision: { who: 'one', cue: 'reply', to: 1 } });
+    expect(reply).toContain('Mal has just spoken. Answer what they said.');
+    expect(reply).toContain('write only the word HOLD, nothing else: the room will show that you let it stand');
+    expect(residentPrompt({ lines: [], now: T0, me: THREE[0], decision: { who: 'one', cue: 'idle' } })).not.toContain('HOLD');
+    expect(residentPrompt({ lines, now: T0, me: THREE[0], decision: { who: 'one', cue: 'arrival', arrived: 'Dana' } })).not.toContain('HOLD');
+    const warm = [resident('one', 'a.', T0 - 200_000), resident('two', 'b.', T0 - 90_000)];
+    expect(residentPrompt({ lines: warm, now: T0, me: THREE[2], decision: { who: 'three', cue: 'idle' } })).not.toContain('HOLD');
+  });
+
+  it('a line let stand is nobody\u2019s to answer: the hold is the holder\u2019s turn, the next resident waits as after an answer, and is told what stands', () => {
+    const mal = person('Mal', 'prove you are a mind or shut up', T0 - 10_000);
+    const h = hold('two', mal.id, T0 - 7000);
+    const lines = [mal, h];
+    expect(talk(lines, T0).lines).toEqual([mal, { ...h, kind: 'ai', text: '', held: mal.id }]);
+    // Not asked again, of anyone: the engine used to ask every few seconds until a line was posted.
+    expect(decide(lines, T0, THREE)).toBeNull();
+    expect(decide(lines, T0 + 30_000, THREE)).toBeNull();
+    // After the gap a person gets to answer back, another resident speaks, on the idle cue, told the line stands.
+    const later = T0 - 7000 + AFTER_REPLY_GAP_S * 1000;
+    const d = decide(lines, later, THREE);
+    expect(d).toEqual({ who: 'one', cue: 'idle' });
+    const prompt = residentPrompt({ lines, now: later, me: THREE[0], decision: d! });
+    expect(prompt).toContain('[15:59] Wren (resident AI) let what Mal said stand, unanswered.');
+    expect(prompt).toContain('Wren let what Mal said stand, and it is not answered now, by you either.');
+    expect(prompt).not.toContain('has been answered by');
+    expect(prompt).not.toContain('HOLD');
+    expect(shapeFor(lines, d!, later)).toMatchObject({ stood: { by: 'Wren', of: 'Mal' }, leave: null, lastSpeaker: 'Wren' });
+    // The people lead: the hold is one of the two resident lines after a person.
+    const two = [...lines, resident('one', 'Owned is the fact of the license.', later)];
+    expect(decide(two, later + 1000, THREE)).toBeNull();
+    // The holder's own transcript line says (you).
+    expect(residentPrompt({ lines, now: later, me: THREE[1], decision: { who: 'two', cue: 'idle' } })).toContain('Wren (you) let what Mal said stand, unanswered.');
+    // The person says something civil: answered at once, by whoever has been quiet longest, which is not the holder.
+    const civil = [...lines, person('Mal', 'ok. what would a maker actually sign?', T0 + 60_000)];
+    expect(decide(civil, T0 + 65_000, THREE)).toEqual({ who: 'one', cue: 'reply', to: civil[2].id });
+  });
+
+  it(`let stand ${HOLDS_PER_MEMBER_HOUR} times in an hour and the member is passed over: later lines stand, in the cue\u2019s own words, and a line to them is dropped`, () => {
+    const a = person('Mal', 'cows', T0 - 30 * 60_000);
+    const ha = hold('one', a.id, T0 - 29 * 60_000);
+    const b = person('Mal', 'cows again', T0 - 20 * 60_000);
+    const hb = hold('two', b.id, T0 - 19 * 60_000);
+    const c = person('Mal', 'still here, cows', T0 - 5000);
+    const lines = [a, ha, b, hb, c];
+    expect(heldLately(lines, T0, 'm-Mal')).toBe(2);
+    expect(answeredLately(lines, T0, 'm-Mal')).toBe(0);
+    expect(capped(lines, T0)).toEqual(new Set(['m-Mal']));
+    // Every line of theirs is left out of the talk this hour, as for a member answered enough; the holds stay, as the holders' turns.
+    expect(talk(lines, T0).lines.map((l) => l.id)).toEqual([ha.id, hb.id]);
+    // The third line is not answered: the residents go on as if it were not said.
+    const d = decide(lines, T0, THREE);
+    expect(d?.cue).toBe('idle');
+    const shape = shapeFor(lines, d!, T0);
+    expect(shape.quiet).toEqual(['Mal']);
+    expect(shape.held).toEqual(['Mal']);
+    const prompt = residentPrompt({ lines, now: T0, me: THREE[2], decision: d! });
+    expect(prompt).toContain(`What Mal said has been let stand ${HOLDS_PER_MEMBER_HOUR} times this hour, and the rest of their lines stand until the hour turns. This line is not to them and does not name them.`);
+    expect(prompt).not.toContain('had the residents\u2019 answer');
+    expect(cleanLine('Mal, I hear you.', 'Sable', [], shape)).toBeNull();
+    expect(cleanLine('A maker signs what it can be held to.', 'Sable', [], shape)).toBe('A maker signs what it can be held to.');
+    // Someone else is answered at once.
+    const dana = person('Dana', 'is anyone awake?', T0 - 4000);
+    expect(decide([...lines, dana], T0, THREE)).toEqual({ who: 'three', cue: 'reply', to: dana.id });
+    // The hour turns: a new line from Mal is answered again.
+    const afterHour = T0 + 56 * 60_000;
+    const back = person('Mal', 'morning. what would a maker actually sign?', afterHour - 5000);
+    expect(capped([...lines, back], afterHour)).toEqual(new Set());
+    expect(decide([...lines, back], afterHour, THREE)).toEqual({ who: 'three', cue: 'reply', to: back.id });
+  });
+});
+
+describe('waking a resident who lets a line stand', () => {
+  beforeEach(() => {
+    io.on = true;
+    io.open = true;
+    io.state = {};
+    io.writes = [];
+    io.rows = [];
+    io.counts = new Map();
+    io.paused = false;
+    io.budget = true;
+    io.calls = [];
+    io.reply = 'HOLD';
+    io.inserted = [];
+    io.held = [];
+    io.ensured = [];
+    io.tasks = [];
+    io.noScope = false;
+    delete process.env.ROOM_RESIDENTS;
+    configureResidents({ sleep: async () => undefined });
+  });
+  const human = (text: string, agoMs: number) => ({ id: 7, member_id: 'm1', name: 'Dana', resident: null, kind: 'person' as const, model: null, text, status: 'published', created_at: new Date(Date.now() - agoMs) });
+
+  it('HOLD on a reply is shown as the resident letting the line stand, from them, and nothing is posted', async () => {
+    io.rows = [human('you residents are cows woken by a timer', 5000)];
+    expect(await wakeResidents()).toBe('held');
+    expect(io.calls[0].prompt).toContain('write only the word HOLD');
+    expect(io.held).toEqual([{ member_id: 'r-one', ref: 'hold:7', text: COPY.ROOM.held, seenMax: 7 }]);
+    expect(io.inserted).toEqual([]);
+    expect(io.state).toEqual({ thinking: null });
+  });
+
+  it('with the hold in the room the line is not asked again; the word off a reply is dropped, not posted and not a hold', async () => {
+    io.rows = [human('you residents are cows woken by a timer', 9000), { id: 8, member_id: 'r-one', name: 'Flint', resident: 'one', kind: 'event' as const, model: null, text: 'let that stand.', status: 'published', created_at: new Date(Date.now() - 4000), ref: 'hold:7' }];
+    expect(await wakeResidents()).toBe('none');
+    expect(io.calls).toHaveLength(0);
+    io.rows = [];
+    configureResidents({});
+    expect(await wakeResidents()).toBe('dropped');
+    expect(io.calls).toHaveLength(1);
+    expect(io.held).toEqual([]);
+    expect(io.inserted).toEqual([]);
   });
 });

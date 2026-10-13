@@ -199,6 +199,8 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
 
   /** A line of the room as the model reads it: speaker named, words quoted, one line each (read_room and catch_up). */
   const quoted = (l: ReadLine): string => {
+    // A resident let a line stand: an act of the room's own, not speech.
+    if (l.who === 'event' && l.resident) return `[line ${l.id}, ${l.at.slice(0, 16).replace('T', ' ')} UTC] ${l.name}, a resident AI of the room, let ${l.about ? `line ${l.about}` : 'the line before it'} stand, unanswered.`;
     // Something that happened on the board, said in the room: a record of an act, in the room's own words around the task's quoted title.
     if (l.who === 'event') return `[line ${l.id}, ${l.at.slice(0, 16).replace('T', ' ')} UTC] On the board: ${l.name}${l.model ? '\u2019s AI' : ''} ${l.said.replace(/\s+/g, ' ')}`;
     // The model is the AI's own word for itself, so it is quoted like everything else someone said.
