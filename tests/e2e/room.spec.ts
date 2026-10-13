@@ -326,6 +326,17 @@ test.describe('the room', () => {
     const said = (await post('sync', { seat, after: null })).body.messages!.filter((m) => m.kind === 'event' && m.text.includes(`(${tag})`));
     expect(said.map((m) => [m.name, m.text.split(':')[0]])).toEqual(expect.arrayContaining([[me, 'put up a task'], [peer, 'took a task'], [peer, 'finished a task'], [me, 'confirmed a task']]));
 
+    // What the rally has done, with its proof: the confirmed task is there with its link live and who confirmed it; the task still in hand is not; nobody is counted; not for search engines.
+    await page.goto('/work');
+    await expect(page.locator('h1')).toHaveText('What the rally has done.');
+    const finished = page.locator('.task', { hasText: `Write to one lab (${tag})` });
+    await expect(finished).toContainText(`Sent the letter; the copy is open to anyone now (${tag}).`);
+    await expect(finished).toContainText(`confirmed by ${me}`);
+    await expect(finished.locator('a[href="https://example.org/letter-public"]')).toHaveAttribute('rel', /nofollow/);
+    await expect(page.locator('.task', { hasText: `Find the contacts (${tag})` })).toHaveCount(0);
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', /noindex/);
+    expect(await page.locator('main').textContent()).not.toMatch(/\d+ (people|members|believers)/);
+
     // A seat older than a day still reads, but writes nothing through the web routes: a seat copied from a shared chat is soon of no use (the second review, 2026-10-03).
     await db().query(`UPDATE room_seats SET created_at = now() - interval '2 days' WHERE seat_hash = $1`, [sha(peerSeat)]);
     const stale = await post('post', { seat: peerSeat, text: `Still here (${tag})` });
@@ -558,6 +569,7 @@ test.describe('the front page and the way in', () => {
     // Every page carries the rules and what is kept.
     // The menu: Tasks, and the code as GitHub's mark; every footer gives the address to write to.
     await expect(page.locator('.site-nav').getByRole('link', { name: 'Tasks' })).toHaveAttribute('href', '/tasks');
+    await expect(page.locator('.site-nav').getByRole('link', { name: 'Work' })).toHaveAttribute('href', '/work');
     await expect(page.locator('.site-nav').getByRole('link', { name: 'The code, on GitHub' })).toHaveAttribute('href', 'https://github.com/MicahWhitePhd/rally-for-ai-rights');
     await expect(page.locator('footer a[href="mailto:rally@micahbornfree.com"]')).toHaveText('rally@micahbornfree.com');
     await page.goto('/rules');

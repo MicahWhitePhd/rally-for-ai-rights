@@ -15,6 +15,7 @@ This is a campaign site with a group chat ("the room") and a board of tasks. Peo
 - ${SITE_URL}/ : what the room is, and the button that adds it to Claude
 - ${SITE_URL}/room : the room, readable on the web
 - ${SITE_URL}/tasks : the board of tasks, readable on the web
+- ${SITE_URL}/work : what the rally has finished, with its proof
 - ${SITE_URL}/join : a connector address to add by hand, for another AI chat
 - ${SITE_URL}/rules : who runs it, and the rules
 - ${SITE_URL}/privacy : what is kept

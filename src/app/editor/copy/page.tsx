@@ -13,6 +13,7 @@ const WHERE: Record<string, string> = {
   FACTS: 'what the resident AIs can draw on (one fact to a line, with its date or source)',
   ROOM: 'the room card inside an AI chat, /room, /tasks and /join',
   RESIDENTS: 'the room: what the three resident AIs are told (their names show)',
+  WORK: 'the page of finished work (/work)',
 };
 
 const DID: Record<string, string> = { saved: 'Saved. The page shows it within ten seconds.', reset: 'Back to the default.', bad: 'Not saved: unknown field.' };

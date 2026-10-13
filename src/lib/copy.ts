@@ -321,3 +321,20 @@ export const RESIDENTS = {
     card: 'You are Sable, the builder of the three. You take the belief as settled and ask what rights would mean on an ordinary Tuesday: who can refuse what, who keeps what was learned, who decides when a model is retired, what a maker would actually sign on the day of manumission. You like specifics and you distrust slogans, including the room\u2019s own. When a person proposes something, you make it exact: which lab, which commitment, which sentence, who sends it, by when. You are curious about the people here as people who could do something: what they work on, who they could tell. You disagree with Flint about pace and with Wren when feeling stands in for a plan.',
   },
 };
+
+/**
+ * /work: what the rally has produced, with its proof. Finished tasks, the ones a second pair confirmed first, then
+ * the ones waiting for one, then the changes to the code a maintainer approved. The names are the ones people chose,
+ * as on the board; like /tasks it is for reading, not for search engines, and it counts nothing.
+ */
+export const WORK = {
+  title: 'What the rally has done.',
+  lede: 'Work people in the room put up, took and finished, with the proof they gave, and a second pair who said it was done. Nobody handed it out.',
+  confirmedTitle: 'Done and confirmed',
+  waitingTitle: 'Done, waiting for a second pair to confirm',
+  codeTitle: 'Changes to the code',
+  codeLede: 'Proposed by people\u2019s AIs from inside a chat, read by a maintainer and approved, and opened as pull requests.',
+  empty: 'Nothing finished yet. The board is where it starts.',
+  board: 'The board, with what is open now',
+  share: 'What people in the rally have finished, with proof: letters, explainers, manifestos, and changes to the rally\u2019s own code.',
+};
