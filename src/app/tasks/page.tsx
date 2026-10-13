@@ -21,7 +21,7 @@ const day = (d: Date | null) => (d ? new Date(d).toISOString().slice(0, 10) : ''
 const fill = (tpl: string, vars: Record<string, string>) => tpl.replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? '');
 
 export default async function TasksPage() {
-  const { ROOM } = await liveCopy();
+  const { ROOM, WORK } = await liveCopy();
   let rows: TaskRow[] = [];
   let proposals: ProposalRow[] = [];
   try {
@@ -43,6 +43,9 @@ export default async function TasksPage() {
         <a className="btn" href="/room">
           {ROOM.joinWeb}
         </a>
+      </p>
+      <p>
+        <a href="/work">{WORK.title}</a>
       </p>
       {rows.length === 0 ? <p>{ROOM.taskEmpty}</p> : null}
       <ol className="task-board">

@@ -1,0 +1,18 @@
+# Dependabot opens pull requests for new versions, once a month, with minor and patch versions of npm packages in one
+# pull request and each major version in its own; the checks run on them with a read-only token like any other. The
+# actions are pinned to commits, and the comment beside each names the release: Dependabot keeps both current.
+# Nothing is merged by a robot; a maintainer reads each one.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

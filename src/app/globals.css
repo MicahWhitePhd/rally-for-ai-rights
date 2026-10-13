@@ -55,6 +55,8 @@ label{display:block;font:500 0.85rem/1.4 var(--sans);}
 .record-lede{font:400 clamp(1.15rem,2.2vw,1.4rem)/1.45 var(--serif);}
 .join-address{overflow-wrap:anywhere;padding:0.6rem;border:1px solid var(--ink);}
 .room-frame{display:block;width:100%;height:clamp(28rem,75vh,50rem);border:2px solid var(--ink);background:var(--paper);}
+.join-code{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding:0.6rem;border:1px solid var(--ink);font-size:0.85rem;}
+.copy-text>*+*{margin-top:0.6rem;}
 
 /* the front page */
 .front{padding-top:clamp(1.5rem,5vw,3.5rem);container-type:inline-size;}

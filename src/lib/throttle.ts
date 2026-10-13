@@ -1,5 +1,5 @@
 import 'server-only';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { bumpThrottle, cleanupThrottle } from '@/lib/db/queries/throttle';
 
 /**
@@ -152,9 +152,21 @@ export type AddressGate = { allowed: true } | { allowed: false; limit: 'hour' | 
  * The network address as it is kept: a keyed hash, never the address. The key is ROOM_SECRET (or the editor's session
  * secret); without one the hash is unkeyed, which is fine on a laptop and not on a deployment.
  */
+/** The key a production instance with no secret set hashes addresses under: made once per process, so the hash is still keyed and still stable here, and never a word in the code. */
+let madeUp: string | null = null;
+function hashKey(): string {
+  const set = process.env.ROOM_SECRET || process.env.EDITOR_SESSION_SECRET;
+  if (set) return set;
+  if (process.env.NODE_ENV !== 'production') return 'rally-dev';
+  if (!madeUp) {
+    madeUp = randomBytes(32).toString('base64url');
+    console.error('[CONFIG] ROOM_SECRET is not set: network addresses are hashed under a key made up by this instance until it is');
+  }
+  return madeUp;
+}
+
 export function addressBucket(key: string): string {
-  const secret = process.env.ROOM_SECRET || process.env.EDITOR_SESSION_SECRET || 'rally-dev';
-  return createHmac('sha256', secret).update(`addr:${key}`).digest('base64url').slice(0, 22);
+  return createHmac('sha256', hashKey()).update(`addr:${key}`).digest('base64url').slice(0, 22);
 }
 
 let swept = 0;
