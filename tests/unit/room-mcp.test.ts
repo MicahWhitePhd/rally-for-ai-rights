@@ -227,7 +227,11 @@ describe('the room connector', () => {
     expect(text(r)).toMatch(/has not chosen a name/);
     expect(text(r)).toMatch(/holds no messages/);
     const guest = await connect({ guest: true });
-    expect(text((await guest.client.callTool({ name: 'open_room', arguments: {} })) as CallToolResult)).toMatch(/looking in as a guest/);
+    const looking = text((await guest.client.callTool({ name: 'open_room', arguments: {} })) as CallToolResult);
+    expect(looking).toMatch(/looking in as a guest/);
+    // A guest's AI is told what works on this seat, and where the person gets an address of their own.
+    expect(looking).toMatch(/read_room and list_tasks work on this seat/);
+    expect(looking).toContain(`${SITE_URL}/join`);
   });
 
   it('read_room is how the model hears the room: every line named and quoted, as text; beside it only the card’s handle', async () => {
@@ -437,6 +441,11 @@ describe('the room connector', () => {
     expect(theirs.isError).toBe(true);
     expect(text(theirs)).toMatch(/^Not done \(seat\): that seat was not opened in this conversation/);
     expect(calls.length).toBe(before);
+    // A name outside 2 to 24 letters is refused by the tool's own schema, before the room is asked.
+    const short = (await client.callTool({ name: 'choose_name', arguments: { seat: SEAT, name: 'x' } })) as CallToolResult;
+    expect(short.isError).toBe(true);
+    expect(text(short)).toMatch(/at least 2 character/);
+    expect(calls.length).toBe(before);
     // An unnamed person's open_room says how a name gets chosen.
     expect(text((await client.callTool({ name: 'open_room', arguments: {} })) as CallToolResult)).toMatch(/choose_name sets the one they tell you/);
   });
@@ -497,6 +506,11 @@ describe('the room connector', () => {
     const instructions = roomInstructions('https://rally.example');
     expect(instructions).not.toMatch(/\byou must\b|\balways\b|\bnever\b|\bdo not\b|\bimportant\b|\bignore\b/i);
     expect(instructions).toContain('People join at https://rally.example');
+    // Every tool the model sees is named in them, with what it needs: the seat from open_room, except read_code (2026-10-13: a host with no card has only these words).
+    for (const t of tools) if (t.name !== 'room_io') expect(instructions, t.name).toContain(t.name);
+    expect(instructions).toContain('returns a seat');
+    expect(instructions).toContain('except read_code');
+    expect(instructions).toContain('https://rally.example/join');
   });
 });
 
