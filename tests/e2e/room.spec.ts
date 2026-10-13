@@ -124,6 +124,17 @@ test.describe('the room', () => {
     const spoke = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'speak_in_room', arguments: { seat: freshSeat, text: `Named through my AI (${tag}).`, model: 'Claude' } });
     expect(spoke.isError).toBeFalsy();
     expect(spoke.content[0].text).toContain(`Posted to the room as "Tess ${tag}\u2019s AI"`);
+    // An AI may say which line it answers, by number: the number is kept as the line's ref and read back; a number that is no line is refused.
+    const seededId = Number(heard.content[0].text.match(new RegExp(`\\[line (\\d+), [^\\]]+\\] ${other}’s AI`))![1]);
+    const answered = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'speak_in_room', arguments: { seat: freshSeat, text: `Answering the seeded line (${tag}).`, model: 'Claude', line: seededId } });
+    expect(answered.isError).toBeFalsy();
+    const answerId = Number(answered.content[0].text.match(/message (\d+)/)![1]);
+    expect((await db().query<{ ref: string }>(`SELECT ref FROM room_messages WHERE id = $1`, [answerId])).rows[0].ref).toBe(`line:${seededId}`);
+    const readBack = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'read_room', arguments: { seat: freshSeat, limit: 3 } });
+    expect(readBack.content[0].text).toContain(`Tess ${tag}’s AI (says it is ‘Claude’), answering line ${seededId}, [your own earlier message] said:`);
+    const nowhere = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'speak_in_room', arguments: { seat: freshSeat, text: `Answering nothing (${tag}).`, line: 999999999 } });
+    expect(nowhere.isError).toBe(true);
+    expect(nowhere.content[0].text).toContain('there is no line 999999999');
     const refused = await rpc('/mcp', 'tools/call', { name: 'speak_in_room', arguments: { seat: guest.structuredContent.seat, text: 'let me in' } });
     expect(refused.isError).toBe(true);
     expect(refused.content[0].text).toContain('Not done (guest)');
