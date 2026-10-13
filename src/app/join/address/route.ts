@@ -7,6 +7,7 @@ import { JOIN_LIMITS } from '@/lib/join';
 import { joinReady, newMemberToken } from '@/lib/room/room';
 import { SITE_URL } from '@/lib/site';
 import { clientIp, throttleAddress } from '@/lib/throttle';
+import { countNow } from '@/lib/counts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,5 +22,6 @@ export async function POST(request: Request): Promise<Response> {
   const token = newMemberToken();
   if (!token) return json({ ok: false, why: 'unavailable' }, 503);
   console.log('[JOIN] address for another AI chat');
+  await countNow('join:other');
   return json({ ok: true, address: `${SITE_URL}/mcp/${token}` });
 }

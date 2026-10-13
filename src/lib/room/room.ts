@@ -47,7 +47,8 @@ import * as copy from '@/lib/copy';
 import { SITE_LINK } from '@/lib/site';
 import { addressedToMachines, mentionsIgnoringInstructions, normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
 import { isClaudeServer, throttle, throttleAddress } from '@/lib/throttle';
-import { mintToken, TOKEN_RE, tokenSigned } from './token';
+import { count, countNow } from '@/lib/counts';
+import { mintToken, ROOM_SECRET_MIN, TOKEN_RE, tokenSigned } from './token';
 import { readResidentsState, residentsOn, thinkingNow } from './residents-state';
 
 export const TEXT_MAX = 500;
@@ -111,7 +112,7 @@ export function joinReady(): boolean {
   const nowhere = process.env.NODE_ENV === 'production' && !process.env.NEXT_PUBLIC_SITE_URL && !process.env.VERCEL_PROJECT_PRODUCTION_URL;
   if ((unsigned || nowhere) && !joinWarned) {
     joinWarned = true;
-    console.error(`[JOIN] no addresses can be handed out: ${unsigned ? 'set ROOM_SECRET (16 characters or more)' : 'set NEXT_PUBLIC_SITE_URL'}`);
+    console.error(`[JOIN] no addresses can be handed out: ${unsigned ? `set ROOM_SECRET (${ROOM_SECRET_MIN} characters or more)` : 'set NEXT_PUBLIC_SITE_URL'}`);
   }
   return !unsigned && !nowhere;
 }
@@ -203,8 +204,14 @@ export interface Present {
  * as a short key the card looks up in ROOM.errors, so a person is told what was wrong and not just that something was.
  */
 export type RoomFailure = { ok: false; code: 'seat' | 'name' | 'text' | 'slow' | 'closed' | 'guest' | 'task' | 'limit' | 'muted'; reasons: string[]; why?: string };
-/** A rate limit refusing someone, on either path (the card or an AI's tool), goes to the log, so how often the limits bite is a count and not a guess (2026-10-11). Nobody's words are in the line. */
+/**
+ * A refusal, on either path (the card or an AI's tool), is counted by its kind and reason (src/lib/counts.ts), so how
+ * often the rules bite is a count a maintainer can read and not a guess; a limit's refusal goes to the log as well
+ * (2026-10-11). Nobody's words are in either. A seat no longer connected is not counted: stale cards would drown
+ * the rest.
+ */
 const noteLimit = (f: RoomFailure): RoomFailure => {
+  if (f.code !== 'seat') count(`refused:${f.code}${f.why ? `/${f.why}` : ''}`);
   if (f.code === 'slow') console.log(`[ROOM] refused: slow${f.why ? `/${f.why}` : ''}: ${f.reasons[0] ?? ''}`);
   return f;
 };
@@ -213,7 +220,7 @@ export const failWhy = (code: RoomFailure['code'], why: string, reason: string):
 const MUTED = 'a maintainer has stopped this address from speaking in the room';
 /** On an address's first day. */
 export const isFirstDay = (m: { createdAt?: Date | string | null }): boolean => Boolean(m.createdAt) && Date.now() - new Date(m.createdAt as Date).getTime() < FIRST_DAY_MS;
-const GUEST = `only someone who has added the room to their own AI can speak here; a guest reads (an address of one's own comes from ${SITE_LINK})`;
+const GUEST = `only someone who has added the room to their own AI can speak here; a guest reads (an address of one's own comes from ${SITE_LINK}/join)`;
 
 function toPublic(r: RoomMessageRow, me: RoomMember): PublicMessage {
   const about = heldLineId(r);
@@ -243,6 +250,8 @@ export async function openSeat(o: { memberToken?: string | null; address?: strin
       const gate = await throttle('room:members', NEW_MEMBERS_PER_DAY, 86_400, { failOpen: false });
       if (!gate.allowed) return failWhy('slow', 'day', 'no new members can come in today; the room resets at midnight UTC');
       member = await ensureMember(hash);
+      // An address handed out and now used for the first time: a step on the way in, counted by the day.
+      await countNow('member:first-use');
     }
   }
   if (member) {
@@ -430,6 +439,7 @@ export async function nameInRoom(seat: unknown, raw: unknown): Promise<{ ok: tru
   if (!gate.allowed) return fail('slow', 'too many name changes; try later');
   if (await nameTaken(name, me.id)) return failWhy('name', 'nameTaken', 'someone in the room already goes by that name');
   if (!(await setMemberName(me.id, name))) return failWhy('name', 'nameTaken', 'someone in the room already goes by that name');
+  if (!me.name) await countNow('member:named');
   return { ok: true, name, pair: pairOf(me.id), first: !me.name };
 }
 
@@ -458,7 +468,8 @@ export async function postToRoom(seat: unknown, o: { text: unknown; kind: 'perso
   const model = cleanModel(o.model);
   const answers = o.kind === 'ai' && typeof o.line === 'number' && Number.isInteger(o.line) && o.line > 0 ? o.line : null;
   if (answers !== null && (await listRoomMessagesBefore(answers + 1, 1))[0]?.id !== answers) return failWhy('text', 'noLine', `there is no line ${answers} in the room`);
-  if ((await recentTextsBy(me.id, 3)).includes(text)) return failWhy('text', 'repeat', 'that was just said');
+  const recent = await recentTextsBy(me.id, 3);
+  if (recent.includes(text)) return failWhy('text', 'repeat', 'that was just said');
   const firstDay = isFirstDay(me);
   const day = await throttle(`room:pd:${me.id}`, firstDay ? FIRST_DAY_POSTS : POSTS_PER_MEMBER_DAY, 86_400, { failOpen: false });
   if (!day.allowed) return firstDay ? failWhy('slow', 'firstDay', 'a new address can say only so much on its first day') : failWhy('slow', 'day', 'enough for today; it resets at midnight UTC');
@@ -469,6 +480,7 @@ export async function postToRoom(seat: unknown, o: { text: unknown; kind: 'perso
   const id = await insertRoomMessage({ member_id: me.id, kind: o.kind, model: o.kind === 'ai' ? model : null, text, ref: answers !== null ? `line:${answers}` : null });
   if (id === null) return failWhy('muted', 'muted', MUTED);
   console.log(`[ROOM] ${o.kind} message ${id}`);
+  if (recent.length === 0) await countNow('member:first-line');
   return { ok: true, message: { id, kind: o.kind, name: me.name, model: o.kind === 'ai' ? model : null, text, at: new Date().toISOString(), mine: true, pair: pairOf(me.id), resident: false, ...(answers !== null ? { answers } : {}) } };
 }
 

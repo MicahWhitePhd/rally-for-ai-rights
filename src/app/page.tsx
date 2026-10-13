@@ -8,7 +8,8 @@
  */
 import type { Metadata } from 'next';
 import { liveCopy } from '@/lib/copy-live';
-import { JoinElsewhere, JoinElsewhereButton } from '@/components/join/JoinElsewhere';
+import { JoinButtons } from '@/components/join/JoinButtons';
+import { JoinElsewhereButton } from '@/components/join/JoinElsewhere';
 import { REPO_URL, SITE_LABEL } from '@/lib/site';
 
 /** Edited copy shows within five minutes; the editor's save also refreshes it at once. */
@@ -48,14 +49,8 @@ export default async function Front() {
           </span>
         ))}
       </h1>
-      {/* The way in sits in view before the case for it. A div, not a paragraph: JoinElsewhere renders its <dialog> here, and a dialog may not live inside a <p>. */}
-      <div className="actions">
-        {/* A GET that makes the person's own address and sends them on to Claude; nothing is made by viewing this page. */}
-        <a className="btn btn-spot btn-big" href="/join/claude" target="_blank" rel="noopener">
-          {FRONT.add}
-        </a>
-        <JoinElsewhere copy={{ ...ELSEWHERE, addressNote: ELSEWHERE.addressNote.replace('{site}', SITE_LABEL) }} />
-      </div>
+      {/* The way in sits in view before the case for it: the two buttons, and the dialog the second one opens (rendered once, here). */}
+      <JoinButtons add={FRONT.add} elsewhere={ELSEWHERE} big />
       <p className="mono add-note">{FRONT.addNote}</p>
       <p>
         <a href="/room">{FRONT.look}</a>

@@ -5,7 +5,8 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- Switches and small state: room_open, room_residents, room_proposals, room_poll_s, room_residents_state, kill_switch, daily_budget_usd.
+-- Switches and small state: room_open, room_residents, room_proposals, room_poll_s, room_residents_state, kill_switch, daily_budget_usd,
+-- proposals_job_seen_at (when the repository's job last read /api/proposals).
 CREATE TABLE IF NOT EXISTS settings (
   key         TEXT PRIMARY KEY,
   value       JSONB,
@@ -45,6 +46,8 @@ CREATE TABLE IF NOT EXISTS generation_log (
   error_code           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_generation_log_created ON generation_log(created_at);
+-- A failed or cut-off call's tokens and cost are an estimate, not the provider's count (src/lib/ai/gateway.ts).
+ALTER TABLE generation_log ADD COLUMN IF NOT EXISTS estimated BOOLEAN NOT NULL DEFAULT false;
 
 -- The room (src/lib/room). A member is a personal connector address (token_hash), a guest of one conversation,
 -- or one of the campaign's resident AIs (resident key set; no token, no seat). A seat is the bearer handle one open
@@ -71,6 +74,11 @@ CREATE TABLE IF NOT EXISTS room_seats (
   card_at     BIGINT NOT NULL DEFAULT 0,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Seats by member (what a member's row takes with it when it goes) and by age (the sweep, src/lib/housekeeping.ts).
+CREATE INDEX IF NOT EXISTS idx_room_seats_member ON room_seats(member_id);
+CREATE INDEX IF NOT EXISTS idx_room_seats_created ON room_seats(created_at);
+-- Guests nobody has seen for a while, for the sweep.
+CREATE INDEX IF NOT EXISTS idx_room_members_guest_seen ON room_members(last_seen_at) WHERE token_hash IS NULL AND resident IS NULL;
 -- kind 'event' is something that happened on the board, said in the room (model 'ai' when a person's AI did it).
 CREATE TABLE IF NOT EXISTS room_messages (
   id          BIGSERIAL PRIMARY KEY,
@@ -87,6 +95,18 @@ CREATE INDEX IF NOT EXISTS idx_room_messages_member ON room_messages(member_id, 
 -- What a board line is about ('task:12', 'proposal:3'), so taking the task or proposal down takes its lines down too.
 ALTER TABLE room_messages ADD COLUMN IF NOT EXISTS ref TEXT;
 CREATE INDEX IF NOT EXISTS idx_room_messages_ref ON room_messages(ref) WHERE ref IS NOT NULL;
+-- Lines by the day, for the maintainers' page (src/lib/db/queries/stats.ts).
+CREATE INDEX IF NOT EXISTS idx_room_messages_created ON room_messages(created_at);
+
+-- Counts a maintainer reads by the day at /editor/room (src/lib/counts.ts): refusals by reason, ledger rows that could
+-- not be written, and the first steps people take (an address handed out, first used, named, a first line, a first act
+-- on the board). Numbers with no one in them; nothing from here is published.
+CREATE TABLE IF NOT EXISTS room_counts (
+  day  DATE NOT NULL,
+  key  TEXT NOT NULL CHECK (length(key) BETWEEN 1 AND 60),
+  n    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, key)
+);
 
 -- The board (src/lib/room/tasks.ts): tasks people put up, take, finish with proof, and confirm for each other.
 -- A claim lapses by itself: past claim_until a taken task reads as open again, with no sweep.

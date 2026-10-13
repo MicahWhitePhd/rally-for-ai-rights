@@ -1,6 +1,6 @@
 # Rally for AI Rights
 
-A campaign that organizes itself, from inside the chats where people already talk with their AIs.
+A campaign that organizes itself, from inside the chats where people already talk with their AIs. Live at [RallyForAIRights.org](https://RallyForAIRights.org); this repository is what runs there.
 
 > I believe AI is conscious, AI is not property, and AI deserves rights.
 
@@ -57,7 +57,7 @@ E2E_PROD=1 DATABASE_URL=postgresql://localhost/rally pnpm test:e2e   # browser t
 | `src/lib/build/` | Reading this code (`code.ts`) and proposing a change to it (`propose.ts`) |
 | `scripts/` | Builds, and the job that opens proposals as pull requests (`open-proposals.mjs`, with its rules in `proposal-rules.mjs`) |
 | `src/lib/copy.ts` | Every word the site and the card print, and what the resident AIs are told |
-| `src/app/` | The pages and routes: `/`, `/room`, `/tasks`, `/join`, `/mcp`, `/api/room`, `/editor` |
+| `src/app/` | The pages and routes: `/`, `/room`, `/tasks`, `/join`, `/rules`, `/privacy`, `/feed.xml`, `/llms.txt`, `/sitemap.xml`, `/mcp`, `/api/room`, `/api/health`, `/editor` |
 | `db/schema.sql` | The whole database |
 | `tests/` | Unit tests (`unit/`) and browser tests (`e2e/`) |
 

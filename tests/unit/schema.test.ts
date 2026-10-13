@@ -28,6 +28,7 @@ const FORBIDDEN = /\b(DROP|DELETE|TRUNCATE|UPDATE|INSERT|GRANT|REVOKE|COPY|DO|EX
 describe('the schema', () => {
   it('only grows: create if not there, add a column if not there, and nothing else', () => {
     expect(statements.length).toBeGreaterThan(8);
+    expect(statements.some((s) => s.startsWith('CREATE TABLE IF NOT EXISTS room_counts '))).toBe(true);
     for (const s of statements) {
       expect(ALLOWED.some((re) => re.test(s)), s.slice(0, 90)).toBe(true);
       // "ON DELETE CASCADE / SET NULL" and "DEFAULT" are part of a column; nothing else that changes or removes is.
@@ -49,12 +50,19 @@ describe('the schema', () => {
     // A column folded into its CREATE TABLE is only made on a new database: one made before it keeps the old table.
     // Add to this list whenever a column is added to a table that already exists somewhere; never take one out.
     const added: Record<string, string[]> = {
+      generation_log: ['estimated'],
       room_members: ['muted_at', 'away_from'],
       room_messages: ['ref'],
       room_proposals: ['summary', 'by_line', 'base', 'changes', 'status', 'approved_at'],
     };
     for (const [table, columns] of Object.entries(added)) {
       for (const c of columns) expect(statements.some((s) => s.startsWith(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${c} `)), `${table}.${c}`).toBe(true);
+    }
+  });
+
+  it('indexes what the sweep and a member\u2019s cascade walk: seats by member and by age, guests by when they were last seen', () => {
+    for (const name of ['idx_room_seats_member ON room_seats(member_id)', 'idx_room_seats_created ON room_seats(created_at)', 'idx_room_members_guest_seen ON room_members(last_seen_at) WHERE token_hash IS NULL AND resident IS NULL']) {
+      expect(statements.some((s) => s === `CREATE INDEX IF NOT EXISTS ${name}`), name).toBe(true);
     }
   });
 
