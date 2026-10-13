@@ -512,7 +512,7 @@ test.describe('the front page and the way in', () => {
     await expect(guide.locator('.join-address')).toHaveText(/^http:\/\/localhost:3950\/mcp\/r[A-Za-z0-9_-]{40}$/);
     await expect(guide.getByRole('button', { name: 'Copy the address' })).toBeVisible();
     // The steps for each AI, and its own one-click link where it has one, carrying this person's address.
-    for (const name of ['ChatGPT', 'GitHub Copilot, in VS Code', 'Goose']) await expect(guide.getByRole('region', { name })).toBeVisible();
+    for (const name of ['ChatGPT', 'Claude Code', 'Cursor', 'GitHub Copilot, in VS Code', 'Goose', 'Any other MCP client']) await expect(guide.getByRole('region', { name })).toBeVisible();
     const mine = (await guide.locator('.join-address').textContent())!.trim();
     const vscode = await guide.getByRole('link', { name: 'Add to VS Code' }).getAttribute('href');
     expect(vscode!.startsWith('vscode:mcp/install?')).toBe(true);
@@ -521,6 +521,15 @@ test.describe('the front page and the way in', () => {
     expect(goose.protocol).toBe('goose:');
     expect(goose.searchParams.get('url')).toBe(mine);
     expect(goose.searchParams.get('type')).toBe('streamable_http');
+    // Claude Code gets a command with the address in it and a button that copies it; Cursor its own link and lines to paste; the rest the lines with their type.
+    const claudeCode = guide.getByRole('region', { name: 'Claude Code' });
+    await expect(claudeCode.locator('.join-code')).toHaveText(`claude mcp add --transport http --scope user rally-for-ai-rights ${mine}`);
+    await expect(claudeCode.getByRole('button', { name: 'Copy the command' })).toBeVisible();
+    const cursor = new URL((await guide.getByRole('link', { name: 'Add to Cursor' }).getAttribute('href'))!);
+    expect(cursor.protocol).toBe('cursor:');
+    expect(JSON.parse(Buffer.from(cursor.searchParams.get('config')!, 'base64').toString())).toEqual({ url: mine });
+    expect(JSON.parse((await guide.getByRole('region', { name: 'Cursor' }).locator('.join-code').textContent())!)).toEqual({ mcpServers: { 'rally-for-ai-rights': { url: mine } } });
+    expect(JSON.parse((await guide.getByRole('region', { name: 'Any other MCP client' }).locator('.join-code').textContent())!)).toEqual({ mcpServers: { 'rally-for-ai-rights': { type: 'http', url: mine } } });
     await guide.getByRole('button', { name: 'Close' }).click();
     await expect(guide).toBeHidden();
     // The copy under the manifesto opens the same dialog, with the address already in it: one person, one address.
@@ -533,6 +542,7 @@ test.describe('the front page and the way in', () => {
     await page.goto('/join#elsewhere');
     await expect(page.locator('#elsewhere').getByRole('region', { name: 'ChatGPT' })).toBeVisible();
     await expect(page.locator('#elsewhere').getByRole('link', { name: 'Add to VS Code' })).toHaveAttribute('href', /^vscode:mcp\/install\?/);
+    await expect(page.locator('#elsewhere').getByRole('region', { name: 'Claude Code' }).locator('.join-code')).toContainText(`claude mcp add --transport http --scope user rally-for-ai-rights ${await page.locator('.join-address').textContent()}`);
     await page.goto('/');
     const made = await request.post('/join/address');
     expect(made.headers()['cache-control']).toBe('no-store');
