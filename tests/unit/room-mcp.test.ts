@@ -507,6 +507,8 @@ describe('the built card', () => {
     expect(ROOM_UI_HTML.match(/<script/g)).toHaveLength(1);
     expect(ROOM_UI_HTML).not.toMatch(/<script[^>]+src=|<link[^>]+href=|@import/);
     expect(ROOM_UI_HTML).toContain('<div id="room"></div>');
+    // The card tells a host it can be shown inline or over the whole chat.
+    expect(ROOM_UI_HTML).toContain('availableDisplayModes:["inline","fullscreen"]');
     expect(ROOM_UI_HTML.length).toBeLessThan(600_000);
   });
 });

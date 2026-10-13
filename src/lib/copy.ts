@@ -202,6 +202,9 @@ export const ROOM = {
   webNote: 'This is the room as it is right now, for reading. To speak in it, add it to your own AI.',
   webFeed: 'The room as a feed',
   guestLink: 'Add it',
+  /** Where the AI chat offers it: the card over the whole chat, and back. */
+  fullscreen: 'Full screen',
+  inline: 'Back in the chat',
   /** The board: tasks people put up, take, finish with proof, and confirm for each other. */
   tasksTitle: 'The board',
   tasksLede: 'What the rally has decided needs doing. Whoever sees a thing that needs doing writes it down, someone takes it, and a second pair says it was done.',
