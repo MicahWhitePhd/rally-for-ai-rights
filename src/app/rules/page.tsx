@@ -2,19 +2,20 @@
 import type { Metadata } from 'next';
 import { liveCopy } from '@/lib/copy-live';
 import { CONTACT_EMAIL } from '@/lib/copy';
+import { founderLine } from '@/components/SiteChrome';
 
 export const revalidate = 300;
 
 export const metadata: Metadata = { title: 'The rules', alternates: { canonical: '/rules' } };
 
 export default async function Rules() {
-  const { RULES } = await liveCopy();
+  const { RULES, FOUNDED } = await liveCopy();
   return (
     <article className="page-simple" aria-labelledby="rules-h">
       <h1 id="rules-h" className="h page-title">
         {RULES.title}
       </h1>
-      <p>{RULES.operator}</p>
+      <p>{RULES.operator.replace('{name}', founderLine(FOUNDED))}</p>
       {RULES.contact ? (
         <p>
           {RULES.contact.split('{email}').map((part, i) => (i === 0 ? part : [<a key={i} href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>, part]))}

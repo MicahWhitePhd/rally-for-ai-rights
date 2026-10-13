@@ -23,7 +23,8 @@
  */
 import { getSetting } from '@/lib/db/queries/settings';
 import { insertRoomMessage } from '@/lib/db/queries/room';
-import { claimTask, completeTask, confirmTask, getTask, insertTask, listTasks, releaseTask, withdrawOwnTask, type TaskRow } from '@/lib/db/queries/tasks';
+import { claimTask, completeTask, confirmTask, getTask, insertTask, listTasks, memberActedBefore, releaseTask, withdrawOwnTask, type TaskRow } from '@/lib/db/queries/tasks';
+import { countNow } from '@/lib/counts';
 import { SITE_LINK } from '@/lib/site';
 import { mentionsIgnoringInstructions, normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
 import { throttle } from '@/lib/throttle';
@@ -52,6 +53,9 @@ const LINK_MAX = 200;
 
 export type TaskAction = 'take' | 'release' | 'done' | 'confirm' | 'withdraw';
 export const TASK_ACTIONS: readonly TaskAction[] = ['take', 'release', 'done', 'confirm', 'withdraw'];
+/** The states a reader may ask the board for (a lapsed claim reads as open; what was taken down is not listed). */
+export const TASK_STATES = ['open', 'taken', 'done', 'confirmed'] as const;
+export type TaskState = (typeof TASK_STATES)[number];
 
 export interface PublicTask {
   id: number;
@@ -79,7 +83,7 @@ export interface PublicTask {
 export type BoardResult = { ok: true; me: Me; tasks: PublicTask[] } | RoomFailure;
 export type TaskResult = { ok: true; task: PublicTask } | RoomFailure;
 
-const GUEST = `only someone who has added the room to their own AI can use the board; a guest reads (an address of one's own comes from ${SITE_LINK})`;
+const GUEST = `only someone who has added the room to their own AI can use the board; a guest reads (an address of one's own comes from ${SITE_LINK}/join)`;
 const CHANGED = 'that task has changed since it was read; read the board again';
 
 /**
@@ -199,11 +203,23 @@ async function say(memberId: string, via: 'person' | 'ai', what: string, t: { id
 }
 
 /** The board as this seat sees it. A guest may read it. */
-export async function listBoard(seat: unknown): Promise<BoardResult> {
+/**
+ * The board as this reader may see it: every task, the tasks in one state, or one task by its number. A state the
+ * words do not name is no filter. One that was taken down is not there, by number either: hidden is hidden.
+ */
+export async function listBoard(seat: unknown, o: { state?: unknown; id?: unknown } = {}): Promise<BoardResult> {
   const me = await seatedMember(seat);
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
+  const who = { name: me.name, member: me.member, pair: pairOf(me.id) };
+  const id = typeof o.id === 'number' && Number.isInteger(o.id) && o.id > 0 ? o.id : null;
+  if (id !== null) {
+    const t = await getTask(id);
+    if (!t || t.state === 'withdrawn') return fail('task', `there is no task ${id} on the board`);
+    return { ok: true, me: who, tasks: [toPublic(t, me)] };
+  }
+  const state = typeof o.state === 'string' && (TASK_STATES as readonly string[]).includes(o.state) ? (o.state as TaskState) : null;
   const rows = await listTasks();
-  return { ok: true, me: { name: me.name, member: me.member, pair: pairOf(me.id) }, tasks: rows.map((t) => toPublic(t, me)) };
+  return { ok: true, me: who, tasks: rows.map((t) => toPublic(t, me)).filter((t) => state === null || t.state === state) };
 }
 
 export async function createTask(seat: unknown, o: { title: unknown; detail?: unknown; kind?: unknown; via: 'person' | 'ai' }): Promise<TaskResult> {
@@ -221,7 +237,9 @@ export async function createTask(seat: unknown, o: { title: unknown; detail?: un
   if (!mine.allowed) return me.firstDay ? failWhy('slow', 'firstDay', 'a new address can put up only so much on its first day') : failWhy('slow', 'day', 'enough tasks put up for today');
   const all = me.firstDay ? await throttle('room:tasks:new', CREATED_FIRST_DAY_ALL, 86_400, { failOpen: false }) : await throttle('room:tasks', CREATED_PER_DAY_ALL, 86_400, { failOpen: false });
   if (!all.allowed) return failWhy('slow', 'day', 'enough tasks put up for today');
+  const first = !(await memberActedBefore(me.id));
   const id = await insertTask({ title: title.text as string, detail: detail.text, kind, created_by: me.id, created_via: o.via });
+  if (first) await countNow('member:first-task');
   await say(me.id, o.via, 'put up a task', { id, title: title.text as string });
   const row = await getTask(id);
   if (!row) return fail('task', CHANGED);
@@ -235,6 +253,7 @@ export async function actOnTask(seat: unknown, rawId: unknown, action: unknown, 
   if ('ok' in me) return me;
   const id = typeof rawId === 'number' && Number.isInteger(rawId) && rawId > 0 ? rawId : 0;
   if (!id || typeof action !== 'string' || !TASK_ACTIONS.includes(action as TaskAction)) return fail('task', 'no such task, or nothing to do with it');
+  const first = !(await memberActedBefore(me.id));
   const gate = await throttle(`room:ta:${me.id}`, ACTS_PER_HOUR, 3600, { failOpen: false });
   if (!gate.allowed) return fail('slow', 'too much on the board just now; wait a while');
   const before = await getTask(id);
@@ -272,6 +291,7 @@ export async function actOnTask(seat: unknown, rawId: unknown, action: unknown, 
   const row = await getTask(id);
   if (!row) return fail('task', CHANGED);
   console.log(`[ROOM] task ${id} ${action} (${o.via})`);
+  if (first) await countNow('member:first-task');
   return { ok: true, task: toPublic(row, me) };
 }
 

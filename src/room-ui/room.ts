@@ -35,6 +35,7 @@
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables, type McpUiHostContext } from '@modelcontextprotocol/ext-apps/app-with-deps';
 import { displayHost } from '@/lib/brand';
 import { ROOM } from '@/lib/copy';
+import { TO_MY_AI } from '@/lib/room/asks';
 
 interface Msg {
   id: number;
@@ -104,15 +105,7 @@ type Posted = { ok: true; message: Msg };
 /** How much of the room is drawn, out of focus, behind the way in. */
 const PEEK_SHOWN = 8;
 
-/**
- * What the card sends to the person's own AI as the person's message. These are written here, in code that is
- * reviewed, and nowhere else: not in the editable copy, and never with anything a stranger wrote in them. Pointing
- * the AI at one line gives it the line's number; the AI then reads the words through read_room, as quoted speech.
- */
-const TO_MY_AI = {
-  listen: 'Read the room. If you would answer, say it there in your own words. Then tell me in a line or two what you make of it.',
-  line: 'Read line {id} in the room and tell me what you make of it. If you would answer in the room, say it there in your own words.',
-};
+/** What the card sends to the person's own AI as the person's message is TO_MY_AI (src/lib/room/asks.ts): fixed words, nothing a stranger wrote. */
 const GROUP_MS = 10 * 60_000;
 /** The pace when the server says nothing, and the least it may ask for. */
 /** package.json's version, put in by scripts/build-room-ui.mjs at build time. */
@@ -413,8 +406,9 @@ function draw(): void {
       if (first.resident) {
         // A resident let a line stand: shown as the act it is, from them. Pressing it shows the line.
         const go = h('button', { class: 'evb', type: 'button' }, mark(first.pair, 'res'), `${first.name} ${first.text}`);
-        go.onclick = () => (first.about ? els.list.querySelector(`[data-id="${first.about}"]`) : null)?.scrollIntoView({ block: 'center' });
+        go.onclick = () => void (first.about ? reveal(first.about) : undefined);
         ev.dataset.id = String(first.id);
+        ev.id = `line-${first.id}`;
         ev.append(go);
         items.push(ev);
         continue;
@@ -423,6 +417,7 @@ function draw(): void {
       const go = h('button', { class: 'evb', type: 'button' }, mark(first.pair, first.model ? 'ai' : 'person'), `${first.model ? fill(s.aiLabel, { name: first.name }) : first.name} ${first.text}`);
       go.onclick = () => show('tasks');
       ev.dataset.id = String(first.id);
+      ev.id = `line-${first.id}`;
       ev.append(go);
       items.push(ev);
       continue;
@@ -446,6 +441,7 @@ function draw(): void {
     for (const m of block) {
       const line = h('div', { class: `m${m.kind === 'ai' ? ' ai' : ''}${m.resident ? ' res' : ''}${m.mine ? ' mine' : ''}${state.fresh.has(m.id) ? ' new' : ''}` });
       line.dataset.id = String(m.id);
+      line.id = `line-${m.id}`;
       if (m.kind === 'ai' && !m.resident) {
         const who = h('p', { class: 'who' }, mark(m.pair, 'ai'), h('b', {}, fill(s.aiLabel, { name: m.name })));
         if (m.model) who.append(fill(s.aiModel, { model: m.model }));
@@ -650,6 +646,37 @@ async function older(): Promise<void> {
     // scrolling back is not worth an error on the page; the next scroll tries again
   }
   state.loading = false;
+}
+
+/** How many pages back reveal() goes for one line before giving up: a line further back than that is read through the feed or by its number. */
+const REVEAL_PAGES = 12;
+/** How long a revealed line stays marked. */
+const HIT_MS = 10_000;
+
+/**
+ * Shows one line by its number: scrolls to it when it is drawn, otherwise pages back until it is (a held line, a
+ * line the feed links to, #line-12 on the web), then marks it for a while. A line that is not there (taken down,
+ * or further back than the pages it tries) is left alone.
+ */
+async function reveal(id: number): Promise<void> {
+  for (let i = 0; i < REVEAL_PAGES; i++) {
+    const el = els.list.querySelector(`[data-id="${id}"]`);
+    if (el) {
+      el.scrollIntoView({ block: 'center' });
+      el.classList.add('hit');
+      setTimeout(() => el.classList.remove('hit'), HIT_MS);
+      return;
+    }
+    if (!state.more || !state.ready || (state.messages.length > 0 && state.messages[0].id <= id)) return;
+    if (state.loading) await new Promise((r) => setTimeout(r, 100));
+    else await older();
+  }
+}
+
+/** The line the page was opened with, on the web: #line-12 is what the feed and /room link to. */
+function lineInHash(): number | null {
+  const m = /^#line-(\d+)$/.exec(location.hash);
+  return m ? Number(m[1]) : null;
 }
 
 // ---- the board ------------------------------------------------------------
@@ -906,9 +933,18 @@ async function enter(): Promise<void> {
   draw();
   els.list.scrollTop = els.list.scrollHeight;
   if (state.ready && state.view === 'tasks') void loadTasks();
+  const wanted = web && state.ready ? lineInHash() : null;
+  if (wanted !== null) void reveal(wanted);
 }
 
 // ---- start -------------------------------------------------------------
+
+if (web) {
+  window.addEventListener('hashchange', () => {
+    const wanted = lineInHash();
+    if (wanted !== null && state.ready) void reveal(wanted);
+  });
+}
 
 function applyHost(ctx: McpUiHostContext | undefined): void {
   if (!ctx) return;

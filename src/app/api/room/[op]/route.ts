@@ -6,11 +6,13 @@
  */
 import type { NextRequest } from 'next/server';
 import { liveCopy } from '@/lib/copy-live';
+import { housekeep } from '@/lib/housekeeping';
 import { stir } from '@/lib/room/residents';
 import { isSeat, nameInRoom, olderRoom, openSeat, postToRoom, seatWritable, syncRoom } from '@/lib/room/room';
 import { arrivalOf } from '@/lib/room/server';
 import { actOnTask, createTask, listBoard } from '@/lib/room/tasks';
 import { addressKey, clientIp, throttleAddress } from '@/lib/throttle';
+import { count } from '@/lib/counts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -46,7 +48,10 @@ function tooSoon(seat: unknown, born: unknown): boolean {
 }
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: CORS });
-const tooMany = (limit?: 'hour' | 'day') => json({ ok: false, code: 'slow', reasons: ['too many from here just now'], ...(limit === 'day' ? { why: 'day' } : {}) }, 429);
+const tooMany = (limit?: 'hour' | 'day') => {
+  count(`refused:slow/address-${limit ?? 'hour'}`);
+  return json({ ok: false, code: 'slow', reasons: ['too many from here just now'], ...(limit === 'day' ? { why: 'day' } : {}) }, 429);
+};
 
 /** What writes. The web routes cannot tell whose browser is asking, so a seat writes here only for its first day. */
 const WRITES = new Set(['post', 'name', 'task-new', 'task-act']);
@@ -56,6 +61,7 @@ export function OPTIONS(): Response {
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string }> }): Promise<Response> {
+  housekeep();
   const { op } = await ctx.params;
   let body: Record<string, unknown>;
   try {
