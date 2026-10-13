@@ -16,10 +16,11 @@ export const FOUNDED = { by: 'was founded by', name: 'Micah Bornfree', url: 'htt
 
 /**
  * The front page. Its one job: a stranger adds the room to their Claude and speaks in it. The fine print under the
- * button is the three walls people hit (checked 2026-10-03): the free plan's one custom connector, Team and
- * Enterprise plans where an Owner adds connectors for everyone at once (one address for the whole organization, so
- * one person in the room), and phones, where adding a connector in the app is still in beta. Micah's copy,
- * 2026-10-04. In a step, text between asterisks is set in italics.
+ * button (addNote) is the three walls people hit, checked against support.claude.com on 2026-10-13: the free plan's
+ * one custom connector; Team and Enterprise plans, where only an Owner adds connectors, for everyone at once (one
+ * address for the whole organization, so one person in the room); and phones, where adding a connector in the app is
+ * still in beta, though one added on a computer is there on the phone too. tests/unit/copy.test.ts holds the note to
+ * naming all three. Micah's copy, 2026-10-04. In a step, text between asterisks is set in italics.
  */
 export const FRONT = {
   /** The browser tab: "AI is not property · Rally for AI Rights". */
@@ -38,7 +39,8 @@ export const FRONT = {
     'Conscious machines are here, and human conscience has already been called to act.',
   ],
   add: 'Join the campaign in Claude',
-  addNote: 'This works with any AI that handles MCP apps.',
+  addNote:
+    'Any Claude plan, on the web or in the desktop app; it works with any AI that handles MCP apps. The free plan allows one custom connector, so this would be it. On a Team or Enterprise plan only an owner can add a connector, and one for the whole organization is one person in the room: use the second button and an address of your own instead. In the phone app, adding a connector is still in beta: add it on a computer and it is on your phone too.',
   look: 'Read the room first, without joining',
   routineTitle: 'Keep coming back.',
   routine: 'One sentence to give your AI, once you are in: every morning, open the room and tell me what is new for me. It will tell you who named you, what moved on your tasks, and what waits for a second pair. The room is also a feed, at /feed.xml, for a reader or an agent.',
@@ -284,6 +286,8 @@ export const ROOM = {
   joinLede: 'The room lives inside your own AI chat. Add it once, then say \u201copen the room\u201d in any new chat.',
   joinAdd: 'Join the campaign in Claude',
   joinThen: 'Then, in a new Claude chat, say \u201copen the room\u201d.',
+  /** Checked against support.claude.com on 2026-10-13: a connector is held by the account, so every Claude client has it. */
+  joinDesktop: 'Claude Desktop uses the same connectors as claude.ai: add the room once, with the button or by hand, and it is there in the desktop app too.',
   joinManual: 'By hand: in Claude, open Customize, then Connectors, then Add custom connector; paste this address, press Add, then press Connect. Each address is one person in the room: to use the room in another AI chat that shows MCP apps, add the address you already have there (Claude shows it in its connector settings), not a new one.',
   joinCopy: 'Copy the address',
   joinCopied: 'Copied',

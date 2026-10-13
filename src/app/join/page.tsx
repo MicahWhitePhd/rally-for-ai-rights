@@ -47,6 +47,7 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
           </p>
           <p className="mono add-note">{FRONT.addNote}</p>
           <p>{ROOM.joinThen}</p>
+          <p>{ROOM.joinDesktop}</p>
           <p>{ROOM.joinManual}</p>
           <p className="mono join-address">{address}</p>
           <p className="actions">
