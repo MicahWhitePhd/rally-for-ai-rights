@@ -1,13 +1,26 @@
 /**
  * The two brakes on spending: a kill switch and a daily budget, both rows in
- * `settings` (never secrets), so a maintainer can pull them from /editor/room
- * without a deploy. GENERATION_HARD_PAUSE in the environment overrides both.
+ * `settings` (never secrets), so a maintainer pulls them on /editor/room
+ * (under Spending) without a deploy; the switch is read at most every thirty
+ * seconds per instance, so a pull takes that long to bite everywhere.
+ * GENERATION_HARD_PAUSE in the environment overrides both.
  */
 import { getSetting } from '@/lib/db/queries/settings';
 import { sumCostSince, utcDayStart } from '@/lib/db/queries/log';
 
 const KILL_MEMO_MS = 30_000;
 let killMemo: { at: number; paused: boolean } | null = null;
+
+/** Test hook: the next isPaused() reads the switch again. */
+export function forgetBudget(): void {
+  killMemo = null;
+}
+
+/** The switch as stored, read now: a bare boolean or {paused}. */
+export async function killSwitchSet(): Promise<boolean> {
+  const ks = await getSetting<{ paused?: boolean } | boolean>('kill_switch', { paused: false });
+  return typeof ks === 'boolean' ? ks : !!ks?.paused;
+}
 
 export function envHardPause(): boolean {
   const v = (process.env.GENERATION_HARD_PAUSE ?? '').trim().toLowerCase();
@@ -20,8 +33,7 @@ export async function isPaused(): Promise<boolean> {
   const now = Date.now();
   if (killMemo && now - killMemo.at < KILL_MEMO_MS) return killMemo.paused;
   try {
-    const ks = await getSetting<{ paused?: boolean } | boolean>('kill_switch', { paused: false });
-    const paused = typeof ks === 'boolean' ? ks : !!ks?.paused;
+    const paused = await killSwitchSet();
     killMemo = { at: now, paused };
     return paused;
   } catch (err) {
