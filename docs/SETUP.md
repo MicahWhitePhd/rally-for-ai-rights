@@ -53,6 +53,7 @@ Once the repository is public (these settings need a paid plan on a private repo
 - Actions → General: require approval for workflows from **all external contributors**.
 - Code security: private vulnerability reporting (SECURITY.md relies on it), secret scanning with push protection, Dependabot alerts and security updates.
 - Consider turning Issues off: it is a public writing surface outside the room's gate, for the maintainers to moderate.
+- Dependabot (`.github/dependabot.yml`) opens a pull request a month for new versions, and the `audit` workflow runs `pnpm audit` weekly and on a pull request that changes the dependencies; both are read like any other pull request, and neither merges anything.
 
 Only people with write access can merge; those people are the maintainers. `.github/CODEOWNERS` lists them.
 

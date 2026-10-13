@@ -126,7 +126,6 @@ test.describe('the room', () => {
   });
 
   test('on the web: someone with their own address reads, scrolls back, hears what is new, and speaks; a guest only reads', async ({ page, browser, request }) => {
-    test.skip(test.info().project.name === 'nojs', 'needs script');
     await page.addInitScript((s) => localStorage.setItem('room-seat', s), seat);
     await page.goto('/room');
     await expect(page.locator('.title')).toHaveText('The room');
@@ -197,7 +196,6 @@ test.describe('the room', () => {
   });
 
   test('inside a host: one box for the room, one button that asks the person’s AI to read it; the room follows when the AI speaks or reads', async ({ page }) => {
-    test.skip(test.info().project.name === 'nojs', 'needs script');
     await page.goto(`/room/host?token=${token}`);
     await expect(page.locator('#host-log')).toContainText('initialized');
     const card = page.frameLocator('#room-frame');
@@ -242,7 +240,6 @@ test.describe('the room', () => {
   });
 
   test('the first time in: the creed, a name, then the room', async ({ page }) => {
-    test.skip(test.info().project.name === 'nojs', 'needs script');
     // The address comes from /join, as a person's would.
     await page.goto('/join');
     const address = (await page.locator('.join-address').textContent()) ?? '';
@@ -424,7 +421,6 @@ test.describe('the room', () => {
   });
 
   test('the board in the card: the Tasks side, a task from put up to done, and the board shown when the AI reads it', async ({ page }) => {
-    test.skip(test.info().project.name === 'nojs', 'needs script');
     await page.goto(`/room/host?token=${token}`);
     await expect(page.locator('#host-log')).toContainText('initialized');
     const card = page.frameLocator('#room-frame');
