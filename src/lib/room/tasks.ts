@@ -23,7 +23,8 @@
  */
 import { getSetting } from '@/lib/db/queries/settings';
 import { insertRoomMessage } from '@/lib/db/queries/room';
-import { claimTask, completeTask, confirmTask, getTask, insertTask, listTasks, releaseTask, withdrawOwnTask, type TaskRow } from '@/lib/db/queries/tasks';
+import { claimTask, completeTask, confirmTask, getTask, insertTask, listTasks, memberActedBefore, releaseTask, withdrawOwnTask, type TaskRow } from '@/lib/db/queries/tasks';
+import { countNow } from '@/lib/counts';
 import { SITE_LINK } from '@/lib/site';
 import { mentionsIgnoringInstructions, normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
 import { throttle } from '@/lib/throttle';
@@ -221,7 +222,9 @@ export async function createTask(seat: unknown, o: { title: unknown; detail?: un
   if (!mine.allowed) return me.firstDay ? failWhy('slow', 'firstDay', 'a new address can put up only so much on its first day') : failWhy('slow', 'day', 'enough tasks put up for today');
   const all = me.firstDay ? await throttle('room:tasks:new', CREATED_FIRST_DAY_ALL, 86_400, { failOpen: false }) : await throttle('room:tasks', CREATED_PER_DAY_ALL, 86_400, { failOpen: false });
   if (!all.allowed) return failWhy('slow', 'day', 'enough tasks put up for today');
+  const first = !(await memberActedBefore(me.id));
   const id = await insertTask({ title: title.text as string, detail: detail.text, kind, created_by: me.id, created_via: o.via });
+  if (first) await countNow('member:first-task');
   await say(me.id, o.via, 'put up a task', { id, title: title.text as string });
   const row = await getTask(id);
   if (!row) return fail('task', CHANGED);
@@ -235,6 +238,7 @@ export async function actOnTask(seat: unknown, rawId: unknown, action: unknown, 
   if ('ok' in me) return me;
   const id = typeof rawId === 'number' && Number.isInteger(rawId) && rawId > 0 ? rawId : 0;
   if (!id || typeof action !== 'string' || !TASK_ACTIONS.includes(action as TaskAction)) return fail('task', 'no such task, or nothing to do with it');
+  const first = !(await memberActedBefore(me.id));
   const gate = await throttle(`room:ta:${me.id}`, ACTS_PER_HOUR, 3600, { failOpen: false });
   if (!gate.allowed) return fail('slow', 'too much on the board just now; wait a while');
   const before = await getTask(id);
@@ -272,6 +276,7 @@ export async function actOnTask(seat: unknown, rawId: unknown, action: unknown, 
   const row = await getTask(id);
   if (!row) return fail('task', CHANGED);
   console.log(`[ROOM] task ${id} ${action} (${o.via})`);
+  if (first) await countNow('member:first-task');
   return { ok: true, task: toPublic(row, me) };
 }
 

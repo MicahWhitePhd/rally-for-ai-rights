@@ -100,6 +100,9 @@ label{display:block;font:500 0.85rem/1.4 var(--sans);}
 .editor form.inline{display:inline;}
 .editor .row,.page-simple .row{display:flex;flex-wrap:wrap;gap:0.6rem 1rem;align-items:center;margin:0.5rem 0;}
 .editor .btn{padding:0.5rem 0.8rem;font-size:0.85rem;}
+.editor table.watch{border-collapse:collapse;font-size:0.8rem;margin:0.6rem 0;display:block;overflow-x:auto;max-width:100%;}
+.editor table.watch th,.editor table.watch td{border:1px solid var(--ink);padding:0.2rem 0.45rem;text-align:right;white-space:nowrap;}
+.editor table.watch th:first-child,.editor table.watch td:first-child{text-align:left;}
 
 @media print{.site-nav,.actions,.editor-nav{display:none;}a{text-decoration:none;}}
 

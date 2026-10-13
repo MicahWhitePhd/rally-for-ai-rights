@@ -13,6 +13,7 @@ import { joinReady, newMemberToken } from '@/lib/room/room';
 import { SITE_LABEL, SITE_URL } from '@/lib/site';
 import { clientIp, throttleAddress } from '@/lib/throttle';
 import { claudeAddUrl, JOIN_LIMITS } from '@/lib/join';
+import { countNow } from '@/lib/counts';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +32,7 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
       ? { allowed: false as const, limit: later === 'day' ? 'day' : 'hour' }
       : await throttleAddress('rj', clientIp(await headers()), JOIN_LIMITS, { failOpen: false });
   const token = gate.allowed ? newMemberToken() : null;
+  if (token) await countNow('join:other');
   const address = token ? `${SITE_URL}/mcp/${token}` : null;
   return (
     <article className="join" aria-labelledby="join-h">

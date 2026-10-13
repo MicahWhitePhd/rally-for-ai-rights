@@ -56,6 +56,12 @@ export async function listTasks(limit = 120, withdrawn = false): Promise<TaskRow
   );
 }
 
+/** Whether this member has ever put up, taken or confirmed a task: the board's first step, counted once (src/lib/counts.ts). */
+export async function memberActedBefore(memberId: string): Promise<boolean> {
+  const r = await queryOne<{ acted: boolean }>(`SELECT EXISTS (SELECT 1 FROM room_tasks WHERE created_by = $1 OR claimed_by = $1 OR confirmed_by = $1) AS acted`, [memberId]);
+  return Boolean(r?.acted);
+}
+
 export async function getTask(id: number): Promise<TaskRow | null> {
   return queryOne<TaskRow>(`SELECT ${COLS} FROM ${FROM} WHERE t.id = $1`, [id]);
 }

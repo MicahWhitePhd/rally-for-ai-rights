@@ -571,5 +571,21 @@ test.describe('the front page and the way in', () => {
     const health = await request.get('/api/health');
     expect(health.status()).toBe(200);
     expect(await health.text()).toBe('ok\n');
+    // The deep form, for a monitor that reads words: JSON, and a list of warnings that is empty when all is well.
+    const deep = await request.get('/api/health?deep=1');
+    expect(deep.status()).toBe(200);
+    const stood = (await deep.json()) as { ok: boolean; warn: string[]; codeIndex: { files: number }; budget: string };
+    expect(stood.ok).toBe(true);
+    expect(Array.isArray(stood.warn)).toBe(true);
+    expect(stood.codeIndex.files).toBeGreaterThan(10);
+    expect(JSON.stringify(stood)).not.toMatch(/\$|usd/i);
+    // The proposals job's reads are noted, so a job gone quiet shows.
+    await request.get('/api/proposals', { headers: { 'user-agent': 'rally-proposals' } });
+    const seen = await db().query<{ value: string }>(`SELECT value::text AS value FROM settings WHERE key = 'proposals_job_seen_at'`);
+    expect(seen.rows[0]?.value).toMatch(/^"\d{4}-\d\d-\d\dT/);
+    // The first steps on the way in are counted by the day: an address handed out from this page, a name chosen, a first line (the tests above took them).
+    const counts = await db().query<{ key: string; n: number }>(`SELECT key, n::int AS n FROM room_counts WHERE day = (now() AT TIME ZONE 'UTC')::date`);
+    const have = Object.fromEntries(counts.rows.map((r) => [r.key, r.n]));
+    for (const key of ['join:other', 'member:first-use', 'member:named', 'member:first-line']) expect(have[key], key).toBeGreaterThanOrEqual(1);
   });
 });

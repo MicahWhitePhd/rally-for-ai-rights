@@ -73,8 +73,15 @@ vi.mock('@/lib/db/queries/room', () => ({
     return db.said.length;
   },
 }));
+const counted = vi.hoisted(() => new Map<string, number>());
+vi.mock('@/lib/db/queries/counts', () => ({
+  addCounts: async (batch: ReadonlyArray<readonly [string, number]>) => {
+    for (const [k, n] of batch) counted.set(k, (counted.get(k) ?? 0) + n);
+  },
+}));
 vi.mock('@/lib/db/queries/tasks', () => ({
   boardStamp: async () => ({ open: 0, rev: 0 }),
+  memberActedBefore: async (memberId: string) => db.tasks.some((t) => t.created_by === memberId || t.claimed_by === memberId || t.confirmed_by === memberId),
   listTasks: async () => db.tasks.filter((t) => t.status !== 'withdrawn').map(row),
   getTask: async (id: number) => {
     const t = find(id);
@@ -141,6 +148,20 @@ beforeEach(() => {
   db.tasks = [];
   db.said = [];
   db.race = false;
+  counted.clear();
+});
+
+describe('what is counted for the maintainers', () => {
+  it('a member\u2019s first act on the board, once: putting up, or taking, whichever comes first', async () => {
+    const dana = seat('Dana');
+    const ali = seat('Ali');
+    expect((await createTask(dana, { title: 'Write to one lab about its weights', via: 'person' })).ok).toBe(true);
+    expect((await createTask(dana, { title: 'Find the contacts', via: 'person' })).ok).toBe(true);
+    expect(counted.get('member:first-task')).toBe(1);
+    expect((await actOnTask(ali, 1, 'take', { via: 'person' })).ok).toBe(true);
+    expect((await actOnTask(ali, 1, 'release', { via: 'person' })).ok).toBe(true);
+    expect(counted.get('member:first-task')).toBe(2);
+  });
 });
 
 describe('who may use the board', () => {
