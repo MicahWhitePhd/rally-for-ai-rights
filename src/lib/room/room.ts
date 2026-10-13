@@ -47,7 +47,7 @@ import * as copy from '@/lib/copy';
 import { SITE_LINK } from '@/lib/site';
 import { addressedToMachines, mentionsIgnoringInstructions, normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
 import { isClaudeServer, throttle, throttleAddress } from '@/lib/throttle';
-import { mintToken, TOKEN_RE, tokenSigned } from './token';
+import { mintToken, ROOM_SECRET_MIN, TOKEN_RE, tokenSigned } from './token';
 import { readResidentsState, residentsOn, thinkingNow } from './residents-state';
 
 export const TEXT_MAX = 500;
@@ -111,7 +111,7 @@ export function joinReady(): boolean {
   const nowhere = process.env.NODE_ENV === 'production' && !process.env.NEXT_PUBLIC_SITE_URL && !process.env.VERCEL_PROJECT_PRODUCTION_URL;
   if ((unsigned || nowhere) && !joinWarned) {
     joinWarned = true;
-    console.error(`[JOIN] no addresses can be handed out: ${unsigned ? 'set ROOM_SECRET (16 characters or more)' : 'set NEXT_PUBLIC_SITE_URL'}`);
+    console.error(`[JOIN] no addresses can be handed out: ${unsigned ? `set ROOM_SECRET (${ROOM_SECRET_MIN} characters or more)` : 'set NEXT_PUBLIC_SITE_URL'}`);
   }
   return !unsigned && !nowhere;
 }
