@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS generation_log (
   error_code           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_generation_log_created ON generation_log(created_at);
+-- A failed or cut-off call's tokens and cost are an estimate, not the provider's count (src/lib/ai/gateway.ts).
+ALTER TABLE generation_log ADD COLUMN IF NOT EXISTS estimated BOOLEAN NOT NULL DEFAULT false;
 
 -- The room (src/lib/room). A member is a personal connector address (token_hash), a guest of one conversation,
 -- or one of the campaign's resident AIs (resident key set; no token, no seat). A seat is the bearer handle one open

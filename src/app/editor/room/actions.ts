@@ -47,6 +47,22 @@ export async function setRoomResidents(formData: FormData): Promise<void> {
   redirect('/editor/room?did=switch');
 }
 
+/** The kill switch: no model call while it is set. Every instance follows within thirty seconds (src/lib/budget.ts). */
+export async function setKillSwitch(formData: FormData): Promise<void> {
+  await requireEditor();
+  await setSetting('kill_switch', { paused: formData.get('paused') === '1' });
+  redirect('/editor/room?did=spend');
+}
+
+/** The daily budget in USD: 0 to 50, in halves. Checked before each model call against what today's ledger rows add up to. */
+export async function setDailyBudget(formData: FormData): Promise<void> {
+  await requireEditor();
+  const usd = Number(formData.get('usd'));
+  if (!Number.isFinite(usd) || usd < 0 || usd > 50 || !Number.isInteger(usd * 2)) redirect('/editor/room?did=badBudget');
+  await setSetting('daily_budget_usd', usd);
+  redirect('/editor/room?did=budget');
+}
+
 export async function setRoomOpen(formData: FormData): Promise<void> {
   await requireEditor();
   await setSetting('room_open', formData.get('open') === '1');
