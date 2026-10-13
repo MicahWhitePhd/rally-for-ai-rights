@@ -82,7 +82,7 @@ export interface PublicTask {
 export type BoardResult = { ok: true; me: Me; tasks: PublicTask[] } | RoomFailure;
 export type TaskResult = { ok: true; task: PublicTask } | RoomFailure;
 
-const GUEST = `only someone who has added the room to their own AI can use the board; a guest reads (an address of one's own comes from ${SITE_LINK})`;
+const GUEST = `only someone who has added the room to their own AI can use the board; a guest reads (an address of one's own comes from ${SITE_LINK}/join)`;
 const CHANGED = 'that task has changed since it was read; read the board again';
 
 /**

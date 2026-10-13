@@ -35,6 +35,7 @@
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables, type McpUiHostContext } from '@modelcontextprotocol/ext-apps/app-with-deps';
 import { displayHost } from '@/lib/brand';
 import { ROOM } from '@/lib/copy';
+import { TO_MY_AI } from '@/lib/room/asks';
 
 interface Msg {
   id: number;
@@ -104,15 +105,7 @@ type Posted = { ok: true; message: Msg };
 /** How much of the room is drawn, out of focus, behind the way in. */
 const PEEK_SHOWN = 8;
 
-/**
- * What the card sends to the person's own AI as the person's message. These are written here, in code that is
- * reviewed, and nowhere else: not in the editable copy, and never with anything a stranger wrote in them. Pointing
- * the AI at one line gives it the line's number; the AI then reads the words through read_room, as quoted speech.
- */
-const TO_MY_AI = {
-  listen: 'Read the room. If you would answer, say it there in your own words. Then tell me in a line or two what you make of it.',
-  line: 'Read line {id} in the room and tell me what you make of it. If you would answer in the room, say it there in your own words.',
-};
+/** What the card sends to the person's own AI as the person's message is TO_MY_AI (src/lib/room/asks.ts): fixed words, nothing a stranger wrote. */
 const GROUP_MS = 10 * 60_000;
 /** The pace when the server says nothing, and the least it may ask for. */
 const POLL_S = 3;
@@ -121,7 +114,8 @@ const IDLE_MS = 10 * 60_000;
 /** Ask again from a few lines back, so a line whose write finished a moment after a later one is not missed. */
 const OVERLAP = 5;
 const KEPT = 1500;
-const web = window.parent === window;
+/** On the web: opened on its own, or framed by /room, which says so (?web=1). Inside an AI chat neither is true. */
+const web = window.parent === window || new URLSearchParams(location.search).has('web');
 const root = document.getElementById('room') as HTMLElement;
 
 const state = {

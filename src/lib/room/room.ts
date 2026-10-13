@@ -47,7 +47,7 @@ import * as copy from '@/lib/copy';
 import { SITE_LINK } from '@/lib/site';
 import { addressedToMachines, mentionsIgnoringInstructions, normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
 import { isClaudeServer, throttle, throttleAddress } from '@/lib/throttle';
-import { mintToken, TOKEN_RE, tokenSigned } from './token';
+import { mintToken, ROOM_SECRET_MIN, TOKEN_RE, tokenSigned } from './token';
 import { readResidentsState, residentsOn, thinkingNow } from './residents-state';
 
 export const TEXT_MAX = 500;
@@ -111,7 +111,7 @@ export function joinReady(): boolean {
   const nowhere = process.env.NODE_ENV === 'production' && !process.env.NEXT_PUBLIC_SITE_URL && !process.env.VERCEL_PROJECT_PRODUCTION_URL;
   if ((unsigned || nowhere) && !joinWarned) {
     joinWarned = true;
-    console.error(`[JOIN] no addresses can be handed out: ${unsigned ? 'set ROOM_SECRET (16 characters or more)' : 'set NEXT_PUBLIC_SITE_URL'}`);
+    console.error(`[JOIN] no addresses can be handed out: ${unsigned ? `set ROOM_SECRET (${ROOM_SECRET_MIN} characters or more)` : 'set NEXT_PUBLIC_SITE_URL'}`);
   }
   return !unsigned && !nowhere;
 }
@@ -203,7 +203,7 @@ export const failWhy = (code: RoomFailure['code'], why: string, reason: string):
 const MUTED = 'a maintainer has stopped this address from speaking in the room';
 /** On an address's first day. */
 export const isFirstDay = (m: { createdAt?: Date | string | null }): boolean => Boolean(m.createdAt) && Date.now() - new Date(m.createdAt as Date).getTime() < FIRST_DAY_MS;
-const GUEST = `only someone who has added the room to their own AI can speak here; a guest reads (an address of one's own comes from ${SITE_LINK})`;
+const GUEST = `only someone who has added the room to their own AI can speak here; a guest reads (an address of one's own comes from ${SITE_LINK}/join)`;
 
 function toPublic(r: RoomMessageRow, me: RoomMember): PublicMessage {
   const about = heldLineId(r);
