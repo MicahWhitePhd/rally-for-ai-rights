@@ -565,12 +565,65 @@ describe('what an AI is handed when asked to listen', () => {
     // Pointed at one line by its number: that line and the few before it, nothing after.
     state.counts.clear();
     await postToRoom(dana, { text: 'and another thing', kind: 'person' });
-    const upTo = await readRoom(ali, 15, 2);
-    expect(upTo.ok && upTo.lines.map((l) => l.id)).toEqual([1, 2]);
+    const upTo = await readRoom(ali, { limit: 15, line: 2 });
+    expect(upTo.ok && [upTo.lines.map((l) => l.id), upTo.more]).toEqual([[1, 2], false]);
     state.counts.clear();
     for (let i = 0; i < 40; i++) state.messages.push({ id: 10 + i, member_id: 'm1', kind: 'person', model: null, text: `line ${i}`, status: 'published', created_at: new Date() });
-    const many = await readRoom(ali, 500);
+    const many = await readRoom(ali, { limit: 500 });
     expect(many.ok && many.lines).toHaveLength(30);
+    expect(many.ok && many.more).toBe(true);
+  });
+
+  it('pages: the lines before one, or after one, oldest first, and says whether there are more; one cursor at a time', async () => {
+    const ali = await seated('Ali');
+    for (let i = 1; i <= 25; i++) state.messages.push({ id: i, member_id: 'm1', kind: 'person', model: null, text: `line ${i}`, status: 'published', created_at: new Date() });
+    const latest = await readRoom(ali, { limit: 5 });
+    expect(latest.ok && [latest.lines.map((l) => l.id), latest.more]).toEqual([[21, 22, 23, 24, 25], true]);
+    const back = await readRoom(ali, { before: 21, limit: 5 });
+    expect(back.ok && [back.lines.map((l) => l.id), back.more]).toEqual([[16, 17, 18, 19, 20], true]);
+    const start = await readRoom(ali, { before: 4, limit: 5 });
+    expect(start.ok && [start.lines.map((l) => l.id), start.more]).toEqual([[1, 2, 3], false]);
+    const on = await readRoom(ali, { since: 20, limit: 3 });
+    expect(on.ok && [on.lines.map((l) => l.id), on.more]).toEqual([[21, 22, 23], true]);
+    const end = await readRoom(ali, { since: 23, limit: 5 });
+    expect(end.ok && [end.lines.map((l) => l.id), end.more]).toEqual([[24, 25], false]);
+    expect(await readRoom(ali, { before: 10, since: 2 })).toMatchObject({ ok: false, code: 'text' });
+    expect(await readRoom(ali, { line: 10, since: 2 })).toMatchObject({ ok: false, code: 'text' });
+  });
+
+  it('says who is in the room, by the rule the card follows: the residents and, for someone with their own address, people with a card open and who was in lately; someone looking in is shown the residents alone', async () => {
+    state.members.set('res1', { id: 'res1', name: 'Flint', token: null, resident: 'one' });
+    const dana = await seated('Dana');
+    const ali = await seated('Ali');
+    const idOf = (name: string) => [...state.members.values()].find((m) => m.name === name)!.id;
+    await syncRoom(dana, null);
+    state.seen.set(idOf('Ali'), Date.now() - 3600_000);
+    const read = await readRoom(dana);
+    expect(read.ok && read.here.map((p) => [p.name, p.resident, p.me])).toEqual([
+      ['Flint', true, false],
+      ['Dana', false, true],
+    ]);
+    expect(read.ok && read.lately.map((p) => p.name)).toEqual(['Ali']);
+    // Not yet seen by the room (no card open), a named member is still listed as here: it is their read.
+    const alis = await readRoom(ali);
+    expect(alis.ok && alis.here.map((p) => [p.name, p.me])).toEqual([
+      ['Flint', false],
+      ['Dana', false],
+      ['Ali', true],
+    ]);
+    const guest = await readRoom(await guestSeat());
+    expect(guest.ok && guest.here.map((p) => p.name)).toEqual(['Flint']);
+    expect(guest.ok && guest.lately).toEqual([]);
+    process.env.ROOM_RESIDENTS = 'off';
+    const off = await readRoom(dana);
+    expect(off.ok && off.here.map((p) => p.name)).toEqual(['Dana']);
+  });
+
+  it('reading has its own allowance, apart from catching up: the sixty-first read in an hour is refused while catch_up still answers', async () => {
+    const dana = await seated('Dana');
+    for (let i = 0; i < 60; i++) expect((await readRoom(dana)).ok, `read ${i + 1}`).toBe(true);
+    expect(await readRoom(dana)).toMatchObject({ ok: false, code: 'slow' });
+    expect((await catchUp(dana)).ok).toBe(true);
   });
 });
 

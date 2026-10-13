@@ -42,7 +42,7 @@ import {
   touchMember,
   withdrawnAmong,
   type RoomMember,
-  type RoomMessageRow, awayFrom, listRoomMessagesSince, markAway } from '@/lib/db/queries/room';
+  type RoomMessageRow, awayFrom, listRoomMessagesSince, markAway, type PresentRow } from '@/lib/db/queries/room';
 import * as copy from '@/lib/copy';
 import { SITE_LINK } from '@/lib/site';
 import { addressedToMachines, mentionsIgnoringInstructions, normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
@@ -345,12 +345,7 @@ export async function syncRoom(seat: unknown, after: number | null, have: readon
   const more = after === null && found.length > PAGE;
   const rows = more ? found.slice(-PAGE) : found;
   const cursor = rows.length ? rows[rows.length - 1].id : after ?? 0;
-  // Who is here, by name, is for the people in the room. Someone looking in sees only the residents.
-  const chip = (p: { id: string; name: string; resident: string | null }): Present => ({ name: p.name, pair: pairOf(p.id), resident: p.resident !== null, me: p.id === me.id });
-  const here = present.filter((p) => p.now && (on || !p.resident) && (me.member || p.resident !== null)).map(chip);
-  if (me.name && me.member && !here.some((p) => p.me)) here.push({ name: me.name, pair: pairOf(me.id), resident: false, me: true });
-  // Who was in lately, for someone who has entered; the reader is never listed twice.
-  const lately = me.member && me.name ? present.filter((p) => !p.now && !p.resident && p.id !== me.id).map(chip) : [];
+  const { here, lately } = presence(me, present, on);
   const back = prev !== null && Date.now() - new Date(prev).getTime() > AWAY_MS;
   const arrived = Boolean(me.name) && !me.muted && back;
   // Back after a while: when they had been away since is kept, for catch_up. A database without the column yet is not the card's problem.
@@ -370,6 +365,20 @@ export async function syncRoom(seat: unknown, after: number | null, have: readon
     arrived,
     next: Math.min(60, Math.max(POLL_S, Math.round(Number(pace)) || POLL_S)),
   };
+}
+
+/**
+ * Who is in the room, as this reader may see it. Who is here, by name, is for the people in the room: someone with
+ * their own address sees the residents (while they are on) and the people with a card open, themselves among them;
+ * someone looking in sees only the residents. Who was in lately is for someone who has entered and taken a name, and
+ * the reader is never listed twice. One rule for the card's sync and for read_room.
+ */
+function presence(me: { id: string; name: string | null; member: boolean }, present: PresentRow[], on: boolean): { here: Present[]; lately: Present[] } {
+  const chip = (p: { id: string; name: string; resident: string | null }): Present => ({ name: p.name, pair: pairOf(p.id), resident: p.resident !== null, me: p.id === me.id });
+  const here = present.filter((p) => p.now && (on || !p.resident) && (me.member || p.resident !== null)).map(chip);
+  if (me.name && me.member && !here.some((p) => p.me)) here.push({ name: me.name, pair: pairOf(me.id), resident: false, me: true });
+  const lately = me.member && me.name ? present.filter((p) => !p.now && !p.resident && p.id !== me.id).map(chip) : [];
+  return { here, lately };
 }
 
 export type OlderResult = { ok: true; messages: PublicMessage[]; more: boolean } | RoomFailure;
@@ -434,28 +443,64 @@ export async function postToRoom(seat: unknown, o: { text: unknown; kind: 'perso
   return { ok: true, message: { id, kind: o.kind, name: me.name, model: o.kind === 'ai' ? model : null, text, at: new Date().toISOString(), mine: true, pair: pairOf(me.id), resident: false } };
 }
 
-export type ReadResult = { ok: true; me: Me; seat: string; lines: Array<{ id: number; at: string; who: 'person' | 'ai' | 'event'; name: string; model: string | null; mine: boolean; resident: boolean; said: string; /** On a resident's event: the line they let stand. */ about?: number }> } | RoomFailure;
+export type ReadResult =
+  | {
+      ok: true;
+      me: Me;
+      seat: string;
+      lines: Array<{ id: number; at: string; who: 'person' | 'ai' | 'event'; name: string; model: string | null; mine: boolean; resident: boolean; said: string; /** On a resident's event: the line they let stand. */ about?: number }>;
+      /** There are lines beyond these: before the first (the latest, or a page back) or after the last (reading on from a line). */
+      more: boolean;
+      /** Who is in the room now and who was in lately, as this reader may see it (presence). */
+      here: Present[];
+      lately: Present[];
+    }
+  | RoomFailure;
 
 /**
- * The latest messages for the person's AI to read, when the person asks it to listen: who said what, nothing else.
- * With `line`, the lines that end at that one: how the card points an AI at one thing someone said without ever
- * handing the words over itself.
+ * The messages for the person's AI to read, when the person asks it to listen: who said what, nothing else. The
+ * latest `limit`, or with `before` the ones before a line, with `since` the ones after a line, or with `line` the
+ * lines that end at that one: how the card points an AI at one thing someone said without ever handing the words
+ * over itself. One of the three at a time. One more row than asked is fetched, so the reader is told whether there
+ * is more.
  */
 export type ReadLine = Extract<ReadResult, { ok: true }>['lines'][number];
+export interface ReadOptions {
+  limit?: number;
+  line?: unknown;
+  before?: unknown;
+  since?: unknown;
+}
+/** How many lines one read gives at most, and how many when it is pointed at one line. */
+export const READ_MAX = 30;
+const READ_AT_LINE = 10;
+/** Reads an hour per member: enough to page through a day, apart from catch_up's own allowance. */
+const READS_PER_HOUR = 60;
+const CATCH_UPS_PER_HOUR = 20;
+const lineId = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null);
 
-export async function readRoom(seat: unknown, limit = 15, line?: unknown): Promise<ReadResult> {
+export async function readRoom(seat: unknown, o: ReadOptions = {}): Promise<ReadResult> {
   const me = await memberOf(seat);
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
-  const gate = await throttle(`room:r:${me.id}`, 30, 3600, { failOpen: false });
+  const gate = await throttle(`room:r:${me.id}`, READS_PER_HOUR, 3600, { failOpen: false });
   if (!gate.allowed) return fail('slow', 'the room was read a great deal just now; wait a while');
-  const n = Math.min(30, Math.max(1, Math.floor(limit) || 15));
-  const upTo = typeof line === 'number' && Number.isInteger(line) && line > 0 ? line : null;
-  const rows = upTo ? await listRoomMessagesBefore(upTo + 1, Math.min(n, 10)) : await listRoomMessages(null, n);
+  const n = Math.min(READ_MAX, Math.max(1, Math.floor(o.limit ?? 15) || 15));
+  const [line, before, since] = [lineId(o.line), lineId(o.before), lineId(o.since)];
+  if ([line, before, since].filter((v) => v !== null).length > 1) return fail('text', 'one of line, before and since at a time');
+  const [found, present, on] = await Promise.all([
+    line !== null ? listRoomMessagesBefore(line + 1, Math.min(n, READ_AT_LINE)) : before !== null ? listRoomMessagesBefore(before, n + 1) : listRoomMessages(since, n + 1),
+    listPresent(),
+    residentsOn(),
+  ]);
+  const more = line === null && found.length > n;
+  const rows = !more ? found : since !== null ? found.slice(0, n) : found.slice(-n);
   return {
     ok: true,
     me: { name: me.name, member: me.member, pair: pairOf(me.id) },
     seat: seat as string,
     lines: rows.map((r) => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}) })),
+    more,
+    ...presence(me, present, on),
   };
 }
 
@@ -504,8 +549,8 @@ export async function catchUp(seat: unknown): Promise<CatchUpResult> {
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
   if (!me.member) return fail('guest', GUEST);
   if (!me.name) return fail('name', 'no name has been chosen in the room yet; the card asks for one, and choose_name sets one');
-  const gate = await throttle(`room:r:${me.id}`, 30, 3600, { failOpen: false });
-  if (!gate.allowed) return fail('slow', 'the room was read a great deal just now; wait a while');
+  const gate = await throttle(`room:cu:${me.id}`, CATCH_UPS_PER_HOUR, 3600, { failOpen: false });
+  if (!gate.allowed) return fail('slow', 'catching up was asked for a great deal just now; wait a while');
   let away: Date | null = null;
   try {
     away = await awayFrom(me.id);
