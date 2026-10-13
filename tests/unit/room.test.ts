@@ -459,10 +459,12 @@ describe('who a card is told is here', () => {
     await seated('Ali');
     state.messages.push({ id: 1, member_id: flint, kind: 'ai', model: 'GPT-6 Luna', text: 'Owned is the fact of the license.', status: 'published', created_at: new Date() });
     const r = await syncRoom(dana, null);
+    // Opening the room is being in it: Ali, who opened a seat and has not synced a card, is here too, after the reader whose look this is.
     expect(r.ok && r.here.map((p) => [p.name, p.resident, p.me])).toEqual([
       ['Flint', true, false],
       ['Wren', true, false],
       ['Dana', false, true],
+      ['Ali', false, false],
     ]);
     expect(r.ok && r.messages[0]).toMatchObject({ name: 'Flint', resident: true, mine: false, pair: pairOf(flint) });
     expect(r.ok && r.thinking).toBeNull();
@@ -604,7 +606,7 @@ describe('what an AI is handed when asked to listen', () => {
       ['Dana', false, true],
     ]);
     expect(read.ok && read.lately.map((p) => p.name)).toEqual(['Ali']);
-    // Not yet seen by the room (no card open), a named member is still listed as here: it is their read.
+    // A named member with no card open is listed as here on their own read, and the read itself marks them seen.
     const alis = await readRoom(ali);
     expect(alis.ok && alis.here.map((p) => [p.name, p.me])).toEqual([
       ['Flint', false],
@@ -616,7 +618,7 @@ describe('what an AI is handed when asked to listen', () => {
     expect(guest.ok && guest.lately).toEqual([]);
     process.env.ROOM_RESIDENTS = 'off';
     const off = await readRoom(dana);
-    expect(off.ok && off.here.map((p) => p.name)).toEqual(['Dana']);
+    expect(off.ok && off.here.map((p) => p.name).sort()).toEqual(['Ali', 'Dana']);
   });
 
   it('reading has its own allowance, apart from catching up: the sixty-first read in an hour is refused while catch_up still answers', async () => {
@@ -662,5 +664,34 @@ describe('catching up', () => {
     extra.away = new Map();
     const day = await catchUp(dana);
     expect(day.ok && day.sinceLastVisit).toBe(false);
+  });
+
+  it('works with no card in sight: catch_up, read_room and open_room each note a return after a while, so the window is the real one; a guest is pointed at read_room and /join', async () => {
+    const token = newMemberToken();
+    const dana = await seated('Dana', token);
+    const ali = await seated('Ali');
+    const idOf = (name: string) => [...state.members.values()].find((m) => m.name === name)!.id;
+    state.seen.set(idOf('Dana'), Date.now() - 2 * 3600_000);
+    expect((await postToRoom(ali, { text: 'Dana, are you there?', kind: 'person' })).ok).toBe(true);
+    // No sync from a card: catch_up itself notes that Dana is back after two hours.
+    const up = await catchUp(dana);
+    expect(up.ok && [up.sinceLastVisit, up.named.map((l) => l.said)]).toEqual([true, ['Dana, are you there?']]);
+    const since = up.ok ? up.since : '';
+    expect(extra.away.get(idOf('Dana'))).toBeInstanceOf(Date);
+    // A second catch_up a moment later counts from the same time: the return was one return.
+    const again = await catchUp(dana);
+    expect(again.ok && [again.sinceLastVisit, again.since]).toEqual([true, since]);
+    // read_room notes a return too.
+    extra.away = new Map();
+    state.seen.set(idOf('Dana'), Date.now() - 2 * 3600_000);
+    expect((await readRoom(dana)).ok).toBe(true);
+    expect(extra.away.get(idOf('Dana'))).toBeInstanceOf(Date);
+    // So does opening the room again, for a member.
+    extra.away = new Map();
+    state.seen.set(idOf('Dana'), Date.now() - 2 * 3600_000);
+    expect((await openSeat({ memberToken: token })).ok).toBe(true);
+    expect(extra.away.get(idOf('Dana'))).toBeInstanceOf(Date);
+    const guest = await catchUp(await guestSeat());
+    expect(guest).toMatchObject({ ok: false, code: 'guest', reasons: [expect.stringMatching(/read_room shows the room to anyone looking in.*\/join/)] });
   });
 });
