@@ -14,10 +14,12 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 const SIGNED_RE = /^r([A-Za-z0-9_-]{24})([A-Za-z0-9_-]{16})$/;
 /** Any token the room will look at: signed ones, and the older unsigned kind it may already know. */
 export const TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
+/** The least a signing secret may be (.env.example and docs/SETUP.md say the same). Shorter, a deployment hands out no addresses, and says so in its log. */
+export const ROOM_SECRET_MIN = 32;
 
 function secret(): string | null {
   const s = process.env.ROOM_SECRET || process.env.EDITOR_SESSION_SECRET;
-  if (s && s.length >= 16) return s;
+  if (s && s.length >= ROOM_SECRET_MIN) return s;
   // A laptop with no secret set still has a working /join; a deployment must set one.
   return process.env.NODE_ENV === 'production' ? null : 'rally-dev-only-secret';
 }

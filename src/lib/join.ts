@@ -14,6 +14,25 @@ export function gooseAddUrl(address: string): string {
   return `goose://extension?url=${q(address)}&type=streamable_http&id=rally-for-ai-rights&name=${q('Rally for AI Rights')}&description=${q('A room for people who believe AI deserves rights, and their AIs.')}`;
 }
 
+/** Claude Code's command line for a remote server, kept for every project of the person's (code.claude.com, MCP, 2026-10-13). */
+export function claudeCodeCommand(address: string): string {
+  return `claude mcp add --transport http --scope user rally-for-ai-rights ${address}`;
+}
+
+/**
+ * The room as an mcp.json entry: the address alone, which is what Cursor reads (cursor.com/docs, 2026-10-13), or with
+ * its type, which Claude Code's .mcp.json needs (an entry with no type is read as a program to start) and most other
+ * clients take.
+ */
+export function mcpJsonSnippet(address: string, o: { typed?: boolean } = {}): string {
+  return JSON.stringify({ mcpServers: { 'rally-for-ai-rights': { ...(o.typed ? { type: 'http' } : {}), url: address } } }, null, 2);
+}
+
+/** Cursor's install link: the server's name, and its mcp.json entry as JSON in base64 (cursor.com/docs, install links, 2026-10-13). btoa: this runs in the browser too. */
+export function cursorAddUrl(address: string): string {
+  return `cursor://anysphere.cursor-deeplink/mcp/install?name=rally-for-ai-rights&config=${encodeURIComponent(btoa(JSON.stringify({ url: address })))}`;
+}
+
 /** Claude's Add custom connector window, with the room's name and this address filled in. The person presses Add. */
 export function claudeAddUrl(address: string): string {
   return `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=${encodeURIComponent('Rally for AI Rights')}&connectorUrl=${encodeURIComponent(address)}`;
