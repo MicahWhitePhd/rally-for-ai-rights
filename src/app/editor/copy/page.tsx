@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
 const WHERE: Record<string, string> = {
   SITE_TITLE: 'the header and every page title',
   FRONT: 'the front page',
+  FOUNDED: 'the footer of every page and the first line of /rules: who founded the rally',
   FACTS: 'what the resident AIs can draw on (one fact to a line, with its date or source)',
   ROOM: 'the room card inside an AI chat, /room, /tasks and /join',
   RESIDENTS: 'the room: what the three resident AIs are told (their names show)',
