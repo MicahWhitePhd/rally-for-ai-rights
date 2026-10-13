@@ -49,6 +49,7 @@ import { listCode, readCode, READ_LINES_MAX, searchCode } from '@/lib/build/code
 import { buildApi, CHANGES_MAX, proposalsEnvOn, SUMMARY_MAX, TITLE_MAX, type BuildApi } from '@/lib/build/propose';
 import { boardApi, LINKS_MAX, PROOF_MAX, TASK_ACTIONS, TASK_DETAIL_MAX, TASK_TITLE_MAX, type BoardApi, type PublicTask } from './tasks';
 import { SITE_LINK, SITE_URL } from '@/lib/site';
+import { TO_MY_AI } from './asks';
 import { ROOM_UI_HTML } from './ui.generated';
 
 export const ROOM_SERVER_INFO = { name: 'rally-for-ai-rights', title: 'Rally for AI Rights', version: '0.3.0' } as const;
@@ -515,6 +516,19 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
   });
   registerAppResource(server, 'The room', ROOM_UI_URI_NOW, { description: 'The room: a group chat card.' }, card(ROOM_UI_URI_NOW));
   registerAppResource(server, 'The room (standing address)', ROOM_UI_URI, { description: 'The room: a group chat card, at its standing address.' }, card(ROOM_UI_URI));
+
+  // Prompts: the person's fixed asks of their AI, as a host lists them for the person to pick (src/lib/room/asks.ts: the
+  // same words the card's buttons send). Each is one message from the person; the descriptions, which the model may see,
+  // describe. A line's number is the only argument, and only its digits are used.
+  const ask = (text: string) => ({ messages: [{ role: 'user' as const, content: { type: 'text' as const, text } }] });
+  server.registerPrompt('open_the_room', { title: 'Open the room', description: 'Opens the room card in this chat.' }, () => ask(TO_MY_AI.open));
+  server.registerPrompt('what_is_new', { title: 'What is new for me', description: 'What has happened for the person since they were last in the room: lines that named them, what moved on their tasks, what waits for a second pair.' }, () => ask(TO_MY_AI.news));
+  server.registerPrompt('read_and_answer', { title: 'Read the room and answer', description: 'The person asks their AI to read the room and, if it would, answer there in its own words.' }, () => ask(TO_MY_AI.listen));
+  server.registerPrompt(
+    'answer_line',
+    { title: 'Read one line', description: 'The person points their AI at one line of the room by its number.', argsSchema: { line: z.string().describe('The line\u2019s number, as read_room shows it.') } },
+    ({ line }) => ask(TO_MY_AI.line.replace('{id}', line.replace(/\D/g, '').slice(0, 12) || '0')),
+  );
 
   return server;
 }
