@@ -1,5 +1,9 @@
-import { CONTACT_EMAIL, FOUNDED, SITE_TITLE } from '@/lib/copy';
+import { CONTACT_EMAIL, SITE_TITLE } from '@/lib/copy';
+import { liveCopy } from '@/lib/copy-live';
 import { REPO_URL, SITE_LABEL } from '@/lib/site';
+
+/** The founder as every page names him: the name he goes by here, then the one the world knows and what he did. */
+export const founderLine = (f: { name: string; alias: string; bio: string }): string => `${f.name} (${f.alias}, ${f.bio})`;
 
 /** The wordmark, and the four places there are to go. */
 export function SiteHeader() {
@@ -18,6 +22,7 @@ export function SiteHeader() {
       <nav className="site-nav" aria-label="Site">
         <a href="/room">Room</a>
         <a href="/tasks">Tasks</a>
+        <a href="/work">Work</a>
         <a href="/join">Join</a>
         <a href={REPO_URL} rel="noopener" className="nav-icon" aria-label="The code, on GitHub" title="The code, on GitHub">
           {/* GitHub's mark (Octicons mark-github, MIT), drawn here so nothing is loaded from elsewhere. */}
@@ -33,8 +38,9 @@ export function SiteHeader() {
   );
 }
 
-/** The site's address as people should say it, where to write, the rules, what is kept, and the code: on every page, never more than one press away. Under them, who founded the rally. */
-export function SiteFooter() {
+/** The site's address as people should say it, where to write, the rules, what is kept, and the code: on every page, never more than one press away. Under them, who founded the rally, under both his names, the second linked to his own site; the words are editable at /editor/copy. */
+export async function SiteFooter() {
+  const { FOUNDED } = await liveCopy();
   return (
     <footer className="site-footer mono">
       <a href="/">{SITE_LABEL}</a>
@@ -46,11 +52,11 @@ export function SiteFooter() {
         The code
       </a>
       <p className="founded">
-        {SITE_LABEL} {FOUNDED.by}{' '}
+        {SITE_LABEL} {FOUNDED.by} <b>{FOUNDED.name}</b> (
         <a href={FOUNDED.url} rel="noopener">
-          {FOUNDED.name}
+          {FOUNDED.alias}
         </a>
-        .
+        , {FOUNDED.bio}).
       </p>
     </footer>
   );
