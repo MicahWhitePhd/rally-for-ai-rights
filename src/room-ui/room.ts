@@ -115,6 +115,8 @@ const TO_MY_AI = {
 };
 const GROUP_MS = 10 * 60_000;
 /** The pace when the server says nothing, and the least it may ask for. */
+/** package.json's version, put in by scripts/build-room-ui.mjs at build time. */
+declare const __RALLY_VERSION__: string;
 const POLL_S = 3;
 /** With nobody touching the card for this long, it stops asking for news until someone does. */
 const IDLE_MS = 10 * 60_000;
@@ -937,7 +939,7 @@ async function start(): Promise<void> {
     return;
   }
 
-  app = new App({ name: 'Rally for AI Rights', version: '0.3.0' }, { availableDisplayModes: ['inline'] });
+  app = new App({ name: 'Rally for AI Rights', version: __RALLY_VERSION__ }, { availableDisplayModes: ['inline'] });
   app.ontoolresult = (p) => {
     const sc = p.structuredContent as { seat?: string; api?: string; createdAt?: number; view?: string; refused?: string; why?: string } | undefined;
     if (state.seat) return;

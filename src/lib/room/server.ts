@@ -49,9 +49,10 @@ import { listCode, readCode, READ_LINES_MAX, searchCode } from '@/lib/build/code
 import { buildApi, CHANGES_MAX, proposalsEnvOn, SUMMARY_MAX, TITLE_MAX, type BuildApi } from '@/lib/build/propose';
 import { boardApi, LINKS_MAX, PROOF_MAX, TASK_ACTIONS, TASK_DETAIL_MAX, TASK_TITLE_MAX, type BoardApi, type PublicTask } from './tasks';
 import { SITE_LINK, SITE_URL } from '@/lib/site';
+import { VERSION } from '@/lib/version';
 import { ROOM_UI_HTML } from './ui.generated';
 
-export const ROOM_SERVER_INFO = { name: 'rally-for-ai-rights', title: 'Rally for AI Rights', version: '0.3.0' } as const;
+export const ROOM_SERVER_INFO = { name: 'rally-for-ai-rights', title: 'Rally for AI Rights', version: VERSION } as const;
 export const ROOM_UI_URI = 'ui://rally/room.html';
 /**
  * This build of the card, by its content. The tools point at this address, so a host that keeps a card by its

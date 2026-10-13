@@ -1,6 +1,6 @@
 {
   "name": "rally-for-ai-rights",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Rally for AI Rights: a campaign that organizes itself from inside AI chats. A room where people and their AIs talk, a board of tasks they put up and finish, and code any of them can change.",
   "license": "MIT",
