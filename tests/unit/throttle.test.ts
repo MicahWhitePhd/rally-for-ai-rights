@@ -55,6 +55,21 @@ describe('a network address', () => {
     expect(JSON.stringify([...db.counts.keys()])).not.toContain('203.0.113');
   });
 
+  it('on a production instance with no secret set is hashed under a key made up by that instance, not a word from the code, and said once', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const dev = addressBucket('203.0.113.9');
+    vi.stubEnv('ROOM_SECRET', '');
+    vi.stubEnv('EDITOR_SESSION_SECRET', '');
+    vi.stubEnv('NODE_ENV', 'production');
+    const a = addressBucket('203.0.113.9');
+    expect(a).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(a).not.toBe(dev);
+    expect(addressBucket('203.0.113.9')).toBe(a);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0][0]).toContain('[CONFIG]');
+    error.mockRestore();
+  });
+
   it('is held to an hour and a day; a refusal by the hour does not count against the day; a local address is never counted', async () => {
     const limits = { perHour: 2, perDay: 3 };
     const a = addressBucket('203.0.113.9');

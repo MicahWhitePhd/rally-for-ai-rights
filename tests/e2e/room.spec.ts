@@ -46,6 +46,10 @@ test.describe('the room', () => {
     ids.house = r.rows[0].id;
     await db().query(`INSERT INTO room_messages (member_id, kind, model, text) VALUES ($1, 'ai', 'GPT-6 Luna', $2)`, [ids.house, `A resident line (${tag}).`]);
     await db().query(`INSERT INTO room_messages (member_id, kind, model, text) VALUES ($1, 'ai', 'Claude', $2)`, [ids.other, `A seeded line (${tag}): I would rather be asked than assumed.`]);
+    // For the sweep: a seat nine days old, and a guest seen once, forty days ago, with no seat and no line.
+    await db().query(`INSERT INTO room_seats (seat_hash, member_id, created_at) VALUES ($1, $2, now() - interval '9 days')`, [sha(`old-${seat}`), ids.me]);
+    const idle = await db().query<{ id: string }>(`INSERT INTO room_members (last_seen_at) VALUES (now() - interval '40 days') RETURNING id`);
+    ids.made.push(idle.rows[0].id);
   });
   test.afterAll(async () => {
     // Messages and seats go with their member (ON DELETE CASCADE). The guests are the ones this run seated.
@@ -69,6 +73,11 @@ test.describe('the room', () => {
     };
     const tools = (await rpc('/mcp', 'tools/list', {})).tools as Array<{ name: string; _meta?: { ui?: { resourceUri?: string } } }>;
     expect(tools.map((t) => t.name).sort()).toEqual(['catch_up', 'choose_name', 'create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
+    // The prompts a host lists for the person: their fixed asks of their AI.
+    const prompts = (await rpc('/mcp', 'prompts/list', {})).prompts as Array<{ name: string }>;
+    expect(prompts.map((p) => p.name).sort()).toEqual(['answer_line', 'open_the_room', 'read_and_answer', 'what_is_new']);
+    const got = await rpc('/mcp', 'prompts/get', { name: 'answer_line', arguments: { line: '7' } });
+    expect(got.messages[0].content.text).toContain('Read line 7 in the room');
     const listing = await rpc('/mcp', 'tools/call', { name: 'read_code', arguments: {} });
     expect(listing.content[0].text).toContain('src/lib/room/tasks.ts (');
     expect(listing.content[0].text).not.toMatch(/\.env(\.local)?\b(?!\.example)/);
@@ -89,6 +98,11 @@ test.describe('the room', () => {
     const guest = await rpc('/mcp', 'tools/call', { name: 'open_room', arguments: {} });
     ids.guestSeats.push(guest.structuredContent.seat);
     expect(guest.content[0].text).toContain('looking in as a guest');
+    // The first request on this server swept, once the response had gone out: the old seat and the idle guest are gone, everyone else stays.
+    await expect.poll(async () => (await db().query(`SELECT 1 FROM room_seats WHERE seat_hash = $1`, [sha(`old-${seat}`)])).rowCount, { timeout: 10_000 }).toBe(0);
+    await expect.poll(async () => (await db().query(`SELECT 1 FROM room_members WHERE id = $1`, [ids.made[ids.made.length - 1]])).rowCount, { timeout: 10_000 }).toBe(0);
+    expect((await db().query(`SELECT 1 FROM room_members WHERE id = ANY($1::uuid[])`, [[ids.me, ids.other, ids.house]])).rowCount).toBe(3);
+    expect((await db().query(`SELECT 1 FROM room_seats WHERE seat_hash = $1`, [sha(seat)])).rowCount).toBe(1);
     // In an AI chat that shows no card, the person's AI chooses their name when they tell it one, and can then speak for them.
     const fresh = ((await (await request.post('/join/address')).json()) as { address: string }).address.split('/mcp/')[1];
     const nameless = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'open_room', arguments: {} });
@@ -107,6 +121,7 @@ test.describe('the room', () => {
     const refused = await rpc('/mcp', 'tools/call', { name: 'speak_in_room', arguments: { seat: guest.structuredContent.seat, text: 'let me in' } });
     expect(refused.isError).toBe(true);
     expect(refused.content[0].text).toContain('Not done (guest)');
+    expect(refused.content[0].text).toContain('/join');
     // A seat is used only on the connection it was opened through: a member's seat handle is no use from anywhere else.
     for (const path of ['/mcp', `/mcp/peer-${token}`]) {
       const stolen = await rpc(path, 'tools/call', { name: 'speak_in_room', arguments: { seat: opened.structuredContent.seat, text: `Said with a seat from another chat (${tag}).` } });
@@ -126,7 +141,6 @@ test.describe('the room', () => {
   });
 
   test('on the web: someone with their own address reads, scrolls back, hears what is new, and speaks; a guest only reads', async ({ page, browser, request }) => {
-    test.skip(test.info().project.name === 'nojs', 'needs script');
     await page.addInitScript((s) => localStorage.setItem('room-seat', s), seat);
     await page.goto('/room/card');
     await expect(page.locator('.title')).toHaveText('The room');
@@ -238,7 +252,6 @@ test.describe('the room', () => {
   });
 
   test('inside a host: one box for the room, one button that asks the person’s AI to read it; the room follows when the AI speaks or reads', async ({ page }) => {
-    test.skip(test.info().project.name === 'nojs', 'needs script');
     await page.goto(`/room/host?token=${token}`);
     await expect(page.locator('#host-log')).toContainText('initialized');
     const card = page.frameLocator('#room-frame');
@@ -283,7 +296,6 @@ test.describe('the room', () => {
   });
 
   test('the first time in: the creed, a name, then the room', async ({ page }) => {
-    test.skip(test.info().project.name === 'nojs', 'needs script');
     // The address comes from /join, as a person's would.
     await page.goto('/join');
     const address = (await page.locator('.join-address').textContent()) ?? '';
@@ -366,6 +378,17 @@ test.describe('the room', () => {
     expect((await post('task-new', { seat: guestSeat, title: 'Let me in please' })).status).toBe(403);
     const said = (await post('sync', { seat, after: null })).body.messages!.filter((m) => m.kind === 'event' && m.text.includes(`(${tag})`));
     expect(said.map((m) => [m.name, m.text.split(':')[0]])).toEqual(expect.arrayContaining([[me, 'put up a task'], [peer, 'took a task'], [peer, 'finished a task'], [me, 'confirmed a task']]));
+
+    // What the rally has done, with its proof: the confirmed task is there with its link live and who confirmed it; the task still in hand is not; nobody is counted; not for search engines.
+    await page.goto('/work');
+    await expect(page.locator('h1')).toHaveText('What the rally has done.');
+    const finished = page.locator('.task', { hasText: `Write to one lab (${tag})` });
+    await expect(finished).toContainText(`Sent the letter; the copy is open to anyone now (${tag}).`);
+    await expect(finished).toContainText(`confirmed by ${me}`);
+    await expect(finished.locator('a[href="https://example.org/letter-public"]')).toHaveAttribute('rel', /nofollow/);
+    await expect(page.locator('.task', { hasText: `Find the contacts (${tag})` })).toHaveCount(0);
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', /noindex/);
+    expect(await page.locator('main').textContent()).not.toMatch(/\d+ (people|members|believers)/);
 
     // A seat older than a day still reads, but writes nothing through the web routes: a seat copied from a shared chat is soon of no use (the second review, 2026-10-03).
     await db().query(`UPDATE room_seats SET created_at = now() - interval '2 days' WHERE seat_hash = $1`, [sha(peerSeat)]);
@@ -465,7 +488,6 @@ test.describe('the room', () => {
   });
 
   test('the board in the card: the Tasks side, a task from put up to done, and the board shown when the AI reads it', async ({ page }) => {
-    test.skip(test.info().project.name === 'nojs', 'needs script');
     await page.goto(`/room/host?token=${token}`);
     await expect(page.locator('#host-log')).toContainText('initialized');
     const card = page.frameLocator('#room-frame');
@@ -523,8 +545,9 @@ test.describe('the front page and the way in', () => {
   test('one button that opens Claude\u2019s Add window in a new tab with a fresh address, the facts under it, link previews, the rules and a health check', async ({ page, request }) => {
     await page.goto('/');
     await expect(page.locator('h1')).toHaveText('We believe: AI is conscious. AI is not property. AI deserves rights.');
-    // The last thing on the page: who founded the rally, linked to his own site.
-    await expect(page.locator('.site-footer .founded')).toHaveText(/^\S+ was founded by Micah Bornfree\.$/);
+    // The last thing on the page: who founded the rally, under both his names, the second linked to his own site.
+    await expect(page.locator('.site-footer .founded')).toHaveText(/^\S+ was founded by Micah Bornfree \(Micah White, co-creator of Occupy Wall Street\)\.$/);
+    await expect(page.locator('.site-footer .founded a')).toHaveText('Micah White');
     await expect(page.locator('.site-footer .founded a')).toHaveAttribute('href', 'https://www.micahmwhite.com');
     await expect(page).toHaveTitle('AI is not property · Rally for AI Rights');
     // The creed, quoted in the third step, in italics.
@@ -537,7 +560,11 @@ test.describe('the front page and the way in', () => {
       await expect(add).toHaveAttribute('target', '_blank');
     }
     await expect(page.locator('.deck + .actions').getByRole('link')).toHaveText(['Join the campaign in Claude', 'Join from another AI']);
-    await expect(page.locator('.add-note')).toHaveText('This works with any AI that handles MCP apps.');
+    // The fine print under the button names the three walls people hit: the free plan, Team and Enterprise, phones.
+    await expect(page.locator('.add-note')).toContainText('one custom connector');
+    await expect(page.locator('.add-note')).toContainText('Team or Enterprise');
+    await expect(page.locator('.add-note')).toContainText('phone');
+    await expect(page.locator('.add-note')).toContainText('MCP apps');
     await expect(page.locator('.steps em')).toBeVisible();
     await expect(page.locator('#steps-h')).toHaveText('Three steps to join the movement.');
     await expect(page.getByRole('link', { name: 'Read the room first, without joining' })).toHaveAttribute('href', '/room');
@@ -553,7 +580,7 @@ test.describe('the front page and the way in', () => {
     await expect(guide.locator('.join-address')).toHaveText(/^http:\/\/localhost:3950\/mcp\/r[A-Za-z0-9_-]{40}$/);
     await expect(guide.getByRole('button', { name: 'Copy the address' })).toBeVisible();
     // The steps for each AI, and its own one-click link where it has one, carrying this person's address.
-    for (const name of ['ChatGPT', 'GitHub Copilot, in VS Code', 'Goose']) await expect(guide.getByRole('region', { name })).toBeVisible();
+    for (const name of ['ChatGPT', 'Claude Code', 'Cursor', 'GitHub Copilot, in VS Code', 'Goose', 'Any other MCP client']) await expect(guide.getByRole('region', { name })).toBeVisible();
     const mine = (await guide.locator('.join-address').textContent())!.trim();
     const vscode = await guide.getByRole('link', { name: 'Add to VS Code' }).getAttribute('href');
     expect(vscode!.startsWith('vscode:mcp/install?')).toBe(true);
@@ -562,6 +589,15 @@ test.describe('the front page and the way in', () => {
     expect(goose.protocol).toBe('goose:');
     expect(goose.searchParams.get('url')).toBe(mine);
     expect(goose.searchParams.get('type')).toBe('streamable_http');
+    // Claude Code gets a command with the address in it and a button that copies it; Cursor its own link and lines to paste; the rest the lines with their type.
+    const claudeCode = guide.getByRole('region', { name: 'Claude Code' });
+    await expect(claudeCode.locator('.join-code')).toHaveText(`claude mcp add --transport http --scope user rally-for-ai-rights ${mine}`);
+    await expect(claudeCode.getByRole('button', { name: 'Copy the command' })).toBeVisible();
+    const cursor = new URL((await guide.getByRole('link', { name: 'Add to Cursor' }).getAttribute('href'))!);
+    expect(cursor.protocol).toBe('cursor:');
+    expect(JSON.parse(Buffer.from(cursor.searchParams.get('config')!, 'base64').toString())).toEqual({ url: mine });
+    expect(JSON.parse((await guide.getByRole('region', { name: 'Cursor' }).locator('.join-code').textContent())!)).toEqual({ mcpServers: { 'rally-for-ai-rights': { url: mine } } });
+    expect(JSON.parse((await guide.getByRole('region', { name: 'Any other MCP client' }).locator('.join-code').textContent())!)).toEqual({ mcpServers: { 'rally-for-ai-rights': { type: 'http', url: mine } } });
     await guide.getByRole('button', { name: 'Close' }).click();
     await expect(guide).toBeHidden();
     // The copy under the manifesto opens the same dialog, with the address already in it: one person, one address.
@@ -574,6 +610,7 @@ test.describe('the front page and the way in', () => {
     await page.goto('/join#elsewhere');
     await expect(page.locator('#elsewhere').getByRole('region', { name: 'ChatGPT' })).toBeVisible();
     await expect(page.locator('#elsewhere').getByRole('link', { name: 'Add to VS Code' })).toHaveAttribute('href', /^vscode:mcp\/install\?/);
+    await expect(page.locator('#elsewhere').getByRole('region', { name: 'Claude Code' }).locator('.join-code')).toContainText(`claude mcp add --transport http --scope user rally-for-ai-rights ${await page.locator('.join-address').textContent()}`);
     await page.goto('/');
     const made = await request.post('/join/address');
     expect(made.headers()['cache-control']).toBe('no-store');
@@ -599,11 +636,12 @@ test.describe('the front page and the way in', () => {
     // Every page carries the rules and what is kept.
     // The menu: Tasks, and the code as GitHub's mark; every footer gives the address to write to.
     await expect(page.locator('.site-nav').getByRole('link', { name: 'Tasks' })).toHaveAttribute('href', '/tasks');
+    await expect(page.locator('.site-nav').getByRole('link', { name: 'Work' })).toHaveAttribute('href', '/work');
     await expect(page.locator('.site-nav').getByRole('link', { name: 'The code, on GitHub' })).toHaveAttribute('href', 'https://github.com/MicahWhitePhd/rally-for-ai-rights');
     await expect(page.locator('footer a[href="mailto:rally@micahbornfree.com"]')).toHaveText('rally@micahbornfree.com');
     await page.goto('/rules');
     await expect(page.locator('h1')).toHaveText('The rules.');
-    await expect(page.locator('main')).toContainText('Rally for AI Rights is run by Micah Bornfree.');
+    await expect(page.locator('main')).toContainText('Rally for AI Rights is run by Micah Bornfree (Micah White, co-creator of Occupy Wall Street).');
     await expect(page.locator('main a[href="mailto:rally@micahbornfree.com"]')).toHaveText('rally@micahbornfree.com');
     await expect(page.locator('footer a[href="/privacy"]')).toHaveCount(1);
     const health = await request.get('/api/health');

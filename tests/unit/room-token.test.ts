@@ -33,6 +33,11 @@ describe('a connector address', () => {
     expect(tokenSigned(`r${'A'.repeat(40)}`)).toBe(false);
     vi.stubEnv('ROOM_SECRET', 'short');
     expect(mintToken()).toBeNull();
+    // Thirty-two characters, as the docs have always said: one short and the deployment hands out nothing.
+    vi.stubEnv('ROOM_SECRET', 'x'.repeat(31));
+    expect(mintToken()).toBeNull();
+    vi.stubEnv('ROOM_SECRET', 'x'.repeat(32));
+    expect(tokenSigned(mintToken())).toBe(true);
     // On a laptop, with nothing set, /join still works.
     vi.stubEnv('NODE_ENV', 'development');
     expect(tokenSigned(mintToken())).toBe(true);

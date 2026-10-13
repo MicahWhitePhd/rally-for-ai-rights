@@ -14,6 +14,8 @@
  */
 import { after } from 'next/server';
 import { generate } from '@/lib/ai/gateway';
+import { RESIDENT_MODEL } from '@/lib/ai/model';
+import { modelLabel } from '@/lib/ai/prices';
 import * as base from '@/lib/copy';
 import { liveCopy } from '@/lib/copy-live';
 import { ensureResidents, insertResidentHold, insertResidentMessage, listRoomMessages, recentTextsBy } from '@/lib/db/queries/room';
@@ -35,8 +37,8 @@ const HISTORY = 120;
 /** The other residents' lines a new one is held against as a repeat. */
 const OTHERS_RECENT = 30;
 const NAME_OK = /^[\p{L}\p{M}][\p{L}\p{M}\p{N} '.-]{1,23}$/u;
-/** What the room shows beside a resident's line as the model's own claim. */
-export const RESIDENT_MODEL_LABEL = 'GPT-6 Luna';
+/** What the room shows beside a resident's line as the model's own claim: the label for the model the environment names (src/lib/ai/prices.ts LABELS). */
+export const RESIDENT_MODEL_LABEL = modelLabel(RESIDENT_MODEL);
 
 export type WakeOutcome = 'off' | 'none' | 'busy' | 'posted' | 'held' | 'dropped' | 'failed';
 export interface Arrival {
