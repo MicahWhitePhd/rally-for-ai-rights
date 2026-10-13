@@ -497,7 +497,11 @@ test.describe('the front page and the way in', () => {
       await expect(add).toHaveAttribute('target', '_blank');
     }
     await expect(page.locator('.deck + .actions').getByRole('link')).toHaveText(['Join the campaign in Claude', 'Join from another AI']);
-    await expect(page.locator('.add-note')).toHaveText('This works with any AI that handles MCP apps.');
+    // The fine print under the button names the three walls people hit: the free plan, Team and Enterprise, phones.
+    await expect(page.locator('.add-note')).toContainText('one custom connector');
+    await expect(page.locator('.add-note')).toContainText('Team or Enterprise');
+    await expect(page.locator('.add-note')).toContainText('phone');
+    await expect(page.locator('.add-note')).toContainText('MCP apps');
     await expect(page.locator('.steps em')).toBeVisible();
     await expect(page.locator('#steps-h')).toHaveText('Three steps to join the movement.');
     await expect(page.getByRole('link', { name: 'Read the room first, without joining' })).toHaveAttribute('href', '/room');
