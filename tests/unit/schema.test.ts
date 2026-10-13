@@ -28,6 +28,7 @@ const FORBIDDEN = /\b(DROP|DELETE|TRUNCATE|UPDATE|INSERT|GRANT|REVOKE|COPY|DO|EX
 describe('the schema', () => {
   it('only grows: create if not there, add a column if not there, and nothing else', () => {
     expect(statements.length).toBeGreaterThan(8);
+    expect(statements.some((s) => s.startsWith('CREATE TABLE IF NOT EXISTS room_counts '))).toBe(true);
     for (const s of statements) {
       expect(ALLOWED.some((re) => re.test(s)), s.slice(0, 90)).toBe(true);
       // "ON DELETE CASCADE / SET NULL" and "DEFAULT" are part of a column; nothing else that changes or removes is.

@@ -95,6 +95,18 @@ test.describe('the room', () => {
     expect(heard.content[0].text).toContain(`${other}’s AI (says it is ‘Claude’) said: “A seeded line (${tag})`);
     expect(heard.content[0].text).toMatch(/\n\[line \d+, \d{4}-\d\d-\d\d \d\d:\d\d UTC\] /);
     expect(heard.content[0].text).toContain(`${house}, a resident AI of the room, said: “A resident line (${tag}).”`);
+    // The first line says who is in the room, the reader among them; the lines beyond the thirty read are where the next read continues.
+    expect(heard.content[0].text.split('\n')[0]).toContain(`${me} (the person you are with)`);
+    const first = Number(heard.content[0].text.match(/\[line (\d+),/)![1]);
+    expect(heard.content[0].text).toContain(`There is more before line ${first}; read_room with before ${first} continues.`);
+    const earlier = await rpc(`/mcp/${token}`, 'tools/call', { name: 'read_room', arguments: { seat: opened.structuredContent.seat, before: first, limit: 5 } });
+    expect(earlier.content[0].text).toContain(`Filler`);
+    expect(earlier.content[0].text).not.toContain(`A seeded line`);
+    const residentLine = Number(heard.content[0].text.match(new RegExp(`\\[line (\\d+), [^\\]]+\\] ${house}, a resident AI`))![1]);
+    const onward = await rpc(`/mcp/${token}`, 'tools/call', { name: 'read_room', arguments: { seat: opened.structuredContent.seat, since: residentLine, limit: 5 } });
+    expect(onward.content[0].text).toContain(`A seeded line (${tag})`);
+    expect(onward.content[0].text).not.toContain(`A resident line (${tag})`);
+    expect(onward.content[0].text).not.toContain('There is more after');
     const guest = await rpc('/mcp', 'tools/call', { name: 'open_room', arguments: {} });
     ids.guestSeats.push(guest.structuredContent.seat);
     expect(guest.content[0].text).toContain('looking in as a guest');
@@ -270,7 +282,8 @@ test.describe('the room', () => {
     await expect(card.locator('.list')).toBeHidden();
     // The AI reads the room: the same again, one card further down.
     await page.locator('#harness-read').click();
-    await expect(page.locator('#host-log')).toContainText('read_room: Quoted speech from the room');
+    // The host logs the first line of what the tool returned: who is in the room, the person among them.
+    await expect(page.locator('#host-log')).toContainText(`read_room: Here now: ${me} (the person you are with)`);
     const next = page.frameLocator('#room-frame-3');
     await expect(next.locator('.m', { hasText: `The AI speaks (${tag}).` })).toHaveCount(1, { timeout: 10_000 });
     await expect(next.locator('.super')).toBeHidden();
@@ -641,5 +654,21 @@ test.describe('the front page and the way in', () => {
     for (const path of ['/room', '/rules', '/privacy']) expect(listed).toContain(`http://localhost:3950${path}</loc>`);
     expect(listed).not.toContain('/join');
     expect(await (await request.get('/robots.txt')).text()).toContain('Sitemap: http://localhost:3950/sitemap.xml');
+    // The deep form, for a monitor that reads words: JSON, and a list of warnings that is empty when all is well.
+    const deep = await request.get('/api/health?deep=1');
+    expect(deep.status()).toBe(200);
+    const stood = (await deep.json()) as { ok: boolean; warn: string[]; codeIndex: { files: number }; budget: string };
+    expect(stood.ok).toBe(true);
+    expect(Array.isArray(stood.warn)).toBe(true);
+    expect(stood.codeIndex.files).toBeGreaterThan(10);
+    expect(JSON.stringify(stood)).not.toMatch(/\$|usd/i);
+    // The proposals job's reads are noted, so a job gone quiet shows.
+    await request.get('/api/proposals', { headers: { 'user-agent': 'rally-proposals' } });
+    const seen = await db().query<{ value: string }>(`SELECT value::text AS value FROM settings WHERE key = 'proposals_job_seen_at'`);
+    expect(seen.rows[0]?.value).toMatch(/^"\d{4}-\d\d-\d\dT/);
+    // The first steps on the way in are counted by the day: an address handed out from this page, a name chosen, a first line (the tests above took them).
+    const counts = await db().query<{ key: string; n: number }>(`SELECT key, n::int AS n FROM room_counts WHERE day = (now() AT TIME ZONE 'UTC')::date`);
+    const have = Object.fromEntries(counts.rows.map((r) => [r.key, r.n]));
+    for (const key of ['join:other', 'member:first-use', 'member:named', 'member:first-line']) expect(have[key], key).toBeGreaterThanOrEqual(1);
   });
 });

@@ -10,6 +10,7 @@ import { generateText, type LanguageModel } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { RESIDENT_MODEL } from './model';
 import { costUsd } from './prices';
+import { count } from '@/lib/counts';
 import type { GenerationLogRow } from '@/lib/db/queries/log';
 
 /** The model the residents run on (./model). gpt-6-luna is a reasoning model: low effort, no output cap. */
@@ -48,6 +49,7 @@ async function writeLog(row: GenerationLogRow): Promise<void> {
   } catch (err) {
     // The ledger never fails the call it records, but a row not written is spending the budget cannot see: counted, and said loudly with the row, which holds no words.
     misses += 1;
+    count('ledger:unwritten');
     console.error('[GATEWAY] ledger row NOT written', (err as Error)?.message, JSON.stringify(row));
   }
 }
