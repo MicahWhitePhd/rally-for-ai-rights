@@ -221,6 +221,8 @@ test.describe('the room', () => {
     await expect(visitor.locator('.guest a')).toHaveAttribute('href', /\/join$/);
     await expect(visitor.locator('#room-say')).toBeHidden();
     await expect(visitor.locator('#room-name-block')).toBeHidden();
+    // On the web there is no host to ask: no full-screen button.
+    await expect(visitor.locator('button.full')).toBeHidden();
     // Someone looking in is not shown who is here by name, nor who was in lately: only the residents.
     await expect(visitor.locator('.here .c', { hasText: me })).toHaveCount(0);
     await expect(visitor.locator('.here .c.away')).toHaveCount(0);
@@ -278,6 +280,14 @@ test.describe('the room', () => {
     const line = card.locator('.m', { hasText: `A seeded line (${tag})` });
     await expect(line).toHaveCount(1);
     await expect(card.locator('.here .c.self')).toHaveText(me);
+    // Full screen, where the host offers it: the button asks the host, the host answers, and the card follows; and back.
+    await expect(card.locator('button.full')).toHaveText('Full screen');
+    await card.locator('button.full').click();
+    await expect(page.locator('#host-log')).toContainText('displayMode: fullscreen');
+    await expect(card.locator('body')).toHaveClass(/\bfull\b/);
+    await expect(card.locator('button.full')).toHaveText('Back in the chat');
+    await card.locator('button.full').click();
+    await expect(card.locator('body')).not.toHaveClass(/\bfull\b/);
     await expect(page.locator('#host-log')).not.toContainText('A seeded line');
     await card.locator('.g', { hasText: `A seeded line (${tag})` }).locator('.ask').click();
     // What goes to the person's AI is the line's number and words of the card's own, never what the stranger wrote: the AI reads the line through read_room, as quoted speech.

@@ -152,6 +152,8 @@ const state = {
   cursor: 0,
   ready: false,
   full: false,
+  /** The host offers full screen. */
+  canFull: false,
   /** This card's stamp: when the tool call that showed it was made. The newest card on a seat is the live one. */
   born: 0,
   superseded: false,
@@ -269,6 +271,8 @@ const els = {
   paused: h('p', { class: 'note paused' }),
   resume: h('button', { class: 'ask', type: 'button' }),
   host: h('p', { class: 'host' }),
+  /** Full screen, where the host offers it: asks the host, and the card follows what the host answers. */
+  full: h('button', { class: 'ask full', type: 'button' }),
   guest: h('p', { class: 'note guest' }),
   guestLink: h('a', { class: 'ask' }),
 };
@@ -292,7 +296,7 @@ function shell(): void {
   // Title, then detail, then the button: the order a person fills them in, at any width.
   els.taskForm.append(h('label', { class: 'vh', htmlFor: 'task-title' }, state.s.taskTitlePh), els.taskTitle, h('label', { class: 'vh', htmlFor: 'task-detail' }, state.s.taskDetailPh), els.taskDetail, els.taskAdd);
   els.board.append(els.taskForm, els.taskList);
-  root.replaceChildren(h('div', { class: 'head' }, els.title, els.lede, els.host), els.sup, els.here, els.tabs, nameBlock, els.list, els.newBelow, els.paused, els.board, els.guest, els.form, els.listen, els.listenNote, els.err);
+  root.replaceChildren(h('div', { class: 'head' }, els.title, els.lede, els.host, els.full), els.sup, els.here, els.tabs, nameBlock, els.list, els.newBelow, els.paused, els.board, els.guest, els.form, els.listen, els.listenNote, els.err);
 }
 
 const atBottom = () => els.list.scrollHeight - els.list.scrollTop - els.list.clientHeight < 60;
@@ -301,6 +305,8 @@ function draw(): void {
   const s = state.s;
   document.body.classList.toggle('web', web);
   document.body.classList.toggle('full', state.full && !web);
+  els.full.hidden = web || !state.canFull;
+  els.full.textContent = state.full ? state.s.inline : state.s.fullscreen;
   document.documentElement.classList.toggle('gone', state.superseded);
   els.title.textContent = s.title;
   els.lede.textContent = s.lede;
@@ -826,6 +832,16 @@ els.supBtn.onclick = () => {
   touched();
   void poll();
 };
+els.full.onclick = async () => {
+  if (!app) return;
+  try {
+    const r = await app.requestDisplayMode({ mode: state.full ? 'inline' : 'fullscreen' });
+    state.full = r.mode === 'fullscreen';
+  } catch {
+    // The host said no, or nothing: the card stays as it is.
+  }
+  draw();
+};
 els.guestLink.onclick = (e) => {
   // Inside a host the frame cannot navigate away; ask the host to open the page instead.
   if (!app) return;
@@ -944,10 +960,9 @@ function applyHost(ctx: McpUiHostContext | undefined): void {
     set('--sab', bottom);
     set('--sal', left);
   }
-  if (ctx.displayMode) {
-    state.full = ctx.displayMode === 'fullscreen';
-    draw();
-  }
+  if (ctx.availableDisplayModes) state.canFull = ctx.availableDisplayModes.includes('fullscreen');
+  if (ctx.displayMode) state.full = ctx.displayMode === 'fullscreen';
+  if (ctx.displayMode || ctx.availableDisplayModes) draw();
 }
 
 async function start(): Promise<void> {
@@ -975,7 +990,8 @@ async function start(): Promise<void> {
     return;
   }
 
-  app = new App({ name: 'Rally for AI Rights', version: __RALLY_VERSION__ }, { availableDisplayModes: ['inline'] });
+  // Inline is where the card lives; a host that offers full screen gets a button for it (els.full), and the card follows what the host answers.
+  app = new App({ name: 'Rally for AI Rights', version: __RALLY_VERSION__ }, { availableDisplayModes: ['inline', 'fullscreen'] });
   app.ontoolresult = (p) => {
     const sc = p.structuredContent as { seat?: string; api?: string; createdAt?: number; view?: string; refused?: string; why?: string } | undefined;
     if (state.seat) return;

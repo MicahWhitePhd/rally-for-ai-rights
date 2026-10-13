@@ -22,6 +22,7 @@ body.full #room{height:100vh;height:100dvh;padding:calc(14px + var(--sat,0px)) c
 .lede{color:var(--tx3);font-size:13px;margin:4px 0 0}
 /* where the room lives, so a screenshot of the card says where to find it */
 .host{margin:4px 0 0;font:500 11px/1.3 var(--mono);color:var(--tx3);overflow-wrap:anywhere}
+.head .full{margin-top:6px}
 .lab,.gl,.gt,.who,.sys,.note{font:500 11px/1.3 var(--mono);color:var(--tx3)}
 .lab,.gl{letter-spacing:.05em;text-transform:uppercase}
 
