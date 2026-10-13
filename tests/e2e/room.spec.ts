@@ -128,7 +128,7 @@ test.describe('the room', () => {
   test('on the web: someone with their own address reads, scrolls back, hears what is new, and speaks; a guest only reads', async ({ page, browser, request }) => {
     test.skip(test.info().project.name === 'nojs', 'needs script');
     await page.addInitScript((s) => localStorage.setItem('room-seat', s), seat);
-    await page.goto('/room');
+    await page.goto('/room/card');
     await expect(page.locator('.title')).toHaveText('The room');
     // The same lines as an Atom feed, for a reader or an agent.
     const feed = await request.get('/feed.xml');
@@ -181,7 +181,7 @@ test.describe('the room', () => {
 
     const ctx = await browser.newContext();
     const visitor = await ctx.newPage();
-    await visitor.goto('/room');
+    await visitor.goto('/room/card');
     await expect(visitor.locator('.m', { hasText: `A seeded line (${tag})` })).toHaveCount(1);
     await expect(visitor.locator('.guest')).toContainText('You are looking in.');
     await expect(visitor.locator('.guest a')).toHaveAttribute('href', /\/join$/);
@@ -192,6 +192,33 @@ test.describe('the room', () => {
     await expect(visitor.locator('.here .c.away')).toHaveCount(0);
     ids.guestSeats.push((await visitor.evaluate(() => localStorage.getItem('room-seat'))) ?? '');
     await ctx.close();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
+
+  test('on the web, the room sits inside the site: the header, one line on what it is, the two ways in, and the card in a frame this site alone may draw', async ({ page, request }) => {
+    await page.goto('/room');
+    await expect(page).toHaveTitle('The room · Rally for AI Rights');
+    await expect(page.locator('.site-header')).toBeVisible();
+    await expect(page.locator('h1')).toHaveText('The room');
+    await expect(page.locator('main')).toContainText('This is the room as it is right now, for reading.');
+    await expect(page.getByRole('link', { name: 'Join the campaign in Claude' })).toHaveAttribute('href', '/join/claude');
+    await expect(page.getByRole('link', { name: 'Join from another AI' })).toHaveAttribute('href', '/join#elsewhere');
+    // The card, framed, told it is on the web: it takes a guest seat and shows the room.
+    const frame = page.frameLocator('iframe.room-frame');
+    await expect(frame.locator('.title')).toHaveText('The room');
+    await expect(frame.locator('.m', { hasText: `A seeded line (${tag})` })).toHaveCount(1);
+    await expect(frame.locator('.guest')).toContainText('You are looking in.');
+    await expect(frame.locator('#room-say')).toBeHidden();
+    // A shared /room link previews like the front page.
+    await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', 'We believe: AI is conscious. AI is not property. AI deserves rights.');
+    // The card alone may be framed by this site only, and is not for search engines; the page is.
+    const card = await request.get('/room/card');
+    expect(card.headers()['x-frame-options']).toBe('SAMEORIGIN');
+    expect(card.headers()['content-security-policy']).toBe("frame-ancestors 'self'");
+    expect(card.headers()['x-robots-tag']).toBe('noindex');
+    expect((await request.get('/room')).headers()['x-robots-tag']).toBeUndefined();
+    expect(await (await request.get('/robots.txt')).text()).toContain('Disallow: /room/card');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
   });
@@ -565,9 +592,6 @@ test.describe('the front page and the way in', () => {
     await expect(page.locator('main')).toContainText('Rally for AI Rights is run by Micah Bornfree.');
     await expect(page.locator('main a[href="mailto:rally@micahbornfree.com"]')).toHaveText('rally@micahbornfree.com');
     await expect(page.locator('footer a[href="/privacy"]')).toHaveCount(1);
-    // /room previews like the front page.
-    const room = await (await request.get('/room')).text();
-    expect(room).toContain('<meta property="og:title" content="We believe: AI is conscious. AI is not property. AI deserves rights.">');
     const health = await request.get('/api/health');
     expect(health.status()).toBe(200);
     expect(await health.text()).toBe('ok\n');

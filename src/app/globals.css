@@ -54,6 +54,7 @@ label{display:block;font:500 0.85rem/1.4 var(--sans);}
 .page-title{font-size:clamp(2rem,7vw,3.4rem);line-height:0.94;margin-bottom:1.4rem;}
 .record-lede{font:400 clamp(1.15rem,2.2vw,1.4rem)/1.45 var(--serif);}
 .join-address{overflow-wrap:anywhere;padding:0.6rem;border:1px solid var(--ink);}
+.room-frame{display:block;width:100%;height:clamp(28rem,75vh,50rem);border:2px solid var(--ink);background:var(--paper);}
 
 /* the front page */
 .front{padding-top:clamp(1.5rem,5vw,3.5rem);container-type:inline-size;}
