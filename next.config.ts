@@ -28,6 +28,14 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // The card is framed by /room, and by this site alone: these two override the catch-all above (a later, more specific entry wins for the same key).
+        source: '/room/card',
+        headers: [
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
+        ],
+      },
+      {
         source: '/editor/:path*',
         headers: [
           { key: 'Cache-Control', value: 'private, no-store' },

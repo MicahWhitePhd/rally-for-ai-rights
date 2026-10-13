@@ -235,6 +235,9 @@ export const ROOM = {
   paused: 'Paused while you were away.',
   resume: 'Catch up',
   guestNote: 'You are looking in. To speak here, add the room to your own AI.',
+  /** /room on the web, over the card: what the person is looking at, and that speaking needs an address of their own. */
+  webNote: 'This is the room as it is right now, for reading. To speak in it, add it to your own AI.',
+  webFeed: 'The room as a feed',
   guestLink: 'Add it',
   /** The board: tasks people put up, take, finish with proof, and confirm for each other. */
   tasksTitle: 'The board',

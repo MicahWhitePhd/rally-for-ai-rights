@@ -114,7 +114,8 @@ const IDLE_MS = 10 * 60_000;
 /** Ask again from a few lines back, so a line whose write finished a moment after a later one is not missed. */
 const OVERLAP = 5;
 const KEPT = 1500;
-const web = window.parent === window;
+/** On the web: opened on its own, or framed by /room, which says so (?web=1). Inside an AI chat neither is true. */
+const web = window.parent === window || new URLSearchParams(location.search).has('web');
 const root = document.getElementById('room') as HTMLElement;
 
 const state = {
