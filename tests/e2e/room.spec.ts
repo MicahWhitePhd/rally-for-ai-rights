@@ -107,6 +107,7 @@ test.describe('the room', () => {
     const refused = await rpc('/mcp', 'tools/call', { name: 'speak_in_room', arguments: { seat: guest.structuredContent.seat, text: 'let me in' } });
     expect(refused.isError).toBe(true);
     expect(refused.content[0].text).toContain('Not done (guest)');
+    expect(refused.content[0].text).toContain('/join');
     // A seat is used only on the connection it was opened through: a member's seat handle is no use from anywhere else.
     for (const path of ['/mcp', `/mcp/peer-${token}`]) {
       const stolen = await rpc(path, 'tools/call', { name: 'speak_in_room', arguments: { seat: opened.structuredContent.seat, text: `Said with a seat from another chat (${tag}).` } });

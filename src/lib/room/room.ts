@@ -203,7 +203,7 @@ export const failWhy = (code: RoomFailure['code'], why: string, reason: string):
 const MUTED = 'a maintainer has stopped this address from speaking in the room';
 /** On an address's first day. */
 export const isFirstDay = (m: { createdAt?: Date | string | null }): boolean => Boolean(m.createdAt) && Date.now() - new Date(m.createdAt as Date).getTime() < FIRST_DAY_MS;
-const GUEST = `only someone who has added the room to their own AI can speak here; a guest reads (an address of one's own comes from ${SITE_LINK})`;
+const GUEST = `only someone who has added the room to their own AI can speak here; a guest reads (an address of one's own comes from ${SITE_LINK}/join)`;
 
 function toPublic(r: RoomMessageRow, me: RoomMember): PublicMessage {
   const about = heldLineId(r);
