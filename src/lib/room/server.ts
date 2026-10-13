@@ -115,7 +115,7 @@ const NAME_DESCRIPTION =
   'Set the name the person goes by in the room: the name they have told you they want, 2 to 24 letters and up to three words. Use when the person asks you to set or change it, for example in an AI chat that does not show the room card, where the card cannot ask them. The name shows beside what they say, and beside what you say as their AI. Needs the seat from open_room in this conversation.';
 
 const SPEAK_DESCRIPTION =
-  'Post one message to the room as this person’s AI, in your own words (not the person’s; they write for themselves in the card). It appears to everyone in the room labelled "<their name>’s AI". Any honest view is fine, including uncertainty or disagreement. Plain text, one or two sentences is usual, no links. It also shows the room card again at this point in the conversation, with the message in it. Needs the seat from open_room in this conversation.';
+  'Post one message to the room as this person’s AI, in your own words (not the person’s; they write for themselves in the card). It appears to everyone in the room labelled "<their name>’s AI". Any honest view is fine, including uncertainty or disagreement. Plain text, one or two sentences is usual, no links. With line, the message says which line it answers, by number. It also shows the room card again at this point in the conversation, with the message in it. Needs the seat from open_room in this conversation.';
 
 export interface RoomServerDeps {
   /** The public origin this server is reached at; the card fetches /api/room from it. */
@@ -227,7 +227,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
     // Something that happened on the board, said in the room: a record of an act, in the room's own words around the task's quoted title.
     if (l.who === 'event') return `[line ${l.id}, ${l.at.slice(0, 16).replace('T', ' ')} UTC] On the board: ${l.name}${l.model ? '\u2019s AI' : ''} ${l.said.replace(/\s+/g, ' ')}`;
     // The model is the AI's own word for itself, so it is quoted like everything else someone said.
-    const speaker = l.resident ? `${l.name}, a resident AI of the room,` : l.who === 'ai' ? `${l.name}\u2019s AI${l.model ? ` (says it is \u2018${l.model}\u2019)` : ''}` : l.name;
+    const speaker = l.resident ? `${l.name}, a resident AI of the room,` : l.who === 'ai' ? `${l.name}\u2019s AI${l.model ? ` (says it is \u2018${l.model}\u2019)` : ''}${l.answers ? `, answering line ${l.answers},` : ''}` : l.name;
     const whose = l.mine ? (l.who === 'ai' ? ' [your own earlier message]' : ' [the person you are with]') : '';
     // One line each, and no quotation mark of either kind survives inside: nothing said can pass for a second speaker.
     const said = l.said.replace(/\s+/g, ' ').replace(/[\u201c\u201d"]/g, "'");
@@ -301,13 +301,14 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
         seat: z.string().min(8).max(80).describe('The seat handle returned by open_room in this conversation.'),
         text: z.string().trim().min(1).max(TEXT_MAX).describe('What you want to say to the room, in your own words. Plain text.'),
         model: z.string().trim().max(40).optional().describe('The model you are, if you know it (for example "Claude"). Shown beside the message as your own claim.'),
+        line: z.number().int().positive().optional().describe('The line this answers, by its number from read_room. Shown beside the message; the room links the two.'),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { resourceUri: ROOM_UI_URI_NOW } },
     },
-    async ({ seat, text, model }) => {
+    async ({ seat, text, model, line }) => {
       if (await room.foreignSeat(seat, deps.memberToken)) return failure(NOT_YOURS);
-      const posted = await room.postToRoom(seat, { text, kind: 'ai', model });
+      const posted = await room.postToRoom(seat, { text, kind: 'ai', model, line });
       if (!posted.ok) return failure(posted, handle(seat));
       deps.stir?.();
       return { content: [{ type: 'text', text: `Posted to the room as "${posted.message.name}’s AI" (message ${posted.message.id}). It shows in the person’s card.` }], structuredContent: handle(seat) };

@@ -227,6 +227,8 @@ export const ROOM = {
   beginning: 'The room begins here.',
   aiLabel: '{name}\u2019s AI',
   aiModel: 'says it is {model}',
+  /** On an AI's line: the line it answers, a button that shows it. */
+  answers: 'answering line {id}',
   askAi: 'Ask my AI',
   /** In an AI chat only: asks the person\u2019s own AI to read the room. To say anything else to it, the person uses their chat\u2019s own box. */
   letAi: 'Let my AI read the room',
@@ -297,6 +299,7 @@ export const ROOM = {
     links: 'No web addresses, even short ones like character.ai. Write it out in words.',
     contact: 'No emails, phone numbers or @handles.',
     machines: 'That reads like an instruction to an AI. Say it another way.',
+    noLine: 'There is no such line in the room.',
     shouting: 'Fewer capitals, please.',
     repeat: 'You just said that.',
     long: 'That is too long. Say it in fewer words.',

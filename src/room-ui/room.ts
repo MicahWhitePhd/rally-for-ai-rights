@@ -50,6 +50,8 @@ interface Msg {
   resident: boolean;
   /** On a resident's event: the line they let stand. */
   about?: number;
+  /** On an AI's line: the line it answers. */
+  answers?: number;
 }
 interface Present {
   name: string;
@@ -445,6 +447,13 @@ function draw(): void {
       if (m.kind === 'ai' && !m.resident) {
         const who = h('p', { class: 'who' }, mark(m.pair, 'ai'), h('b', {}, fill(s.aiLabel, { name: m.name })));
         if (m.model) who.append(fill(s.aiModel, { model: m.model }));
+        if (m.answers) {
+          // The line it answers, by number: pressing it shows that line when it is on screen.
+          const to = m.answers;
+          const go = h('button', { class: 'ans', type: 'button' }, fill(s.answers, { id: String(to) }));
+          go.onclick = () => els.list.querySelector(`[data-id="${to}"]`)?.scrollIntoView({ block: 'center' });
+          who.append(' ', go);
+        }
         line.append(who);
       }
       line.append(h('p', { class: 'tx' }, m.text));

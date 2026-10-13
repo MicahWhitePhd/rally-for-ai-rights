@@ -180,6 +180,16 @@ export interface PublicMessage {
   resident: boolean;
   /** On a resident's event: the line they let stand. */
   about?: number;
+  /** On a person's AI's line: the line it answers, by its number. */
+  answers?: number;
+}
+
+/** The id of the line this row answers, when the row is an AI's line that named one ('line:12'); else null. */
+const ANSWERS_REF = /^line:(\d+)$/;
+export function answeredLineId(l: { kind: string; ref?: string | null }): number | null {
+  if (l.kind !== 'ai' || !l.ref) return null;
+  const m = ANSWERS_REF.exec(l.ref);
+  return m ? Number(m[1]) : null;
 }
 
 export interface Present {
@@ -214,7 +224,8 @@ const GUEST = `only someone who has added the room to their own AI can speak her
 
 function toPublic(r: RoomMessageRow, me: RoomMember): PublicMessage {
   const about = heldLineId(r);
-  return { id: r.id, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text, at: new Date(r.created_at).toISOString(), mine: r.member_id === me.id, pair: pairOf(r.member_id), resident: r.resident !== null, ...(about !== null ? { about } : {}) };
+  const answers = answeredLineId(r);
+  return { id: r.id, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text, at: new Date(r.created_at).toISOString(), mine: r.member_id === me.id, pair: pairOf(r.member_id), resident: r.resident !== null, ...(about !== null ? { about } : {}), ...(answers !== null ? { answers } : {}) };
 }
 
 /** The hash a member is known by, from the token in their address. */
@@ -434,8 +445,12 @@ export async function nameInRoom(seat: unknown, raw: unknown): Promise<{ ok: tru
 
 export type PostResult = { ok: true; message: PublicMessage } | RoomFailure;
 
-/** One message, from the person (kind 'person', through the card) or their AI (kind 'ai', through the tool). */
-export async function postToRoom(seat: unknown, o: { text: unknown; kind: 'person' | 'ai'; model?: unknown }): Promise<PostResult> {
+/**
+ * One message, from the person (kind 'person', through the card) or their AI (kind 'ai', through the tool). An AI's
+ * line may say which line it answers, by number: the number is kept as the line's ref and shown, the words are not
+ * fetched or repeated. A number that is no published line is refused, so the ref never points at nothing.
+ */
+export async function postToRoom(seat: unknown, o: { text: unknown; kind: 'person' | 'ai'; model?: unknown; line?: unknown }): Promise<PostResult> {
   if (!(await getSetting<boolean>('room_open', true))) return fail('closed', 'the room is closed for now');
   const me = await memberOf(seat);
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
@@ -451,6 +466,8 @@ export async function postToRoom(seat: unknown, o: { text: unknown; kind: 'perso
   const issues = textIssues(text);
   if (issues.length) return { ...fail('text', ...plainTextProblems(text).map((p) => p.replace(/^text: /, ''))), why: issues[0] };
   const model = cleanModel(o.model);
+  const answers = o.kind === 'ai' && typeof o.line === 'number' && Number.isInteger(o.line) && o.line > 0 ? o.line : null;
+  if (answers !== null && (await listRoomMessagesBefore(answers + 1, 1))[0]?.id !== answers) return failWhy('text', 'noLine', `there is no line ${answers} in the room`);
   const recent = await recentTextsBy(me.id, 3);
   if (recent.includes(text)) return failWhy('text', 'repeat', 'that was just said');
   const firstDay = isFirstDay(me);
@@ -460,11 +477,11 @@ export async function postToRoom(seat: unknown, o: { text: unknown; kind: 'perso
   // What first-day addresses say comes out of their own pool, so new ones cannot use up the day of those who stayed.
   const all = firstDay ? await throttle('room:posts:new', FIRST_DAY_POSTS_ALL, 86_400, { failOpen: false }) : await throttle('room:posts', POSTS_PER_DAY, 86_400, { failOpen: false });
   if (!all.allowed) return failWhy('slow', 'day', 'the room has said enough for today; it resets at midnight UTC');
-  const id = await insertRoomMessage({ member_id: me.id, kind: o.kind, model: o.kind === 'ai' ? model : null, text });
+  const id = await insertRoomMessage({ member_id: me.id, kind: o.kind, model: o.kind === 'ai' ? model : null, text, ref: answers !== null ? `line:${answers}` : null });
   if (id === null) return failWhy('muted', 'muted', MUTED);
   console.log(`[ROOM] ${o.kind} message ${id}`);
   if (recent.length === 0) await countNow('member:first-line');
-  return { ok: true, message: { id, kind: o.kind, name: me.name, model: o.kind === 'ai' ? model : null, text, at: new Date().toISOString(), mine: true, pair: pairOf(me.id), resident: false } };
+  return { ok: true, message: { id, kind: o.kind, name: me.name, model: o.kind === 'ai' ? model : null, text, at: new Date().toISOString(), mine: true, pair: pairOf(me.id), resident: false, ...(answers !== null ? { answers } : {}) } };
 }
 
 export type ReadResult =
@@ -472,7 +489,7 @@ export type ReadResult =
       ok: true;
       me: Me;
       seat: string;
-      lines: Array<{ id: number; at: string; who: 'person' | 'ai' | 'event'; name: string; model: string | null; mine: boolean; resident: boolean; said: string; /** On a resident's event: the line they let stand. */ about?: number }>;
+      lines: Array<{ id: number; at: string; who: 'person' | 'ai' | 'event'; name: string; model: string | null; mine: boolean; resident: boolean; said: string; /** On a resident's event: the line they let stand. */ about?: number; /** On an AI's line: the line it answers. */ answers?: number }>;
       /** There are lines beyond these: before the first (the latest, or a page back) or after the last (reading on from a line). */
       more: boolean;
       /** Who is in the room now and who was in lately, as this reader may see it (presence). */
@@ -523,7 +540,7 @@ export async function readRoom(seat: unknown, o: ReadOptions = {}): Promise<Read
     ok: true,
     me: { name: me.name, member: me.member, pair: pairOf(me.id) },
     seat: seat as string,
-    lines: rows.map((r) => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}) })),
+    lines: rows.map((r) => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}), ...(answeredLineId(r) !== null ? { answers: answeredLineId(r) as number } : {}) })),
     more,
     ...presence(me, present, on),
   };
@@ -587,7 +604,7 @@ export async function catchUp(seat: unknown): Promise<CatchUpResult> {
   const since = away ?? new Date(Date.now() - CATCH_UP_DEFAULT_MS);
   const [rows, tasks] = await Promise.all([listRoomMessagesSince(since, 400), listTasks(120).catch(() => [])]);
   const mine = new Set(tasks.filter((t) => t.created_by === me.id || t.claimed_by === me.id).map((t) => t.id));
-  const line = (r: (typeof rows)[number]): ReadLine => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}) });
+  const line = (r: (typeof rows)[number]): ReadLine => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}), ...(answeredLineId(r) !== null ? { answers: answeredLineId(r) as number } : {}) });
   const name = me.name;
   const named = rows.filter((r) => r.member_id !== me.id && r.kind !== 'event' && namedIn(r.text, name)).slice(-CATCH_UP_LINES).map(line);
   const onMine = rows.filter((r) => r.kind === 'event' && r.member_id !== me.id && r.ref?.startsWith('task:') && mine.has(Number(r.ref.slice(5)))).slice(-CATCH_UP_LINES).map(line);
