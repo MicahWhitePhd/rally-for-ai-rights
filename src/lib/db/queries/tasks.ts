@@ -28,6 +28,7 @@ export interface TaskRow {
   proof_links: string[];
   confirmed_by: string | null;
   confirmer: string | null;
+  confirmed_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -39,7 +40,7 @@ const COLS = `t.id::int AS id, t.title, t.detail, t.kind,
   t.created_by, c.name AS creator, t.created_via,
   CASE WHEN t.status = 'claimed' AND NOT ${LIVE} THEN NULL ELSE t.claimed_by END AS claimed_by,
   CASE WHEN t.status = 'claimed' AND NOT ${LIVE} THEN NULL ELSE k.name END AS claimer,
-  t.claim_until, t.done_at, t.proof, t.proof_links, t.confirmed_by, f.name AS confirmer, t.created_at, t.updated_at`;
+  t.claim_until, t.done_at, t.proof, t.proof_links, t.confirmed_by, f.name AS confirmer, t.confirmed_at, t.created_at, t.updated_at`;
 const FROM = `room_tasks t
   LEFT JOIN room_members c ON c.id = t.created_by
   LEFT JOIN room_members k ON k.id = t.claimed_by
@@ -60,6 +61,16 @@ export async function listTasks(limit = 120, withdrawn = false): Promise<TaskRow
 export async function memberActedBefore(memberId: string): Promise<boolean> {
   const r = await queryOne<{ acted: boolean }>(`SELECT EXISTS (SELECT 1 FROM room_tasks WHERE created_by = $1 OR claimed_by = $1 OR confirmed_by = $1) AS acted`, [memberId]);
   return Boolean(r?.acted);
+
+/** What was finished, for /work: confirmed first, then done and waiting for a second pair, the newest first within each. */
+export async function listFinishedTasks(limit = 100): Promise<TaskRow[]> {
+  return query<TaskRow>(
+    `SELECT ${COLS} FROM ${FROM}
+      WHERE t.status IN ('confirmed', 'done')
+      ORDER BY (t.status = 'confirmed') DESC, COALESCE(t.confirmed_at, t.done_at) DESC NULLS LAST, t.id DESC
+      LIMIT $1`,
+    [limit],
+  );
 }
 
 export async function getTask(id: number): Promise<TaskRow | null> {

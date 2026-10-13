@@ -60,6 +60,12 @@ describe('the schema', () => {
     }
   });
 
+  it('indexes what the sweep and a member\u2019s cascade walk: seats by member and by age, guests by when they were last seen', () => {
+    for (const name of ['idx_room_seats_member ON room_seats(member_id)', 'idx_room_seats_created ON room_seats(created_at)', 'idx_room_members_guest_seen ON room_members(last_seen_at) WHERE token_hash IS NULL AND resident IS NULL']) {
+      expect(statements.some((s) => s === `CREATE INDEX IF NOT EXISTS ${name}`), name).toBe(true);
+    }
+  });
+
   it('keeps no email, password or network address column', () => {
     expect(statements.join('\n')).not.toMatch(/\b(email|password|passwd|ip|ip_address|address|phone)\b\s+(TEXT|INET|VARCHAR|CITEXT)/i);
   });

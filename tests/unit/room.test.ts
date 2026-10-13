@@ -240,7 +240,7 @@ describe('who may speak', () => {
     const guest = await guestSeat();
     expect(await syncRoom(guest, null)).toMatchObject({ ok: true, me: { name: null, member: false } });
     expect(await readRoom(guest)).toMatchObject({ ok: true, lines: [{ name: 'Dana', said: 'hello from inside' }] });
-    expect(await nameInRoom(guest, 'Mallory')).toMatchObject({ ok: false, code: 'guest' });
+    expect(await nameInRoom(guest, 'Mallory')).toMatchObject({ ok: false, code: 'guest', reasons: [expect.stringContaining('/join')] });
     expect(await postToRoom(guest, { text: 'let me in', kind: 'person' })).toMatchObject({ ok: false, code: 'guest' });
     expect(await postToRoom(guest, { text: 'let me in', kind: 'ai' })).toMatchObject({ ok: false, code: 'guest' });
     expect(state.messages).toHaveLength(1);

@@ -172,7 +172,7 @@ describe('who may use the board', () => {
     expect(await createTask(dana, { title: 'Write to one lab about its weights', via: 'person' })).toMatchObject({ ok: true, task: { id: 1, state: 'open', kind: 'act', by: { name: 'Dana', ai: false } } });
     const read = await listBoard(guest);
     expect(read.ok && read.tasks.map((t) => [t.title, Object.values(t.can).some(Boolean)])).toEqual([['Write to one lab about its weights', false]]);
-    expect(await createTask(guest, { title: 'Let me in please', via: 'person' })).toMatchObject({ ok: false, code: 'guest' });
+    expect(await createTask(guest, { title: 'Let me in please', via: 'person' })).toMatchObject({ ok: false, code: 'guest', reasons: [expect.stringContaining('/join')] });
     expect(await actOnTask(guest, 1, 'take', { via: 'person' })).toMatchObject({ ok: false, code: 'guest' });
     expect(await createTask(unnamed, { title: 'A task without a name', via: 'ai' })).toMatchObject({ ok: false, code: 'name' });
     expect(await listBoard('nope')).toMatchObject({ ok: false, code: 'seat' });

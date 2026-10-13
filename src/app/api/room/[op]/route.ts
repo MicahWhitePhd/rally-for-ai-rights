@@ -6,6 +6,7 @@
  */
 import type { NextRequest } from 'next/server';
 import { liveCopy } from '@/lib/copy-live';
+import { housekeep } from '@/lib/housekeeping';
 import { stir } from '@/lib/room/residents';
 import { isSeat, nameInRoom, olderRoom, openSeat, postToRoom, seatWritable, syncRoom } from '@/lib/room/room';
 import { arrivalOf } from '@/lib/room/server';
@@ -60,6 +61,7 @@ export function OPTIONS(): Response {
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ op: string }> }): Promise<Response> {
+  housekeep();
   const { op } = await ctx.params;
   let body: Record<string, unknown>;
   try {

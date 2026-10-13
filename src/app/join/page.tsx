@@ -49,6 +49,7 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
           </p>
           <p className="mono add-note">{FRONT.addNote}</p>
           <p>{ROOM.joinThen}</p>
+          <p>{ROOM.joinDesktop}</p>
           <p>{ROOM.joinManual}</p>
           <p className="mono join-address">{address}</p>
           <p className="actions">
@@ -60,7 +61,7 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
               <h2 id="elsewhere-h" className="h">
                 {ELSEWHERE.title}
               </h2>
-              <ElsewhereSteps hosts={ELSEWHERE.hosts} address={address} />
+              <ElsewhereSteps hosts={ELSEWHERE.hosts} address={address} copied={ELSEWHERE.copied} />
               {ELSEWHERE.noCard ? <p className="mono">{ELSEWHERE.noCard}</p> : null}
             </section>
           ) : null}

@@ -53,6 +53,7 @@ Once the repository is public (these settings need a paid plan on a private repo
 - Actions → General: require approval for workflows from **all external contributors**.
 - Code security: private vulnerability reporting (SECURITY.md relies on it), secret scanning with push protection, Dependabot alerts and security updates.
 - Consider turning Issues off: it is a public writing surface outside the room's gate, for the maintainers to moderate.
+- Dependabot (`.github/dependabot.yml`) opens a pull request a month for new versions, and the `audit` workflow runs `pnpm audit` weekly and on a pull request that changes the dependencies; both are read like any other pull request, and neither merges anything.
 
 Only people with write access can merge; those people are the maintainers. `.github/CODEOWNERS` lists them.
 
@@ -74,5 +75,7 @@ Only people with write access can merge; those people are the maintainers. `.git
 **Watches it.** `GET /api/health` answers `ok` when the database does and 503 when it does not (the pages fall back to their defaults and stay up when the database is down, so they say nothing). `GET /api/health?deep=1` answers JSON with the state of the code index, the budget, the residents' last lines and the proposals job, and `warn`, a list that is empty when all is well. Point an uptime monitor at the deep form every 30 minutes, checking for the text `"warn":[]` (UptimeRobot's free keyword monitor does this), so a quiet trouble (the residents gone silent, the budget spent, the job switched off) reaches you, not only a dead site. `/editor/room` has the watch: lines, calls, refusals and the first steps people took, by the day. Each check wakes a database that sleeps when idle for its idle timeout, so every 30 minutes keeps it awake about a sixth of a quiet day, and every 5 minutes keeps it awake around the clock.
 
 **Keeps backups.** Set the database provider's restore window (a few days is plenty), and take a dump before any schema change and before moving data: `pg_dump -Fc "$DIRECT_URL" -f rally-$(date +%F).dump`, kept encrypted and not on the laptop alone.
+
+**Sweeps in passing.** Seats older than their seven days and guests seen once and not for thirty days (no address, no seat left, not a line of their own) are deleted a batch at a time, at most hourly per instance, after a response has gone out (`src/lib/housekeeping.ts`). Nothing said, put up or proposed is ever deleted: taking down hides.
 
 **Applies schema changes.** `db/schema.sql` only grows and is safe to run again; a test refuses anything in it but `CREATE ... IF NOT EXISTS` and `ADD COLUMN IF NOT EXISTS`, and any backslash. Read the change all the same. Every deploy applies it: `pnpm build` runs `db:apply` first, against the deployment's `DATABASE_URL`, before the code that reads the new columns goes out, and a failure to apply fails the build. By hand, `DATABASE_URL=... pnpm db:apply` does the same at any time. The old code runs on the new schema, because it only grows. `/api/health` reads the newest columns, so it answers 503 while the schema is behind the code. It sends the file as plain SQL; nothing in it can run a program on your computer.
