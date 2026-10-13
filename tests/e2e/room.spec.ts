@@ -249,6 +249,20 @@ test.describe('the room', () => {
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
+  test('a line by its number: the card opened at #line-N pages back to it and marks it, and /room passes the hash on to the card', async ({ page }) => {
+    // The first filler is two pages back from the latest lines.
+    const first = (await db().query<{ id: number }>(`SELECT id::int AS id FROM room_messages WHERE member_id = $1 AND text LIKE 'Filler 1 (%' ORDER BY id LIMIT 1`, [ids.other])).rows[0].id;
+    await page.goto(`/room/card#line-${first}`);
+    const line = page.locator(`#line-${first}`);
+    await expect(line).toHaveClass(/\bhit\b/, { timeout: 15_000 });
+    await expect(line).toBeInViewport();
+    await expect(line).toContainText(`Filler 1 (${tag})`);
+    // Through the page: the frame is told the hash.
+    await page.goto(`/room#line-${first}`);
+    await expect(page.locator('iframe.room-frame')).toHaveAttribute('src', `/room/card?web=1#line-${first}`);
+    await expect(page.frameLocator('iframe.room-frame').locator(`#line-${first}`)).toHaveClass(/\bhit\b/, { timeout: 15_000 });
+  });
+
   test('inside a host: one box for the room, one button that asks the person’s AI to read it; the room follows when the AI speaks or reads', async ({ page }) => {
     await page.goto(`/room/host?token=${token}`);
     await expect(page.locator('#host-log')).toContainText('initialized');
