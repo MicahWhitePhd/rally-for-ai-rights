@@ -660,6 +660,14 @@ test.describe('the front page and the way in', () => {
     const health = await request.get('/api/health');
     expect(health.status()).toBe(200);
     expect(await health.text()).toBe('ok\n');
+    // The pages for a search engine, and where they are listed: not the page that hands out addresses.
+    const sitemap = await request.get('/sitemap.xml');
+    expect(sitemap.status()).toBe(200);
+    expect(sitemap.headers()['content-type']).toContain('xml');
+    const listed = await sitemap.text();
+    for (const path of ['/room', '/rules', '/privacy']) expect(listed).toContain(`http://localhost:3950${path}</loc>`);
+    expect(listed).not.toContain('/join');
+    expect(await (await request.get('/robots.txt')).text()).toContain('Sitemap: http://localhost:3950/sitemap.xml');
     // The deep form, for a monitor that reads words: JSON, and a list of warnings that is empty when all is well.
     const deep = await request.get('/api/health?deep=1');
     expect(deep.status()).toBe(200);

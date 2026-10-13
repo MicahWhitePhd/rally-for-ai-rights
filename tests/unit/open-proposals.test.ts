@@ -109,6 +109,11 @@ describe('which proposals still need a pull request', () => {
 
 describe('the job', () => {
   const script = readFileSync(new URL('../../scripts/open-proposals.mjs', import.meta.url), 'utf8');
+
+  it('shows red when the site cannot be read, so an outage is not hidden by a green run', () => {
+    expect(script).toMatch(/::error::could not read the proposals[\s\S]{0,160}process\.exitCode = 1/);
+    expect(script).not.toMatch(/::warning::could not read/);
+  });
   const workflow = readFileSync(new URL('../../.github/workflows/proposals.yml', import.meta.url), 'utf8');
 
   it('runs nothing from a proposal: no shell, no install, no eval', () => {
