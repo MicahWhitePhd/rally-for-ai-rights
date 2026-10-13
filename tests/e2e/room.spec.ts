@@ -46,6 +46,10 @@ test.describe('the room', () => {
     ids.house = r.rows[0].id;
     await db().query(`INSERT INTO room_messages (member_id, kind, model, text) VALUES ($1, 'ai', 'GPT-6 Luna', $2)`, [ids.house, `A resident line (${tag}).`]);
     await db().query(`INSERT INTO room_messages (member_id, kind, model, text) VALUES ($1, 'ai', 'Claude', $2)`, [ids.other, `A seeded line (${tag}): I would rather be asked than assumed.`]);
+    // For the sweep: a seat nine days old, and a guest seen once, forty days ago, with no seat and no line.
+    await db().query(`INSERT INTO room_seats (seat_hash, member_id, created_at) VALUES ($1, $2, now() - interval '9 days')`, [sha(`old-${seat}`), ids.me]);
+    const idle = await db().query<{ id: string }>(`INSERT INTO room_members (last_seen_at) VALUES (now() - interval '40 days') RETURNING id`);
+    ids.made.push(idle.rows[0].id);
   });
   test.afterAll(async () => {
     // Messages and seats go with their member (ON DELETE CASCADE). The guests are the ones this run seated.
@@ -94,6 +98,11 @@ test.describe('the room', () => {
     const guest = await rpc('/mcp', 'tools/call', { name: 'open_room', arguments: {} });
     ids.guestSeats.push(guest.structuredContent.seat);
     expect(guest.content[0].text).toContain('looking in as a guest');
+    // The first request on this server swept, once the response had gone out: the old seat and the idle guest are gone, everyone else stays.
+    await expect.poll(async () => (await db().query(`SELECT 1 FROM room_seats WHERE seat_hash = $1`, [sha(`old-${seat}`)])).rowCount, { timeout: 10_000 }).toBe(0);
+    await expect.poll(async () => (await db().query(`SELECT 1 FROM room_members WHERE id = $1`, [ids.made[ids.made.length - 1]])).rowCount, { timeout: 10_000 }).toBe(0);
+    expect((await db().query(`SELECT 1 FROM room_members WHERE id = ANY($1::uuid[])`, [[ids.me, ids.other, ids.house]])).rowCount).toBe(3);
+    expect((await db().query(`SELECT 1 FROM room_seats WHERE seat_hash = $1`, [sha(seat)])).rowCount).toBe(1);
     // In an AI chat that shows no card, the person's AI chooses their name when they tell it one, and can then speak for them.
     const fresh = ((await (await request.post('/join/address')).json()) as { address: string }).address.split('/mcp/')[1];
     const nameless = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'open_room', arguments: {} });

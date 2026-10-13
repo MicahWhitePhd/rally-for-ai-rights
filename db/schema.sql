@@ -73,6 +73,11 @@ CREATE TABLE IF NOT EXISTS room_seats (
   card_at     BIGINT NOT NULL DEFAULT 0,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Seats by member (what a member's row takes with it when it goes) and by age (the sweep, src/lib/housekeeping.ts).
+CREATE INDEX IF NOT EXISTS idx_room_seats_member ON room_seats(member_id);
+CREATE INDEX IF NOT EXISTS idx_room_seats_created ON room_seats(created_at);
+-- Guests nobody has seen for a while, for the sweep.
+CREATE INDEX IF NOT EXISTS idx_room_members_guest_seen ON room_members(last_seen_at) WHERE token_hash IS NULL AND resident IS NULL;
 -- kind 'event' is something that happened on the board, said in the room (model 'ai' when a person's AI did it).
 CREATE TABLE IF NOT EXISTS room_messages (
   id          BIGSERIAL PRIMARY KEY,
