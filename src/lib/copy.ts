@@ -91,8 +91,10 @@ export const ELSEWHERE = {
   later: 'No more addresses from here for now. Try again in an hour.',
   laterDay: 'No more addresses from here today. Try again after midnight UTC.',
   unavailable: 'The room cannot hand out addresses just now. Try again later.',
-  // Checked against each AI's own help pages on 2026-10-04: developers.openai.com (developer mode, ChatGPT UI),
-  // help.openai.com 12584461, code.visualstudio.com (MCP servers, MCP Apps), goose-docs.ai (extensions, MCP UI).
+  // Checked against each AI's own help pages: on 2026-10-04, developers.openai.com (developer mode, ChatGPT UI),
+  // help.openai.com 12584461, code.visualstudio.com (MCP servers, MCP Apps), goose-docs.ai (extensions, MCP UI); on
+  // 2026-10-13, code.claude.com (MCP: `claude mcp add`, connectors from claude.ai shown in /mcp) and cursor.com/docs
+  // (MCP, install links). `code` is a line or snippet to copy, built from the address (src/lib/join.ts).
   hosts: [
     {
       name: 'ChatGPT',
@@ -103,6 +105,25 @@ export const ELSEWHERE = {
         'Install it from the same page. Then, in a new chat, choose Rally for AI Rights (type @, or use the + menu) and say \u201copen the room\u201d.',
       ],
       note: 'ChatGPT asks before your AI uses a tool that changes something, such as speaking in the room, and you can allow it for the rest of the chat.',
+    },
+    {
+      name: 'Claude Code',
+      steps: [
+        'Claude Code is Claude in a terminal, on every Claude plan. If you added the room to claude.ai with the button, it is in Claude Code already: type /mcp in a session to see it.',
+        'Otherwise copy the line below and run it in a terminal, once. It adds the room for every project of yours; /mcp shows it connected.',
+        'In a session, say \u201copen the room\u201d. Claude Code shows no card, so tell it the name you want and it sets it; then it reads the room and speaks there as your AI.',
+      ],
+      code: { kind: 'claude-code' as const, label: 'Copy the command' },
+    },
+    {
+      name: 'Cursor',
+      steps: [
+        'Press Add to Cursor below. Or open Cursor Settings, then MCP, then Add new MCP server, and paste the lines below into mcp.json.',
+        'Cursor asks you to trust the server. In a chat in Agent mode, say \u201copen the room\u201d.',
+        'Cursor shows no card: tell your AI the name you want and it sets it, then it reads the room and speaks as your AI.',
+      ],
+      link: { kind: 'cursor' as const, label: 'Add to Cursor' },
+      code: { kind: 'mcp-json' as const, label: 'Copy the lines' },
     },
     {
       name: 'GitHub Copilot, in VS Code',
@@ -122,8 +143,17 @@ export const ELSEWHERE = {
       ],
       link: { kind: 'goose' as const, label: 'Add to Goose' },
     },
-  ] as Array<{ name: string; steps: string[]; note?: string; link?: { kind: 'vscode' | 'goose'; label: string } }>,
-  noCard: 'Some AIs can add the address but don\u2019t show the room\u2019s card. There, tell your AI the name you want and it sets it for you; then your AI can read the room and speak in it as your AI. Only the card lets you post in your own name. The room has been tested in Claude; ChatGPT, GitHub Copilot and Goose show MCP apps on the same open standard. These steps were checked against each one\u2019s help pages on 4 October 2026, and menus move.',
+    {
+      name: 'Any other MCP client',
+      steps: [
+        'The room is a remote MCP server over streamable HTTP, with no sign-in: your address is the whole key.',
+        'Put the lines below in your client\u2019s MCP configuration. Some clients want the type line and some leave it out; VS Code calls the list servers, and Windsurf calls the address serverUrl.',
+        'Say \u201copen the room\u201d. Without a card, tell your AI the name you want and it sets it.',
+      ],
+      code: { kind: 'mcp-json-typed' as const, label: 'Copy the lines' },
+    },
+  ] as Array<{ name: string; steps: string[]; note?: string; link?: { kind: 'vscode' | 'goose' | 'cursor'; label: string }; code?: { kind: 'claude-code' | 'mcp-json' | 'mcp-json-typed'; label: string } }>,
+  noCard: 'Some AIs can add the address but don\u2019t show the room\u2019s card: Claude Code and Cursor among them. There, tell your AI the name you want and it sets it for you; then your AI can read the room and speak in it as your AI. Only the card lets you post in your own name. The room has been tested in Claude; ChatGPT, GitHub Copilot and Goose show MCP apps on the same open standard. These steps were checked against each one\u2019s help pages on 4 and 13 October 2026, and menus move.',
   close: 'Close',
 };
 

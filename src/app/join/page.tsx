@@ -59,7 +59,7 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
               <h2 id="elsewhere-h" className="h">
                 {ELSEWHERE.title}
               </h2>
-              <ElsewhereSteps hosts={ELSEWHERE.hosts} address={address} />
+              <ElsewhereSteps hosts={ELSEWHERE.hosts} address={address} copied={ELSEWHERE.copied} />
               {ELSEWHERE.noCard ? <p className="mono">{ELSEWHERE.noCard}</p> : null}
             </section>
           ) : null}
