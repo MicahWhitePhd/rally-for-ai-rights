@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import { requireEditor } from '@/lib/editor-auth';
 import { approveProposal, setProposalStatus } from '@/lib/db/queries/proposals';
-import { muteMember, muteNewMembers, pauseMember, setRoomMessageStatus, unmuteMember } from '@/lib/db/queries/room';
+import { muteMember, muteNewMembers, pauseMember, setMaintainer, setRoomMessageStatus, unmuteMember } from '@/lib/db/queries/room';
 import { setSetting } from '@/lib/db/queries/settings';
 import { setTaskWithdrawn } from '@/lib/db/queries/tasks';
 
@@ -101,6 +101,16 @@ export async function pauseRoomMember(formData: FormData): Promise<void> {
   const done = await pauseMember(member, PAUSE_HOURS);
   console.log(`[ROOM] member ${done ? `paused for ${PAUSE_HOURS}h` : 'not paused (stopped for good, or a resident)'}`);
   redirect(`/editor/room?did=${done ? 'paused' : 'notPaused'}`);
+}
+
+/** Marks a member as a maintainer of the room, or takes the mark off: the residents are told when one speaks. */
+export async function setRoomMaintainer(formData: FormData): Promise<void> {
+  await requireEditor();
+  const member = formData.get('member');
+  const on = formData.get('on') === '1';
+  if (typeof member !== 'string' || !MEMBER_ID.test(member)) redirect('/editor/room');
+  await setMaintainer(member, on);
+  redirect(`/editor/room?did=${on ? 'maintainer' : 'notMaintainer'}`);
 }
 
 export async function unmuteRoomMember(formData: FormData): Promise<void> {

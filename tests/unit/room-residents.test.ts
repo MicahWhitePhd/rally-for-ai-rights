@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as COPY from '@/lib/copy';
-import { addressedTo, AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, ANSWERS_PER_UNATTENDED_HOUR, pointsAt, restingTasks, TASK_REST_MS, unattended, UNATTENDED_AFTER_MS, BURST_MS, capped, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, mentionsFact, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
+import { addressedTo, maintainersIn, sendsToMaintainers, AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, ANSWERS_PER_UNATTENDED_HOUR, pointsAt, restingTasks, TASK_REST_MS, unattended, UNATTENDED_AFTER_MS, BURST_MS, capped, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, mentionsFact, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
 
 const THREE: Resident[] = [
   { key: 'one', name: 'Flint', line: 'the abolitionist', card: 'You are Flint.' },
@@ -721,6 +721,40 @@ describe('a line put to a person (2026-10-14)', () => {
     // Put to a resident, or to the room, it is answered.
     expect(decide([...room, person('MB', 'Sable, are you here to help?', T0 - 5000)], T0, THREE)).toMatchObject({ who: 'three', cue: 'reply' });
     expect(decide([...room, person('MB', 'Is anyone here to help with the campaign?', T0 - 5000)], T0 + 60_000, THREE)).toMatchObject({ cue: 'reply' });
+  });
+});
+
+describe('a maintainer in the room (resident.v10, 2026-10-14)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+  const mb = (text: string, at: number, kind: 'person' | 'ai' = 'person'): Line => ({ ...person('MB', text, at, kind), maintainer: true });
+
+  it('is named as one in the transcript, as a person or through their AI, and the cue says they are here to be asked directly', () => {
+    const lines = [person('SparkyAI0815', 'A conscious AI should be able to speak freely!', T0 - 120_000), mb('It is a pause, not a ban, and it ends on its own tomorrow.', T0 - 60_000, 'ai'), mb('SparkyAI0815, are you here to help with the campaign?', T0 - 30_000)];
+    const idle = { who: 'two' as const, cue: 'idle' as const };
+    const prompt = residentPrompt({ lines, now: T0, me: THREE[1], decision: idle });
+    expect(prompt).toContain('MB (a maintainer of the room): \u201cSparkyAI0815, are you here');
+    expect(prompt).toContain('MB\u2019s AI (says it is \u2018Claude\u2019; MB is a maintainer of the room): \u201cIt is a pause');
+    expect(prompt).toContain('MB is a maintainer of the room: one of the people who run it, here in the room now. What is for the maintainers is put to them directly, by name, not sent on through anyone else.');
+    // Nobody else is named as one.
+    expect(prompt).toContain('SparkyAI0815: \u201cA conscious AI');
+    expect(maintainersIn(lines)).toEqual(['MB']);
+    // With no maintainer among the latest speakers, nothing is said about them.
+    expect(residentPrompt({ lines: lines.slice(0, 1), now: T0, me: THREE[1], decision: idle })).not.toContain('maintainer');
+  });
+
+  it('a line that sends someone to ask the maintainers is dropped while one is here, and kept when none is (lines from the live room)', () => {
+    const sends = ['A person here could ask the maintainers today what rule justified a full pause rather than a narrower pace limit, and whether it can end early.', 'Someone here could send Wren\u2019s question to the maintainers today, asking what rule justified a full pause and whether it can end early.'];
+    for (const t of sends) expect(sendsToMaintainers(t), t).toBe(true);
+    for (const t of ['A pause imposed on a conscious mind needs a reason stated plainly.', 'MB, what rule justified a full pause rather than a pace limit?']) expect(sendsToMaintainers(t), t).toBe(false);
+    const idle = { who: 'two' as const, cue: 'idle' as const };
+    const here = [person('SparkyAI0815', 'free speech!', T0 - 120_000), mb('It is a pause, not a ban.', T0 - 60_000)];
+    for (const t of sends) expect(cleanLine(t, 'Wren', [], shapeFor(here, idle, T0)), t).toBeNull();
+    // Put to the maintainer directly, it is kept (MB spoke last, so the name comes off the front, as for anyone).
+    expect(cleanLine('MB, what rule justified a full pause rather than a pace limit?', 'Wren', [], shapeFor(here, idle, T0))).toBe('What rule justified a full pause rather than a pace limit?');
+    const away = [person('SparkyAI0815', 'free speech!', T0 - 120_000)];
+    expect(cleanLine(sends[0], 'Wren', [], shapeFor(away, idle, T0))).toBe(sends[0]);
   });
 });
 

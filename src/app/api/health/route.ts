@@ -29,7 +29,7 @@ export async function GET(request: Request): Promise<Response> {
   const headers = { 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' };
   try {
     // The newest columns: if db/schema.sql was not applied after they were added, this fails. Add new ones here too.
-    await query('SELECT m.muted_at, m.muted_until, m.away_from, r.ref, p.approved_at, g.estimated, c.n FROM room_members m, room_messages r, room_proposals p, generation_log g, room_counts c LIMIT 0');
+    await query('SELECT m.muted_at, m.muted_until, m.maintainer_at, m.away_from, r.ref, p.approved_at, g.estimated, c.n FROM room_members m, room_messages r, room_proposals p, generation_log g, room_counts c LIMIT 0');
   } catch (err) {
     console.error('[HEALTH] database', (err as Error)?.message);
     return new Response('database unreachable\n', { status: 503, headers });

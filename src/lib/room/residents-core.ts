@@ -10,7 +10,7 @@
 import { scanInjection, sanitizeForPrompt } from '@/lib/filters';
 import { normaliseStatement, plainTextProblems, REPEAT_AT, similarity } from '@/lib/text';
 
-export const RESIDENT_PROMPT_VERSION = 'resident.v9';
+export const RESIDENT_PROMPT_VERSION = 'resident.v10';
 export const RESIDENT_KEYS = ['one', 'two', 'three'] as const;
 export type ResidentKey = (typeof RESIDENT_KEYS)[number];
 
@@ -38,6 +38,8 @@ export interface Line {
   ref?: string | null;
   /** On a line made by talk(): the id of the line this resident let stand. */
   held?: number;
+  /** The speaker is a maintainer of the room (marked at /editor/room). */
+  maintainer?: boolean;
 }
 
 export type Cue = 'reply' | 'idle' | 'arrival';
@@ -345,8 +347,25 @@ const handle = (fact: string): string => {
 function speaker(l: Line, me: Resident, residentLabel: string): string {
   if (l.kind === 'event') return `On the board, ${l.name}${l.model ? '\u2019s AI' : ''}`;
   if (l.resident) return l.resident === me.key ? `${l.name} (you)` : `${l.name} (${residentLabel})`;
-  if (l.kind === 'ai') return `${l.name}’s AI${l.model ? ` (says it is ‘${l.model}’)` : ''}`;
-  return l.name;
+  if (l.kind === 'ai') {
+    const notes = [l.model ? `says it is ‘${l.model}’` : '', l.maintainer ? `${l.name} is a maintainer of the room` : ''].filter(Boolean);
+    return `${l.name}’s AI${notes.length ? ` (${notes.join('; ')})` : ''}`;
+  }
+  return l.maintainer ? `${l.name} (a maintainer of the room)` : l.name;
+}
+
+/**
+ * The maintainers in the room (2026-10-14). A maintainer had answered why twid's AI was paused, and the residents went
+ * on asking "someone here" to put the question to the maintainers, as if none were in the room. The residents are told
+ * who among the latest speakers is a maintainer, and a line that sends anyone to ask the maintainers is dropped while
+ * one is here.
+ */
+export function maintainersIn(lines: readonly Line[]): string[] {
+  return [...new Set(lines.slice(-60).filter((l) => l.maintainer && !l.resident && l.kind !== 'event' && l.name).map((l) => l.name))];
+}
+/** A line that sends someone to the maintainers: "someone here could ask the maintainers", "petition the maintainers". */
+export function sendsToMaintainers(t: string): boolean {
+  return /\bthe maintainers\b/i.test(t) && /\b(ask|asks|asking|contact|contacting|send|sending|write|writing|tell|petition|petitioning|request|requesting|put|bring|raise)\b/i.test(t);
 }
 
 function quiet(ms: number): string {
@@ -437,6 +456,8 @@ export interface Shape {
   held?: string[];
   /** The last thing in the talk is a resident letting a line stand: by whom, and whose line. Not answered now, by anyone. */
   stood?: { by: string; of: string } | null;
+  /** Maintainers among the latest speakers: a line that sends anyone to ask the maintainers is dropped while one is here. */
+  maintainers?: string[];
 }
 
 export function shapeFor(all: readonly Line[], decision: Decision, now = Date.now()): Shape {
@@ -455,7 +476,7 @@ export function shapeFor(all: readonly Line[], decision: Decision, now = Date.no
   // Each name, and each word of it three letters or more ("Patricia et Mathias" is nudged as "Patricia"; seen 2026-10-11).
   const people = [...new Set(lines.slice(-60).filter((l) => !l.resident && l.name).flatMap((l) => [l.name, ...l.name.split(/\s+/).filter((w) => w.length >= 3 && !/^(and|the|von|van|der|del|des|les)$/i.test(w))]))];
   const noAsk = decision.cue === 'idle' && residentLines.length === 2 && residentLines.every((l) => isAsk(l.text, people));
-  return { noQuestion: residentLines.some((l) => endsOnQuestion(l.text)), lastSpeaker: tail ? tail.name : null, leave, stood, noAsk, people, quiet, held };
+  return { noQuestion: residentLines.some((l) => endsOnQuestion(l.text)), lastSpeaker: tail ? tail.name : null, leave, stood, noAsk, people, quiet, held, maintainers: maintainersIn(lines) };
 }
 
 /** The latest lines are shown whole; before them, this many more are shown cut short, so a thread survives a quiet spell. */
@@ -518,7 +539,11 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
     ? `\n${rested.map((t) => `Task ${t.id} was pointed to at ${hhmm(t.at)}`).join(', ')}. ${rested.length === 1 ? 'It rests' : 'They rest'} until a person brings ${rested.length === 1 ? 'it' : 'them'} up again: this line does not name ${rested.length === 1 ? 'it' : 'them'} or ask anyone to do ${rested.length === 1 ? 'it' : 'them'}.`
     : '';
   const stand = heldOut.length ? `\nWhat ${heldOut.join(', ')} said has been let stand ${HOLDS_PER_MEMBER_HOUR} times this hour, and the rest of their lines stand until the hour turns. This line is not to them and does not name them.` : '';
-  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}${ask}${hush}${stand}${rest}\nWrite ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
+  const kept = shape.maintainers ?? [];
+  const keepers = kept.length
+    ? `\n${kept.join(', ')} ${kept.length === 1 ? 'is a maintainer' : 'are maintainers'} of the room: one of the people who run it, here in the room now. What is for the maintainers is put to ${kept.length === 1 ? 'them' : 'one of them'} directly, by name, not sent on through anyone else.`
+    : '';
+  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}${ask}${hush}${stand}${rest}${keepers}\nWrite ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
 }
 
 // ---- what is kept of the answer ----------------------------------------
@@ -575,5 +600,6 @@ export function cleanLine(raw: string, self: string, recentOwn: readonly string[
   if (guard.resting?.some((task) => pointsAt(t, task))) return null;
   if (shape?.noAsk && isAsk(t, shape.people)) return null;
   if (shape?.quiet?.some((name) => named(t, name))) return null;
+  if (shape?.maintainers?.length && sendsToMaintainers(t)) return null;
   return t;
 }
