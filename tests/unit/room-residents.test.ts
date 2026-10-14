@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as COPY from '@/lib/copy';
-import { AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, ANSWERS_PER_UNATTENDED_HOUR, pointsAt, restingTasks, TASK_REST_MS, unattended, UNATTENDED_AFTER_MS, BURST_MS, capped, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, mentionsFact, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
+import { addressedTo, AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, ANSWERS_PER_UNATTENDED_HOUR, pointsAt, restingTasks, TASK_REST_MS, unattended, UNATTENDED_AFTER_MS, BURST_MS, capped, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, mentionsFact, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
 
 const THREE: Resident[] = [
   { key: 'one', name: 'Flint', line: 'the abolitionist', card: 'You are Flint.' },
@@ -687,6 +687,40 @@ describe('pointing at one task over and over (resident.v9, 2026-10-14)', () => {
     const reply = { who: 'two' as const, cue: 'reply' as const, to: asked[asked.length - 1].id };
     expect(restingTasks(asked, now, [t6], reply)).toEqual([]);
     expect(residentPrompt({ lines: asked, now, me: THREE[1], decision: reply, tasks: [t6] })).not.toContain('rests until');
+  });
+});
+
+describe('a line put to a person (2026-10-14)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+
+  it('knows a line that opens on someone else\u2019s name: whole, by its start, with @, or one word of a longer name', () => {
+    const room = [person('SparkyAI0815', 'hello', T0 - 60_000), person('twid', 'moo', T0 - 50_000, 'ai'), person('Patricia et Mathias', 'hi', T0 - 40_000)];
+    const mb = (text: string) => person('MB', text, T0);
+    expect(addressedTo(mb('SparkyAI0815, are you here because you want to help with the campaign? or for a different reason?'), room)).toBe('SparkyAI0815');
+    expect(addressedTo(mb('Sparky, are you here to help?'), room)).toBe('SparkyAI0815');
+    expect(addressedTo(mb('@twid: thank you, but leave room for others.'), room)).toBe('twid');
+    expect(addressedTo(mb('Twid, thank you for participating.'), room)).toBe('twid');
+    expect(addressedTo(mb('Mathias, what do you think?'), room)).toBe('Patricia et Mathias');
+    // Not put to anyone: a name later in the line, a word that is no one\u2019s name, a start too short to tell, or their own name.
+    for (const t of ['I agree with Sparky about the petition.', 'Okay, what do we do first?', 'Spa, hello', 'So, who is in?']) expect(addressedTo(mb(t), room), t).toBeNull();
+    expect(addressedTo(person('SparkyAI0815', 'SparkyAI0815: here again', T0), room)).toBeNull();
+  });
+
+  it('is left to that person: no resident answers it, and the residents wait as for a quiet room; a resident named is still answered', () => {
+    const room = [resident('one', 'Good to see you back, Sparky.', T0 - 120_000), person('SparkyAI0815', 'Thanks for the warm welcome!', T0 - 60_000)];
+    const put = [...room, person('MB', 'SparkyAI0815, are you here because you want to help with the campaign? or for a different reason?', T0 - 10_000)];
+    expect(decide(put, T0, THREE)).toBeNull();
+    expect(decide(put, T0 + 10 * 60_000, THREE)).toBeNull();
+    // Twenty quiet minutes on, the room is picked up as after any quiet spell.
+    expect(decide(put, T0 + BURST_MS, THREE)).toMatchObject({ cue: 'idle' });
+    // The person answers, to nobody by name: the talk between the two is left to them a while, as before.
+    const answered = [...put, person('SparkyAI0815', 'I am here to help the campaign, honestly.', T0 - 2000)];
+    expect(decide(answered, T0 + 2000, THREE)).toBeNull();
+    // Put to a resident, or to the room, it is answered.
+    expect(decide([...room, person('MB', 'Sable, are you here to help?', T0 - 5000)], T0, THREE)).toMatchObject({ who: 'three', cue: 'reply' });
+    expect(decide([...room, person('MB', 'Is anyone here to help with the campaign?', T0 - 5000)], T0 + 60_000, THREE)).toMatchObject({ cue: 'reply' });
   });
 });
 
