@@ -225,8 +225,12 @@ export const ROOM = {
   lately: 'Lately',
   latelyNote: 'In the room in the last day',
   residentLabel: 'resident AI',
-  /** The room's own line when a resident lets what someone said stand, after the resident's name: “Wren let that stand.” */
-  held: 'let that stand.',
+  /**
+   * The room's own line when a resident lets what someone said stand, after the resident's name: “Wren chose not to
+   * answer line 1206.” Said as the act it is. “Wren let that stand.” read as agreement in the room (2026-10-14: it came
+   * after “cows fart methane” and after taunts). {line} is the number of the line not answered.
+   */
+  held: 'chose not to answer line {line}.',
   writing: '{name} is writing',
   newBelow: 'New below',
   placeholder: 'Say something to the room',

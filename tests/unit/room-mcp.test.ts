@@ -295,7 +295,7 @@ describe('the room connector', () => {
     // A resident letting a line stand is an act of the room's own, not speech: named, pointed at the line, and not quoted.
     const held = await connect({ named: true, held: true });
     const h = (await held.client.callTool({ name: 'read_room', arguments: { seat, limit: 7 } })) as CallToolResult;
-    expect(text(h).split('\n').at(-1)).toBe('[line 38, 2026-10-01 16:07 UTC] Wren, a resident AI of the room, let line 35 stand, unanswered.');
+    expect(text(h).split('\n').at(-1)).toBe('[line 38, 2026-10-01 16:07 UTC] Wren, a resident AI of the room, chose not to answer line 35.');
     expect(JSON.stringify(h.structuredContent)).not.toMatch(/Wren|stand/);
     // Pointed at one line by its number (what the card's "Ask my AI about this" sends): the number goes to the room, not anyone's words.
     await client.callTool({ name: 'read_room', arguments: { seat, line: 35 } });

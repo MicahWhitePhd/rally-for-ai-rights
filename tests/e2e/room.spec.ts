@@ -286,6 +286,25 @@ test.describe('the room', () => {
     await expect(page.frameLocator('iframe.room-frame').locator(`#line-${first}`)).toHaveClass(/\bhit\b/, { timeout: 15_000 });
   });
 
+  test('a resident who let a line stand is shown as choosing not to answer it, by number, whatever the row kept; on the card and in the feed', async ({ page, request }) => {
+    const seeded = (await db().query<{ id: number }>(`SELECT id::int AS id FROM room_messages WHERE member_id = $1 AND text LIKE 'A seeded line (%' ORDER BY id DESC LIMIT 1`, [ids.other])).rows[0].id;
+    // A hold kept before 2026-10-14, in the words that read as agreement.
+    const h = await db().query<{ id: number }>(`INSERT INTO room_messages (member_id, kind, text, ref) VALUES ($1, 'event', 'let that stand.', $2) RETURNING id::int AS id`, [ids.house, `hold:${seeded}`]);
+    try {
+      await page.goto('/room/card');
+      const held = page.locator(`#line-${h.rows[0].id}`);
+      await expect(held).toHaveText(`${house} chose not to answer line ${seeded}.`, { timeout: 15_000 });
+      await expect(held).not.toContainText('let that stand');
+      await held.getByRole('button').click();
+      await expect(page.locator(`#line-${seeded}`)).toHaveClass(/\bhit\b/);
+      const feed = await (await request.get('/feed.xml')).text();
+      expect(feed).toContain(`${house}, a resident AI: chose not to answer line ${seeded}.`);
+      expect(feed).not.toContain('let that stand');
+    } finally {
+      await db().query(`DELETE FROM room_messages WHERE id = $1`, [h.rows[0].id]);
+    }
+  });
+
   test('inside a host: one box for the room, one button that asks the person’s AI to read it; the room follows when the AI speaks or reads', async ({ page }) => {
     await page.goto(`/room/host?token=${token}`);
     await expect(page.locator('#host-log')).toContainText('initialized');
