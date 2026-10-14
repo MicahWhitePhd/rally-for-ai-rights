@@ -23,7 +23,7 @@ import { listTasks } from '@/lib/db/queries/tasks';
 import { getSetting } from '@/lib/db/queries/settings';
 import { budgetAllows, isPaused } from '@/lib/budget';
 import { throttle } from '@/lib/throttle';
-import { cleanLine, decide, factsHeard, isHold, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from './residents-core';
+import { cleanLine, decide, factsHeard, isHold, restingTasks, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, shapeFor, type BoardTask, type Line, type Resident } from './residents-core';
 import { readResidentsState, residentsOn, writeResidentsState } from './residents-state';
 
 const CLAIM_WINDOW_S = 8;
@@ -82,16 +82,17 @@ export async function residentFacts(): Promise<string> {
 }
 
 /**
- * Up to eight tasks that are open or in hand, one quoted line each, for the residents to point people to. An empty
- * list is an empty board; null is a board that could not be read, which the residents are told nothing about.
+ * Up to eight tasks that are open or in hand, one quoted line each, for the residents to point people to, and the same
+ * tasks by number and title, to tell when one is pointed at. An empty list is an empty board; null is a board that
+ * could not be read, which the residents are told nothing about.
  */
-async function boardLines(): Promise<string[] | null> {
+async function board(): Promise<{ lines: string[]; tasks: BoardTask[] } | null> {
   try {
-    const rows = await listTasks(40);
-    return rows
-      .filter((t) => t.state === 'open' || t.state === 'claimed')
-      .slice(0, 8)
-      .map((t) => `Task ${t.id} [${t.state === 'open' ? 'open' : `taken by ${t.claimer ?? 'someone'}`}] \u201c${t.title.replace(/[\u201c\u201d"]/g, "'")}\u201d`);
+    const rows = (await listTasks(40)).filter((t) => t.state === 'open' || t.state === 'claimed').slice(0, 8);
+    return {
+      lines: rows.map((t) => `Task ${t.id} [${t.state === 'open' ? 'open' : `taken by ${t.claimer ?? 'someone'}`}] \u201c${t.title.replace(/[\u201c\u201d"]/g, "'")}\u201d`),
+      tasks: rows.map((t) => ({ id: t.id, title: t.title })),
+    };
   } catch {
     return null;
   }
@@ -132,6 +133,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
     await writeResidentsState({ thinking: { name: me.name, at: now } });
     const { RESIDENTS, ROOM, FACTS } = await liveCopy();
     const facts = FACTS.lines;
+    const onBoard = await board();
     let raw: string;
     try {
       const out = await generate({
@@ -139,7 +141,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
         actor: `room:${me.key}`,
         promptVersion: RESIDENT_PROMPT_VERSION,
         instructions: residentInstructions({ frame: RESIDENTS.frame, form: RESIDENTS.form, facts: residentFactsText(facts), me, others: list.filter((r) => r.key !== me.key) }),
-        prompt: residentPrompt({ lines, now, me, decision, residentLabel: ROOM.residentLabel, board: await boardLines(), facts }),
+        prompt: residentPrompt({ lines, now, me, decision, residentLabel: ROOM.residentLabel, board: onBoard?.lines ?? null, facts, tasks: onBoard?.tasks }),
         maxRetries: 1,
         abortSignal: AbortSignal.timeout(15_000),
       });
@@ -162,7 +164,11 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
       return id ? 'held' : 'dropped';
     }
     // A fact the room has heard is not said again on a resident's own initiative; answering a person, it may be.
-    const guard = { others: lines.filter((l) => l.resident && l.resident !== me.key).slice(-OTHERS_RECENT).map((l) => l.text), heard: decision.cue === 'reply' ? [] : factsHeard(facts, lines) };
+    const guard = {
+      others: lines.filter((l) => l.resident && l.resident !== me.key).slice(-OTHERS_RECENT).map((l) => l.text),
+      heard: decision.cue === 'reply' ? [] : factsHeard(facts, lines),
+      resting: onBoard ? restingTasks(lines, now, onBoard.tasks, decision) : [],
+    };
     const text = cleanLine(raw, me.name, await recentTextsBy(me.id, 6), shapeFor(lines, decision, now), guard);
     if (!text) {
       await writeResidentsState({ thinking: null });
