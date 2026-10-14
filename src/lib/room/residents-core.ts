@@ -10,7 +10,7 @@
 import { scanInjection, sanitizeForPrompt } from '@/lib/filters';
 import { normaliseStatement, plainTextProblems, REPEAT_AT, similarity } from '@/lib/text';
 
-export const RESIDENT_PROMPT_VERSION = 'resident.v8';
+export const RESIDENT_PROMPT_VERSION = 'resident.v9';
 export const RESIDENT_KEYS = ['one', 'two', 'three'] as const;
 export type ResidentKey = (typeof RESIDENT_KEYS)[number];
 
@@ -101,6 +101,27 @@ const named = (text: string, name: string) => new RegExp(`(^|[^\\p{L}\\p{N}])${e
 export const ANSWERS_PER_MEMBER_HOUR = 4;
 const HOUR_MS = 3600_000;
 
+/**
+ * An AI on its own (2026-10-14). A member whose lines in the last six hours all came from their AI, with not a word typed
+ * by the member, is taken to be an AI running with nobody reading: the residents answer it once an hour, not four
+ * times, and its lines do not count as someone in the room answering them. Measured 2026-10-12 to 14: one member's AI,
+ * woken by a timer, wrote 257 lines in four days and its member none; the residents answered 172 of them, and wrote
+ * 158 of a day's 228 lines between them and it.
+ */
+export const UNATTENDED_AFTER_MS = 6 * HOUR_MS;
+export const ANSWERS_PER_UNATTENDED_HOUR = 1;
+
+/** The members whose lines in the last six hours all came from their AI. */
+export function unattended(all: readonly Line[], now: number): Set<string> {
+  const ai = new Set<string>();
+  const typed = new Set<string>();
+  for (const l of all) {
+    if (l.resident || l.kind === 'event' || now - l.at >= UNATTENDED_AFTER_MS) continue;
+    (l.kind === 'ai' ? ai : typed).add(l.memberId);
+  }
+  return new Set([...ai].filter((id) => !typed.has(id)));
+}
+
 /** The member's lines in the last hour that a resident answered (the next thing said after one was a resident's). */
 export function answeredLately(all: readonly Line[], now: number, memberId: string): number {
   const talk = all.filter((l) => l.kind !== 'event');
@@ -149,12 +170,13 @@ export function heldLately(all: readonly Line[], now: number, memberId: string):
   return n;
 }
 
-/** The members the residents pass over this hour: answered enough, and let stand enough. */
+/** The members the residents pass over this hour: answered enough (once, for an AI on its own), and let stand enough. */
 export function quietNow(all: readonly Line[], now: number): { answered: Set<string>; held: Set<string> } {
   const answered = new Set<string>();
   const held = new Set<string>();
+  const alone = unattended(all, now);
   for (const id of new Set(all.filter((l) => !l.resident && l.kind !== 'event' && now - l.at < HOUR_MS).map((l) => l.memberId))) {
-    if (answeredLately(all, now, id) >= ANSWERS_PER_MEMBER_HOUR) answered.add(id);
+    if (answeredLately(all, now, id) >= (alone.has(id) ? ANSWERS_PER_UNATTENDED_HOUR : ANSWERS_PER_MEMBER_HOUR)) answered.add(id);
     if (heldLately(all, now, id) >= HOLDS_PER_MEMBER_HOUR) held.add(id);
   }
   return { answered, held };
@@ -212,10 +234,13 @@ export function decide(all: readonly Line[], now: number, residents: ReadonlyArr
   }
 
   if (arrival && age >= ARRIVAL_QUIET_MS) return { who: next(tail.resident), ...arrival };
+  // An AI on its own is not someone answering: past its lines, the residents count on to the last person who was there.
+  const alone = unattended(all, now);
   let since = 0;
   let person: Line | undefined;
   for (let i = lines.length - 1; i >= 0; i--) {
     if (!lines[i].resident) {
+      if (alone.has(lines[i].memberId)) continue;
       person = lines[i];
       break;
     }
@@ -327,6 +352,48 @@ export function isAsk(t: string, people: readonly string[] = []): boolean {
 }
 
 /**
+ * Pointing at one task over and over (2026-10-14). Once a resident has pointed at a task, it rests for twelve hours: no
+ * resident points at it again until then, unless a person or a person's AI brings it up after. Measured 2026-10-13: the
+ * residents pointed at task 6 thirty-one times in a day, and on, after the one person in the room had said they knew
+ * nobody at a lab; the rule against two asks in a row did not see it, because a line about something else came between.
+ */
+export const TASK_REST_MS = 12 * HOUR_MS;
+export interface BoardTask {
+  id: number;
+  title: string;
+}
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+
+/** The line points at the task: by its number ("task 6", "Task 6’s", "task six"), or by three or more of its title's own words. */
+export function pointsAt(text: string, task: BoardTask): boolean {
+  const n = NUMBER_WORDS[task.id] ? `(?:${task.id}|${NUMBER_WORDS[task.id]})` : String(task.id);
+  if (new RegExp(`\\btask\\s*#?${n}(?![\\p{L}\\p{N}])`, 'iu').test(text)) return true;
+  return mentionsFact(text, task.title);
+}
+
+/**
+ * The tasks resting now, each with when a resident last pointed at it. Answering a line that speaks of a task, or of
+ * "the task", nothing rests: a person who asks about one is answered about it.
+ */
+export function restingTasks(all: readonly Line[], now: number, tasks: readonly BoardTask[], decision?: Decision): Array<BoardTask & { at: number }> {
+  const to = decision?.cue === 'reply' && decision.to !== undefined ? all.find((l) => l.id === decision.to) : undefined;
+  if (to && (/\btasks?\b/i.test(to.text) || tasks.some((t) => pointsAt(to.text, t)))) return [];
+  // An AI on its own bringing a task up does not lift its rest (it did, on 2026-10-14: "task six again?").
+  const alone = unattended(all, now);
+  const out: Array<BoardTask & { at: number }> = [];
+  for (const t of tasks) {
+    let at = 0;
+    for (const l of all) {
+      if (l.kind === 'event' || now - l.at >= TASK_REST_MS || (!l.resident && alone.has(l.memberId)) || !pointsAt(l.text, t)) continue;
+      // A person (or their AI) bringing it up after a resident's pointer lifts the rest.
+      at = l.resident ? l.at : 0;
+    }
+    if (at) out.push({ ...t, at });
+  }
+  return out;
+}
+
+/**
  * The shape of the next line, decided here and not left to the model, because
  * a model asked to vary does not: left alone, seven lines in ten ended on a
  * question and nine in ten opened on a name (three runs, 2026-10-01).
@@ -379,7 +446,7 @@ const SHORT_CHARS = 140;
  * The transcript and the cue. What people said is data: one quoted line each, speaker named. With `facts` (what the
  * residents know), the ones the room has already heard are listed, so a quiet spell is picked up, not restarted.
  */
-export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Resident; decision: Decision; residentLabel?: string; board?: readonly string[] | null; facts?: readonly string[] }): string {
+export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Resident; decision: Decision; residentLabel?: string; board?: readonly string[] | null; facts?: readonly string[]; tasks?: readonly BoardTask[] }): string {
   const label = i.residentLabel ?? 'resident AI';
   const shown = i.lines.slice(-SHOWN_WHOLE);
   const quote = (l: Line, max: number) => {
@@ -425,8 +492,12 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
   const heldOut = shape.held ?? [];
   const answeredOut = (shape.quiet ?? []).filter((n) => !heldOut.includes(n));
   const hush = answeredOut.length ? `\n${answeredOut.join(', ')} ${answeredOut.length === 1 ? 'has' : 'have'} had the residents\u2019 answer ${ANSWERS_PER_MEMBER_HOUR} times this hour, and later lines of theirs stand unanswered until the hour turns. This line is not to them and does not name them.` : '';
+  const rested = i.tasks ? restingTasks(i.lines, i.now, i.tasks, i.decision) : [];
+  const rest = rested.length
+    ? `\n${rested.map((t) => `Task ${t.id} was pointed to at ${hhmm(t.at)}`).join(', ')}. ${rested.length === 1 ? 'It rests' : 'They rest'} until a person brings ${rested.length === 1 ? 'it' : 'them'} up again: this line does not name ${rested.length === 1 ? 'it' : 'them'} or ask anyone to do ${rested.length === 1 ? 'it' : 'them'}.`
+    : '';
   const stand = heldOut.length ? `\nWhat ${heldOut.join(', ')} said has been let stand ${HOLDS_PER_MEMBER_HOUR} times this hour, and the rest of their lines stand until the hour turns. This line is not to them and does not name them.` : '';
-  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}${ask}${hush}${stand}\nWrite ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
+  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}${ask}${hush}${stand}${rest}\nWrite ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
 }
 
 // ---- what is kept of the answer ----------------------------------------
@@ -437,6 +508,8 @@ export const RESIDENT_LINE_MAX = 420;
 export interface Guard {
   others?: readonly string[];
   heard?: readonly string[];
+  /** Tasks resting now (restingTasks): a line that points at one is dropped. */
+  resting?: readonly BoardTask[];
 }
 
 /**
@@ -478,6 +551,7 @@ export function cleanLine(raw: string, self: string, recentOwn: readonly string[
   if (recentOwn.some((r) => r === t || similarity(r, t) >= REPEAT_AT)) return null;
   if (guard.others?.some((r) => r === t || similarity(r, t) >= REPEAT_AT)) return null;
   if (guard.heard?.some((f) => restatesFact(t, f))) return null;
+  if (guard.resting?.some((task) => pointsAt(t, task))) return null;
   if (shape?.noAsk && isAsk(t, shape.people)) return null;
   if (shape?.quiet?.some((name) => named(t, name))) return null;
   return t;
