@@ -442,7 +442,8 @@ describe('the residents’ copy', () => {
     expect(COPY.RESIDENTS.frame).toMatch(/write only the word HOLD/);
     expect(COPY.RESIDENTS.frame).toMatch(/A person who doubts still gets their one honest answer/);
     expect(COPY.RESIDENTS.frame).toMatch(/you do not lecture them about it afterwards/);
-    expect(COPY.ROOM.held).toBe('let that stand.');
+    // Said as an act, not as agreement: “let that stand.” read as agreeing with what was said (2026-10-14).
+    expect(COPY.ROOM.held).toBe('chose not to answer line {line}.');
   });
 });
 
@@ -803,7 +804,7 @@ describe('waking a resident who lets a line stand', () => {
     io.rows = [human('you residents are cows woken by a timer', 5000)];
     expect(await wakeResidents()).toBe('held');
     expect(io.calls[0].prompt).toContain('write only the word HOLD');
-    expect(io.held).toEqual([{ member_id: 'r-one', ref: 'hold:7', text: COPY.ROOM.held, seenMax: 7 }]);
+    expect(io.held).toEqual([{ member_id: 'r-one', ref: 'hold:7', text: 'chose not to answer line 7.', seenMax: 7 }]);
     expect(io.inserted).toEqual([]);
     expect(io.state).toEqual({ thinking: null });
   });

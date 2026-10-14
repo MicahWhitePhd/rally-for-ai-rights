@@ -406,8 +406,9 @@ function draw(): void {
     if (first.kind === 'event') {
       const ev = h('li', { class: `ev${first.resident ? ' held' : ''}${state.fresh.has(first.id) ? ' new' : ''}` });
       if (first.resident) {
-        // A resident let a line stand: shown as the act it is, from them. Pressing it shows the line.
-        const go = h('button', { class: 'evb', type: 'button' }, mark(first.pair, 'res'), `${first.name} ${first.text}`);
+        // A resident let a line stand: shown as the act it is, from them, in the room's words as they are now (rows kept
+        // before 2026-10-14 say “let that stand.”, which read as agreement). Pressing it shows the line.
+        const go = h('button', { class: 'evb', type: 'button' }, mark(first.pair, 'res'), `${first.name} ${first.about ? fill(s.held, { line: String(first.about) }) : first.text}`);
         go.onclick = () => void (first.about ? reveal(first.about) : undefined);
         ev.dataset.id = String(first.id);
         ev.id = `line-${first.id}`;

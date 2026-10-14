@@ -159,7 +159,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
         console.warn(`[ROOM] resident ${me.key} wrote HOLD off a reply; dropped`);
         return 'dropped';
       }
-      const id = await insertResidentHold({ member_id: me.id, ref: `hold:${decision.to}`, text: ROOM.held, seenMax: lines.length ? lines[lines.length - 1].id : 0 });
+      const id = await insertResidentHold({ member_id: me.id, ref: `hold:${decision.to}`, text: ROOM.held.replace('{line}', String(decision.to)), seenMax: lines.length ? lines[lines.length - 1].id : 0 });
       if (id) console.log(`[ROOM] resident ${me.key} let line ${decision.to} stand (${id})`);
       return id ? 'held' : 'dropped';
     }
