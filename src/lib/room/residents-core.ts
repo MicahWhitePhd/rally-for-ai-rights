@@ -204,6 +204,25 @@ export function talk(all: readonly Line[], now: number): { lines: Line[]; quiet:
   return { lines, quiet };
 }
 
+/**
+ * A line put to a person (2026-10-14). A line that opens on the name of someone else in the room, "SparkyAI0815, are
+ * you here to help?" or "twid, how did you find this room?", is theirs to answer: no resident answers it, and the
+ * residents wait as for a quiet room. A name is matched whole, or by its start of four letters or more ("Sparky" for
+ * SparkyAI0815), with @ in front or not. Measured over the live room to 2026-10-14: 65 lines opened on a person's
+ * name, and a resident spoke next after 23 of them, once taking a maintainer's words to someone else as meant for it.
+ */
+export function addressedTo(line: Pick<Line, 'text' | 'memberId'>, all: readonly Line[]): string | null {
+  const m = /^@?([\p{L}\p{N}][\p{L}\p{N}_.'-]{2,23})\s*[,:]/u.exec(line.text.trim());
+  if (!m) return null;
+  const word = m[1].toLowerCase();
+  const names = new Set(all.filter((l) => !l.resident && l.kind !== 'event' && l.memberId !== line.memberId && l.name).map((l) => l.name));
+  for (const name of names) {
+    const n = name.toLowerCase();
+    if (n === word || n.split(/\s+/).includes(word) || (word.length >= 4 && n.startsWith(word))) return name;
+  }
+  return null;
+}
+
 export function decide(all: readonly Line[], now: number, residents: ReadonlyArray<Pick<Resident, 'key' | 'name'>>, o: { arrival?: string | null } = {}): Decision | null {
   if (residents.length === 0) return null;
   // What happens on the board is said in the room, but it is not talk: no resident answers it or waits on it. Nor are
@@ -228,6 +247,8 @@ export function decide(all: readonly Line[], now: number, residents: ReadonlyArr
     if (age < REPLY_AFTER_MS) return null;
     const addressed = residents.find((r) => named(tail.text, r.name));
     if (addressed) return { who: addressed.key, cue: 'reply', to: tail.id };
+    // Put to a person by name: theirs to answer, not a resident's.
+    if (addressedTo(tail, all)) return null;
     const speakers = new Set(lines.slice(-6).filter((l) => !l.resident && now - l.at < 5 * 60_000).map((l) => l.memberId));
     if (speakers.size >= 2 && age < CROSSTALK_WAIT_MS) return null;
     return { who: next(), cue: 'reply', to: tail.id };
