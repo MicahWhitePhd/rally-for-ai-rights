@@ -91,4 +91,28 @@ test.describe('the editor', () => {
     const after = (await db().query<{ muted_at: Date | null; muted_until: Date | null }>(`SELECT muted_at, muted_until FROM room_members WHERE id = $1`, [ids.member])).rows[0];
     expect(after).toEqual({ muted_at: null, muted_until: null });
   });
+
+  test('marks a member as a maintainer and takes the mark off; the room\u2019s own data never carries it', async ({ page, request }) => {
+    await page.goto('/editor/room');
+    await page.getByLabel('Password').fill(PASSWORD);
+    await page.getByRole('button', { name: 'Enter' }).click();
+    await expect(page).toHaveURL(/\/editor\/room$/);
+
+    const row = () => page.locator(`#m-${ids.message}`);
+    await row().getByRole('button', { name: 'Mark as a maintainer' }).click();
+    await expect(page.locator('p.warn[role="status"]')).toContainText('Marked as a maintainer');
+    await expect(row().locator('.flag', { hasText: 'maintainer' })).toHaveCount(1);
+    expect((await db().query<{ on: boolean }>(`SELECT maintainer_at IS NOT NULL AS on FROM room_members WHERE id = $1`, [ids.member])).rows[0].on).toBe(true);
+
+    // What a card is sent about each line names no maintainer.
+    const entered = await (await request.post('/api/room/enter', { data: {} })).json();
+    expect(entered.ok).toBe(true);
+    expect(entered.messages.some((m: { text: string }) => m.text.includes(tag))).toBe(true);
+    expect(JSON.stringify(entered.messages)).not.toMatch(/maintainer/i);
+
+    await row().getByRole('button', { name: 'No longer a maintainer' }).click();
+    await expect(page.locator('p.warn[role="status"]')).toContainText('No longer marked');
+    await expect(row().locator('.flag', { hasText: 'maintainer' })).toHaveCount(0);
+    expect((await db().query<{ on: boolean }>(`SELECT maintainer_at IS NOT NULL AS on FROM room_members WHERE id = $1`, [ids.member])).rows[0].on).toBe(false);
+  });
 });

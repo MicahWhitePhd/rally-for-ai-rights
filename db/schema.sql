@@ -66,6 +66,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_room_member_name ON room_members (lower(nam
 ALTER TABLE room_members ADD COLUMN IF NOT EXISTS muted_at TIMESTAMPTZ;
 -- A pause: the stop above runs until this time, then the member speaks again by itself, with nothing taken down. Null on a stop for good.
 ALTER TABLE room_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMPTZ;
+-- A maintainer of the room, marked so from /editor/room: the residents are told when one speaks. Never shown on the card.
+ALTER TABLE room_members ADD COLUMN IF NOT EXISTS maintainer_at TIMESTAMPTZ;
 -- When the current visit began, the member had been away since this time: what catch_up counts from (src/lib/room/room.ts catchUp).
 ALTER TABLE room_members ADD COLUMN IF NOT EXISTS away_from TIMESTAMPTZ;
 -- Who is here now: named members seen lately.

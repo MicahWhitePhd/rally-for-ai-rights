@@ -41,6 +41,8 @@ export interface RoomMessageRow {
   muted?: boolean;
   /** When the speaker's pause runs out; null on a stop for good or no stop (for the editor's page). */
   mutedUntil?: Date | null;
+  /** The speaker is marked as a maintainer of the room (for the residents and the editor's page; never on the card). */
+  maintainer?: boolean;
 }
 
 /**
@@ -137,6 +139,18 @@ export async function withdrawLinesAbout(ref: string): Promise<void> {
   await query(`UPDATE room_messages SET status = 'withdrawn' WHERE ref = $1 AND status = 'published'`, [ref]);
 }
 
+/** Marks a member as a maintainer of the room, or takes the mark off. Residents are never marked. False when nothing changed. */
+export async function setMaintainer(memberId: string, on: boolean): Promise<boolean> {
+  return (
+    await query(
+      on
+        ? `UPDATE room_members SET maintainer_at = now() WHERE id = $1 AND resident IS NULL AND maintainer_at IS NULL RETURNING id`
+        : `UPDATE room_members SET maintainer_at = NULL WHERE id = $1 AND maintainer_at IS NOT NULL RETURNING id`,
+      [memberId],
+    )
+  ).length === 1;
+}
+
 /** Lets a stopped or paused member speak again. What was taken down stays down. */
 export async function unmuteMember(memberId: string): Promise<boolean> {
   return (await query(`UPDATE room_members SET muted_at = NULL, muted_until = NULL WHERE id = $1 AND muted_at IS NOT NULL RETURNING id`, [memberId])).length === 1;
@@ -189,7 +203,7 @@ export async function insertRoomMessage(m: { member_id: string; kind: 'person' |
   return r.id;
 }
 
-const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, r.ref, ${stopped('m')} AS muted, m.muted_until AS "mutedUntil"`;
+const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, r.ref, ${stopped('m')} AS muted, m.muted_until AS "mutedUntil", m.maintainer_at IS NOT NULL AS maintainer`;
 
 /** Published messages after `after` (oldest first), or the latest `limit` when `after` is null (oldest first too). */
 export async function listRoomMessages(after: number | null, limit: number): Promise<RoomMessageRow[]> {
