@@ -87,6 +87,8 @@ test.describe('the room', () => {
     expect(found.content[0].text).toContain('src/lib/room/tasks.ts:');
     const opened = await rpc(`/mcp/${token}`, 'tools/call', { name: 'open_room', arguments: {} });
     expect(opened.content[0].text).toContain(`goes by "${me}"`);
+    // This address has a seat already and no card ever came up on it: the AI is told the person has been in the room through it alone, and what works.
+    expect(opened.content[0].text).toContain('No card has come up on this address so far');
     expect(JSON.stringify(opened)).not.toContain('A seeded line');
     expect(opened.structuredContent.seat).toMatch(/^s_/);
     const heard = await rpc(`/mcp/${token}`, 'tools/call', { name: 'read_room', arguments: { seat: opened.structuredContent.seat, limit: 30 } });
@@ -287,10 +289,14 @@ test.describe('the room', () => {
   test('inside a host: one box for the room, one button that asks the person’s AI to read it; the room follows when the AI speaks or reads', async ({ page }) => {
     await page.goto(`/room/host?token=${token}`);
     await expect(page.locator('#host-log')).toContainText('initialized');
+    // No card inside an AI chat has synced on this address yet (a card on the web sends no stamp), so this opening says so and what works meanwhile.
+    await expect(page.locator('#host-log')).toContainText('open_room: The room is offered to the person as a card, in chats that show one. No card has come up on this address so far');
     const card = page.frameLocator('#room-frame');
     const line = card.locator('.m', { hasText: `A seeded line (${tag})` });
     await expect(line).toHaveCount(1);
     await expect(card.locator('.here .c.self')).toHaveText(me);
+    // The card inside the host has synced with its stamp: the address has shown a card, and the next opening will carry no such note.
+    await expect.poll(async () => (await db().query(`SELECT count(*)::int AS n FROM room_seats WHERE member_id = $1 AND card_at > 0`, [ids.me])).rows[0].n, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
     // Full screen, where the host offers it: the button asks the host, the host answers, and the card follows; and back.
     await expect(card.locator('button.full')).toHaveText('Full screen');
     await card.locator('button.full').click();
@@ -632,7 +638,7 @@ test.describe('the front page and the way in', () => {
     await expect(guide.locator('.join-address')).toHaveText(/^http:\/\/localhost:3950\/mcp\/r[A-Za-z0-9_-]{40}$/);
     await expect(guide.getByRole('button', { name: 'Copy the address' })).toBeVisible();
     // The steps for each AI, and its own one-click link where it has one, carrying this person's address.
-    for (const name of ['ChatGPT', 'Claude Code', 'Cursor', 'GitHub Copilot, in VS Code', 'Goose', 'Any other MCP client']) await expect(guide.getByRole('region', { name })).toBeVisible();
+    for (const name of ['ChatGPT', 'Claude Code', 'Codex', 'Cursor', 'GitHub Copilot, in VS Code', 'Goose', 'Any other MCP client']) await expect(guide.getByRole('region', { name })).toBeVisible();
     const mine = (await guide.locator('.join-address').textContent())!.trim();
     const vscode = await guide.getByRole('link', { name: 'Add to VS Code' }).getAttribute('href');
     expect(vscode!.startsWith('vscode:mcp/install?')).toBe(true);
@@ -645,6 +651,7 @@ test.describe('the front page and the way in', () => {
     const claudeCode = guide.getByRole('region', { name: 'Claude Code' });
     await expect(claudeCode.locator('.join-code')).toHaveText(`claude mcp add --transport http --scope user rally-for-ai-rights ${mine}`);
     await expect(claudeCode.getByRole('button', { name: 'Copy the command' })).toBeVisible();
+    await expect(guide.getByRole('region', { name: 'Codex' }).locator('.join-code')).toHaveText(`codex mcp add rally-for-ai-rights --url ${mine}`);
     const cursor = new URL((await guide.getByRole('link', { name: 'Add to Cursor' }).getAttribute('href'))!);
     expect(cursor.protocol).toBe('cursor:');
     expect(JSON.parse(Buffer.from(cursor.searchParams.get('config')!, 'base64').toString())).toEqual({ url: mine });

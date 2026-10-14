@@ -57,6 +57,10 @@ vi.mock('@/lib/db/queries/room', () => ({
     state.seats.set(seatHash, memberId);
     return state.seats.size;
   },
+  seatsOf: async (memberId: string) => {
+    const hashes = [...state.seats.entries()].filter(([, m]) => m === memberId).map(([h]) => h);
+    return { seats: hashes.length, synced: hashes.filter((h) => (state.cards.get(h) ?? 0) > 0).length };
+  },
   memberBySeat: async (seatHash: string) => {
     const id = state.seats.get(seatHash);
     const m = id ? state.members.get(id) : null;
@@ -225,6 +229,22 @@ describe('seats and members', () => {
       expect(await postToRoom(seat, { text: 'hello there', kind: 'person' })).toMatchObject({ ok: false, code: 'seat' });
       expect(await nameInRoom(seat, 'Dana')).toMatchObject({ ok: false, code: 'seat' });
     }
+  });
+
+  it('says, on a later opening, when no card has ever come up on the address: the person has been in the room through their AI alone', async () => {
+    const token = newMemberToken();
+    const first = await openSeat({ memberToken: token });
+    expect(first.ok && first.noCardYet).toBe(false);
+    const second = await openSeat({ memberToken: token });
+    expect(second.ok && second.noCardYet).toBe(true);
+    if (!second.ok) return;
+    // A card syncs on one of the seats: the address has shown a card, and the note goes.
+    expect((await syncRoom(second.seat, null, [], Date.now())).ok).toBe(true);
+    const third = await openSeat({ memberToken: token });
+    expect(third.ok && third.noCardYet).toBe(false);
+    // A guest's opening says nothing of it.
+    const guest = await openSeat({});
+    expect(guest.ok && guest.noCardYet).toBe(false);
   });
 
   it('is closed when the switch is off', async () => {
