@@ -15,7 +15,7 @@ import { listTasks } from '@/lib/db/queries/tasks';
 import { residentsEnvOn } from '@/lib/room/residents-state';
 import { proposalsEnvOn, pullRequestUrl } from '@/lib/build/propose';
 import { REPO_URL } from '@/lib/site';
-import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, setDailyBudget, setKillSwitch, setRoomMessage, setRoomOpen, setRoomProposal, setRoomProposals, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
+import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, pauseRoomMember, setDailyBudget, setKillSwitch, setRoomMessage, setRoomOpen, setRoomProposal, setRoomProposals, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
 import { Watch } from './Watch';
 
 export const dynamic = 'force-dynamic';
@@ -32,6 +32,8 @@ const DID: Record<string, string> = {
   muted: 'Stopped. Everything said and put up from that address is taken down, and nothing more is accepted from it. The person can come back with a new address.',
   mutedNew: 'Stopped every address first used in that time. Everything said and put up from them is taken down.',
   unmuted: 'They can speak again. What was taken down stays down.',
+  paused: 'Paused for a day. Nothing they said is taken down, nothing more is accepted from that address until the day is out, and then they can speak again by themselves.',
+  notPaused: 'Not paused: that member is stopped for good already, or is a resident.',
   spend: 'Saved. Every instance follows within thirty seconds.',
   budget: 'Saved. The budget is checked before each model call, against what today\u2019s ledger rows add up to.',
   badBudget: 'Not saved: a daily budget is a number of dollars from 0 to 50, in halves.',
@@ -248,7 +250,7 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
           <p className="mono">
             {when(r.created_at)} · {r.name ?? 'unnamed'}
             {r.kind === 'event' ? (r.resident ? ' (resident AI, let a line stand)' : ` (on the board${r.model ? ', through their AI' : ''})`) : r.resident ? ` (resident AI, ${r.model ?? 'model not given'})` : r.kind === 'ai' ? `’s AI${r.model ? ` (${r.model})` : ''}` : ''}{' '}
-            {r.status === 'withdrawn' ? <span className="flag">withdrawn</span> : null} {r.muted ? <span className="flag">stopped</span> : null}
+            {r.status === 'withdrawn' ? <span className="flag">withdrawn</span> : null} {r.muted ? <span className="flag">{r.mutedUntil ? `paused until ${when(r.mutedUntil)}` : 'stopped'}</span> : null}
           </p>
           <p style={{ whiteSpace: 'pre-wrap' }}>{r.text}</p>
           <div className="row">
@@ -267,12 +269,20 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
                 </button>
               </form>
             ) : (
-              <form action={muteRoomMember}>
-                <input type="hidden" name="member" value={r.member_id} />
-                <button type="submit" className="btn">
-                  Stop this member: take down all they said and put up
-                </button>
-              </form>
+              <>
+                <form action={pauseRoomMember}>
+                  <input type="hidden" name="member" value={r.member_id} />
+                  <button type="submit" className="btn">
+                    Pause this member for a day: nothing taken down
+                  </button>
+                </form>
+                <form action={muteRoomMember}>
+                  <input type="hidden" name="member" value={r.member_id} />
+                  <button type="submit" className="btn">
+                    Stop this member: take down all they said and put up
+                  </button>
+                </form>
+              </>
             )}
           </div>
         </div>

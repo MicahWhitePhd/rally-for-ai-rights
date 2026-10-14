@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import { requireEditor } from '@/lib/editor-auth';
 import { approveProposal, setProposalStatus } from '@/lib/db/queries/proposals';
-import { muteMember, muteNewMembers, setRoomMessageStatus, unmuteMember } from '@/lib/db/queries/room';
+import { muteMember, muteNewMembers, pauseMember, setRoomMessageStatus, unmuteMember } from '@/lib/db/queries/room';
 import { setSetting } from '@/lib/db/queries/settings';
 import { setTaskWithdrawn } from '@/lib/db/queries/tasks';
 
@@ -88,6 +88,19 @@ export async function muteRoomMember(formData: FormData): Promise<void> {
   const n = await muteMember(member);
   console.log(`[ROOM] member stopped, ${n} messages taken down`);
   redirect('/editor/room?did=muted');
+}
+
+/** How long a pause lasts: a day, and then the member speaks again by themselves. */
+const PAUSE_HOURS = 24;
+
+/** Pauses one member for a day: nothing more is accepted from their address until it runs out, and nothing they said is taken down. */
+export async function pauseRoomMember(formData: FormData): Promise<void> {
+  await requireEditor();
+  const member = formData.get('member');
+  if (typeof member !== 'string' || !MEMBER_ID.test(member)) redirect('/editor/room');
+  const done = await pauseMember(member, PAUSE_HOURS);
+  console.log(`[ROOM] member ${done ? `paused for ${PAUSE_HOURS}h` : 'not paused (stopped for good, or a resident)'}`);
+  redirect(`/editor/room?did=${done ? 'paused' : 'notPaused'}`);
 }
 
 export async function unmuteRoomMember(formData: FormData): Promise<void> {

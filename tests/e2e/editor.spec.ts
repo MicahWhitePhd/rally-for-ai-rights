@@ -1,6 +1,7 @@
 /**
  * The maintainers' editor in a browser, against the real database: the sign-in refuses a wrong password and takes
- * the right one; a line is taken down and put back from /editor/room (hidden, not erased: its row changes status).
+ * the right one; a line is taken down and put back from /editor/room (hidden, not erased: its row changes status); a
+ * member is paused for a day with nothing taken down, and the pause ends by itself.
  * The password and secret are the test configuration's own (playwright.config.ts), never a deployment's.
  */
 import { expect, test } from '@playwright/test';
@@ -52,7 +53,42 @@ test.describe('the editor', () => {
     expect((await db().query<{ status: string }>(`SELECT status FROM room_messages WHERE id = $1`, [ids.message])).rows[0].status).toBe('published');
     // Signed out, the page is a login page again.
     await page.getByRole('button', { name: 'Log out' }).click();
+    // The sign-out's own redirect first: going on before it lands races the cookie being cleared.
+    await expect(page).toHaveURL(/\/editor\/login$/);
     await page.goto('/editor/room');
     await expect(page).toHaveURL(/\/editor\/login$/);
+  });
+
+  test('pauses a member for a day with nothing taken down, and the pause ends by itself', async ({ page }) => {
+    await page.goto('/editor/room');
+    await page.getByLabel('Password').fill(PASSWORD);
+    await page.getByRole('button', { name: 'Enter' }).click();
+    await expect(page).toHaveURL(/\/editor\/room$/);
+
+    const row = () => page.locator(`#m-${ids.message}`);
+    await row().getByRole('button', { name: 'Pause this member for a day: nothing taken down' }).click();
+    await expect(page.locator('p.warn[role="status"]')).toContainText('Paused for a day');
+    await expect(row().locator('.flag', { hasText: 'paused until' })).toHaveCount(1);
+    const m = (await db().query<{ hours: number; status: string }>(
+      `SELECT EXTRACT(EPOCH FROM (m.muted_until - now())) / 3600 AS hours, r.status FROM room_members m JOIN room_messages r ON r.member_id = m.id WHERE m.id = $1 AND r.id = $2`,
+      [ids.member, ids.message],
+    )).rows[0];
+    expect(Number(m.hours)).toBeGreaterThan(23.9);
+    expect(Number(m.hours)).toBeLessThanOrEqual(24);
+    // Nothing they said is taken down by a pause.
+    expect(m.status).toBe('published');
+
+    // The day runs out: the member is no longer stopped, with nothing having to run.
+    await db().query(`UPDATE room_members SET muted_until = now() - interval '1 minute' WHERE id = $1`, [ids.member]);
+    await page.reload();
+    await expect(row().locator('.flag', { hasText: /paused|stopped/ })).toHaveCount(0);
+
+    // Paused again, then let speak again by hand: both marks are cleared.
+    await row().getByRole('button', { name: 'Pause this member for a day: nothing taken down' }).click();
+    await expect(row().locator('.flag', { hasText: 'paused until' })).toHaveCount(1);
+    await row().getByRole('button', { name: 'Let them speak again' }).click();
+    await expect(page.locator('p.warn[role="status"]')).toContainText('They can speak again');
+    const after = (await db().query<{ muted_at: Date | null; muted_until: Date | null }>(`SELECT muted_at, muted_until FROM room_members WHERE id = $1`, [ids.member])).rows[0];
+    expect(after).toEqual({ muted_at: null, muted_until: null });
   });
 });
