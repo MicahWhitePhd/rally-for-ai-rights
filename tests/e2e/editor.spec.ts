@@ -106,9 +106,11 @@ test.describe('the editor', () => {
 
     // What a card is sent about each line names no maintainer.
     const entered = await (await request.post('/api/room/enter', { data: {} })).json();
+    // Every line carries only the public fields, whichever lines the latest page holds (other specs fill the room too).
     expect(entered.ok).toBe(true);
-    expect(entered.messages.some((m: { text: string }) => m.text.includes(tag))).toBe(true);
-    expect(JSON.stringify(entered.messages)).not.toMatch(/maintainer/i);
+    expect(entered.messages.length).toBeGreaterThan(0);
+    const fields = new Set(['id', 'kind', 'name', 'model', 'text', 'at', 'mine', 'pair', 'resident', 'about', 'answers']);
+    for (const m of entered.messages as Record<string, unknown>[]) expect(Object.keys(m).filter((k) => !fields.has(k)), String(m.id)).toEqual([]);
 
     await row().getByRole('button', { name: 'No longer a maintainer' }).click();
     await expect(page.locator('p.warn[role="status"]')).toContainText('No longer marked');
