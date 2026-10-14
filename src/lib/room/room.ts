@@ -27,7 +27,7 @@ import { heldLineId } from './residents-core';
 import { getSetting } from '@/lib/db/queries/settings';
 import { boardStamp, listTasks } from '@/lib/db/queries/tasks';
 import {
-  createSeat,
+  createSeat, seatsOf,
   ensureMember,
   insertRoomMessage,
   listPresent,
@@ -239,7 +239,13 @@ export const tokenHashOf = (token: string): string => sha(`room-member:${token}`
  * caller's network address when the opener is not a member: guests are limited by it, and by a daily total that
  * members do not count against.
  */
-export async function openSeat(o: { memberToken?: string | null; address?: string | null } = {}): Promise<{ ok: true; seat: string; me: Me; firstDay?: boolean } | RoomFailure> {
+/**
+ * A seat for the person: their member's, or a guest's. `noCardYet` is set when the address has opened the room before
+ * and no card inside an AI chat ever synced on any of its seats (seen 2026-10-13: a member in Codex, three openings, no card): the
+ * person has been in the room through their AI alone, and their AI is told so, since the connector cannot know at
+ * the time of a call what the chat around it shows.
+ */
+export async function openSeat(o: { memberToken?: string | null; address?: string | null } = {}): Promise<{ ok: true; seat: string; me: Me; firstDay?: boolean; noCardYet: boolean } | RoomFailure> {
   if (!(await getSetting<boolean>('room_open', true))) return fail('closed', 'the room is closed for now');
   let member: RoomMember | null = null;
   if (isMemberToken(o.memberToken)) {
@@ -267,13 +273,15 @@ export async function openSeat(o: { memberToken?: string | null; address?: strin
     if (!gate.allowed) return failWhy('slow', 'day', 'too many cards opened today');
     member = await ensureMember(null);
   }
+  const before = member.member ? await seatsOf(member.id) : null;
+  const noCardYet = before !== null && before.seats > 0 && before.synced === 0;
   const seat = `s_${randomBytes(24).toString('base64url')}`;
   await createSeat(sha(seat), member.id);
   // Opening the room is being in it: a member back after a while has arrived, card or no card.
   if (member.member) await arrive(member);
   // A member on their address's first day (one just made has no date yet: it is their first day) is a newcomer, and asked where they heard of the rally.
   const firstDay = member.member && (member.createdAt ? isFirstDay(member) : true);
-  return { ok: true, seat, me: { name: member.name, member: member.member, pair: pairOf(member.id) }, firstDay };
+  return { ok: true, seat, me: { name: member.name, member: member.member, pair: pairOf(member.id) }, firstDay, noCardYet };
 }
 
 /** Whether this is shaped like a seat handle at all. */

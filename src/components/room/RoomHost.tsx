@@ -73,7 +73,8 @@ export function RoomHost({ endpoint }: { endpoint: string }) {
     if (started.current) return;
     started.current = true;
     (async () => {
-      const c = new Client({ name: 'room-host-harness', version: '0.0.1' });
+      // Declares MCP Apps support at the handshake, as a host that shows the card does (the extension id and the card's media type, written out: the server module is not for the browser).
+      const c = new Client({ name: 'room-host-harness', version: '0.0.1' }, { capabilities: { extensions: { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } } } });
       await c.connect(new StreamableHTTPClientTransport(new URL(endpoint, window.location.origin)));
       const tools = await c.listTools();
       note(`tools: ${tools.tools.map((t) => t.name).join(', ')}`);

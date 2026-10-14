@@ -63,6 +63,12 @@ export async function ensureMember(tokenHash: string | null): Promise<RoomMember
   return g;
 }
 
+/** A member's seats so far, and how many a card inside an AI chat has synced on (a card on the web sends no stamp): none, over several openings, means a host that shows no card. */
+export async function seatsOf(memberId: string): Promise<{ seats: number; synced: number }> {
+  const r = await queryOne<{ seats: number; synced: number }>(`SELECT count(*)::int AS seats, count(*) FILTER (WHERE card_at > 0)::int AS synced FROM room_seats WHERE member_id = $1`, [memberId]);
+  return { seats: r?.seats ?? 0, synced: r?.synced ?? 0 };
+}
+
 export async function createSeat(seatHash: string, memberId: string): Promise<void> {
   await query(`INSERT INTO room_seats (seat_hash, member_id) VALUES ($1, $2)`, [seatHash, memberId]);
 }

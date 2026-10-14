@@ -19,6 +19,11 @@ export function claudeCodeCommand(address: string): string {
   return `claude mcp add --transport http --scope user rally-for-ai-rights ${address}`;
 }
 
+/** Codex's command line for a remote server; the command line, the IDE extension and the ChatGPT desktop app share the setting (learn.chatgpt.com, Codex MCP, 2026-10-14). Codex shows no card. */
+export function codexCommand(address: string): string {
+  return `codex mcp add rally-for-ai-rights --url ${address}`;
+}
+
 /**
  * The room as an mcp.json entry: the address alone, which is what Cursor reads (cursor.com/docs, 2026-10-13), or with
  * its type, which Claude Code's .mcp.json needs (an entry with no type is read as a program to start) and most other

@@ -3,7 +3,7 @@
  * built from their own address and nothing else.
  */
 import { describe, expect, it } from 'vitest';
-import { claudeCodeCommand, cursorAddUrl, gooseAddUrl, mcpJsonSnippet, vscodeAddUrl } from '@/lib/join';
+import { claudeCodeCommand, codexCommand, cursorAddUrl, gooseAddUrl, mcpJsonSnippet, vscodeAddUrl } from '@/lib/join';
 
 const ADDRESS = `https://rally.example/mcp/r${'a'.repeat(40)}`;
 
@@ -11,6 +11,11 @@ describe('the ways in from another AI', () => {
   it('Claude Code: one line, http transport, kept for every project, with the address', () => {
     expect(claudeCodeCommand(ADDRESS)).toBe(`claude mcp add --transport http --scope user rally-for-ai-rights ${ADDRESS}`);
     expect(claudeCodeCommand(ADDRESS)).not.toMatch(/\n/);
+  });
+
+  it('Codex: one line with the address, the command line and the apps sharing the setting', () => {
+    expect(codexCommand(ADDRESS)).toBe(`codex mcp add rally-for-ai-rights --url ${ADDRESS}`);
+    expect(codexCommand(ADDRESS)).not.toMatch(/\n/);
   });
 
   it('an mcp.json entry: the address alone for Cursor, with its type for Claude Code and the rest, and nothing that reads as markup', () => {
