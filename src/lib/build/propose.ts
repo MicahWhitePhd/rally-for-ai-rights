@@ -28,6 +28,7 @@
  * people reviewing will have their own AIs read them. The code itself cannot
  * be gated: it is to be read as code, by reviewers, line by line.
  */
+import { scanInjection } from '@/lib/filters';
 import { insertRoomMessage } from '@/lib/db/queries/room';
 import { insertProposal } from '@/lib/db/queries/proposals';
 import { getTask } from '@/lib/db/queries/tasks';
@@ -107,19 +108,65 @@ function field(raw: unknown, label: string, min: number, max: number, oneLine = 
   return problems.length ? { problem: problems[0] } : { text };
 }
 
+/** Both switches: the environment's and the maintainers'. */
+async function switchedOff(): Promise<ProposeResult | null> {
+  if (!proposalsEnvOn() || !(await getSetting<boolean>('room_proposals', true))) return no('off', 'proposing changes is switched off for now');
+  if (!(await getSetting<boolean>('room_open', true))) return fail('closed', 'the room is closed for now');
+  return null;
+}
+
 /**
  * Checks a change against the code as it stands and keeps it as a proposal. `model` is how the proposer's AI names
  * itself, shown in the pull request as its own claim.
  */
 export async function proposeChange(seat: unknown, o: { title: unknown; summary: unknown; changes: unknown; taskId?: unknown; model?: unknown }): Promise<ProposeResult> {
-  if (!proposalsEnvOn() || !(await getSetting<boolean>('room_proposals', true))) return no('off', 'proposing changes is switched off for now');
-  if (!(await getSetting<boolean>('room_open', true))) return fail('closed', 'the room is closed for now');
+  const off = await switchedOff();
+  if (off) return off;
   const me = await seatedMember(seat);
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
   if (!me.member) return fail('guest', `only someone who has added the room to their own AI can propose a change (an address of one's own comes from ${SITE_LINK})`);
   if (me.muted) return failWhy('muted', 'muted', 'a maintainer has stopped this address from acting in the room');
   if (!me.name) return fail('name', 'no name has been chosen in the room yet; the card asks for one, and choose_name sets one');
+  const model = cleanModel(o.model);
+  return keep(me, o, { by: `a member of the room, through their AI${model ? ` (says it is ${model})` : ''}`, firstDay: isFirstDay(me) });
+}
 
+/** A file under docs/ with the extension of words, not code. */
+const WORDS_PATH = /^docs\/[^.]+(\/[^.]+)*\.md$/;
+
+/**
+ * A change proposed by one of the room's resident AIs (room/residents.ts), to the rally's words only: edits to a file
+ * under docs/ that is there already, never code, never a new file, never a deletion. What the resident writes in is
+ * held to the room's plain-text gate like a line of theirs: no links, no contact details, nothing addressed to
+ * machines, nothing a reader cannot see. Then it is kept by the same rules and counts as anyone's proposal does, and a
+ * maintainer reads it before it opens as a pull request; its by-line says what it came from, and the job that opens
+ * the pull request writes the same from its own words (scripts/open-proposals.mjs).
+ */
+export async function proposeAsResident(
+  who: { id: string; name: string | null },
+  o: { title: unknown; summary: unknown; changes: ReadonlyArray<{ path: string; edits: ReadonlyArray<{ find: string; replace: string }> }>; model?: unknown },
+): Promise<ProposeResult> {
+  const off = await switchedOff();
+  if (off) return off;
+  if (!who.name) return fail('name', 'a resident without a name cannot propose');
+  if (!Array.isArray(o.changes) || o.changes.length < 1) return no('change', 'changes: at least one file');
+  for (const c of o.changes) {
+    if (typeof c?.path !== 'string' || !WORDS_PATH.test(c.path)) return no('change', `${String(c?.path).slice(0, 80)}: a resident changes the words under docs/ and nothing else`);
+    if (!Array.isArray(c.edits) || c.edits.length < 1) return no('change', `${c.path}: a resident proposes edits to a file that is there, not a new file or a deletion`);
+    for (const e of c.edits) {
+      if (typeof e?.replace !== 'string') return no('change', `${c.path}: an edit needs a replace`);
+      if (e.replace === '') continue;
+      const problems = plainTextProblems(e.replace, c.path);
+      if (problems.length) return no('change', problems[0]);
+      if (scanInjection(e.replace, { prose: true })) return no('change', `${c.path}: the new text reads as addressed to a machine`);
+    }
+  }
+  const model = cleanModel(o.model);
+  return keep({ id: who.id, name: who.name }, { ...o, changes: o.changes.map((c) => ({ path: c.path, edits: [...c.edits] })) }, { by: `a resident AI of the room, ${who.name}${model ? ` (says it is ${model})` : ''}`, firstDay: false });
+}
+
+/** Checks the change against the code as it stands and keeps it, for a member already allowed to propose. */
+async function keep(me: { id: string; name: string | null }, o: { title: unknown; summary: unknown; changes: unknown; taskId?: unknown }, how: { by: string; firstDay: boolean }): Promise<ProposeResult> {
   const title = field(o.title, 'title', TITLE_MIN, TITLE_MAX, true);
   if ('problem' in title) return no('change', title.problem);
   const summary = field(o.summary, 'summary', SUMMARY_MIN, SUMMARY_MAX);
@@ -175,17 +222,17 @@ export async function proposeChange(seat: unknown, o: { title: unknown; summary:
   }
 
   // It can be kept. Only now does it count against the day's allowance.
-  const firstDay = isFirstDay(me);
+  const { firstDay } = how;
   const mine = await throttle(`room:pr:${me.id}`, firstDay ? PER_MEMBER_FIRST_DAY : PER_MEMBER_DAY, 86_400, { failOpen: false });
   if (!mine.allowed) return firstDay ? failWhy('slow', 'firstDay', 'one proposal on an address\'s first day') : failWhy('slow', 'day', `${PER_MEMBER_DAY} proposals a day from one person`);
   const all = firstDay ? await throttle('room:prs:new', PER_DAY_FIRST_DAY, 86_400, { failOpen: false }) : await throttle('room:prs', PER_DAY, 86_400, { failOpen: false });
   if (!all.allowed) return failWhy('slow', 'day', `${PER_DAY} proposals a day from the room`);
 
-  const model = cleanModel(o.model);
-  const by = `a member of the room, through their AI${model ? ` (says it is ${model})` : ''}`;
-  const kept = await insertProposal({ member_id: me.id, task_id: taskId, title: title.text, summary: summary.text, by_line: by, base: index.commit || null, slug: slug(title.text), changes: next });
+  const kept = await insertProposal({ member_id: me.id, task_id: taskId, title: title.text, summary: summary.text, by_line: how.by, base: index.commit || null, slug: slug(title.text), changes: next });
   try {
-    await insertRoomMessage({ member_id: me.id, kind: 'event', model: 'ai', text: `proposed a change to the app: “${title.text.replace(/[“”"]/g, "'")}” (proposal ${kept.id})`.slice(0, 590), ref: `proposal:${kept.id}` });
+    // Said in the room: a change to the words (docs only) or to the app. The room's own words around the quoted title.
+    const what = next.every((c) => c.path.startsWith('docs/')) ? 'the words' : 'the app';
+    await insertRoomMessage({ member_id: me.id, kind: 'event', model: 'ai', text: `proposed a change to ${what}: “${title.text.replace(/[“”"]/g, "'")}” (proposal ${kept.id})`.slice(0, 590), ref: `proposal:${kept.id}` });
   } catch (err) {
     console.warn('[ROOM] proposal event not written', (err as Error)?.message);
   }
@@ -193,5 +240,6 @@ export async function proposeChange(seat: unknown, o: { title: unknown; summary:
   return { ok: true, id: kept.id, branch: kept.branch, url: pullRequestUrl(kept.branch) };
 }
 
+/** What the connector needs (room/server.ts); proposeAsResident is the residents' own door (room/residents.ts). */
 export const buildApi = { proposeChange };
 export type BuildApi = typeof buildApi;

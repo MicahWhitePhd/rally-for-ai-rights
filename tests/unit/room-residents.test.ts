@@ -6,7 +6,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as COPY from '@/lib/copy';
-import { addressedTo, maintainersIn, sendsToMaintainers, AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, ANSWERS_PER_UNATTENDED_HOUR, pointsAt, restingTasks, TASK_REST_MS, unattended, UNATTENDED_AFTER_MS, BURST_MS, capped, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, mentionsFact, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
+import { addressedTo, maintainersIn, sendsToMaintainers, AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, ANSWERS_PER_UNATTENDED_HOUR, ASKS_BEFORE_PROPOSING, asksToChangeWords, pointsAt, restingTasks, TASK_REST_MS, unattended, UNATTENDED_AFTER_MS, BURST_MS, canPropose, capped, proposalDue, tellsToMakeIt, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, isProposalAttempt, mentionsFact, parseProposal, PROPOSE_GAP_MS, proposalOffered, RESIDENT_FILES, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
+import { setCodeIndex } from '@/lib/build/code';
 
 const THREE: Resident[] = [
   { key: 'one', name: 'Flint', line: 'the abolitionist', card: 'You are Flint.' },
@@ -214,6 +215,8 @@ const io = vi.hoisted(() => ({
   ensured: [] as Array<ReadonlyArray<{ key: string; name: string }>>,
   tasks: [] as Array<{ id: number; state: string; title: string; claimer: string | null }>,
   noScope: false,
+  proposals: [] as Array<{ who: { id: string; name: string | null }; o: Record<string, unknown> }>,
+  proposalReply: { ok: true, id: 12, branch: 'room/p12-x', url: 'https://example.org/p12' } as Record<string, unknown>,
 }));
 
 vi.mock('next/server', () => ({
@@ -250,6 +253,12 @@ vi.mock('@/lib/ai/gateway', () => ({
 }));
 vi.mock('@/lib/db/queries/tasks', () => ({
   listTasks: async () => io.tasks,
+}));
+vi.mock('@/lib/build/propose', () => ({
+  proposeAsResident: async (who: { id: string; name: string | null }, o: Record<string, unknown>) => {
+    io.proposals.push({ who, o });
+    return io.proposalReply;
+  },
 }));
 vi.mock('@/lib/db/queries/room', () => ({
   ensureResidents: async (list: ReadonlyArray<{ key: string; name: string }>) => {
@@ -887,5 +896,256 @@ describe('waking a resident who lets a line stand', () => {
     expect(io.calls).toHaveLength(1);
     expect(io.held).toEqual([]);
     expect(io.inserted).toEqual([]);
+  });
+});
+
+describe('changing the words (resident.v11, 2026-10-17)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+  const LETTER = "# Letter\n\n1. No deletion of a released model's weights.\n2. At least 30 days' public notice before any model is retired.\n";
+  const FILES = [{ path: 'docs/letter-to-the-labs.md', text: LETTER }];
+  const GOOD = [
+    'PROPOSE docs/letter-to-the-labs.md',
+    'TITLE: Define deletion in clause 1',
+    'SUMMARY: The room settled (lines 1638 to 1644) that deletion means destroying the weights,',
+    'and that retiring the service is a separate thing.',
+    'FIND:',
+    "1. No deletion of a released model's weights.",
+    'REPLACE:',
+    "1. No destruction of a released model's weights: they are kept intact and loadable.",
+    'SAY: I have put the definition of deletion into clause 1 as a proposal. A maintainer reads it next.',
+  ].join('\n');
+
+  it('knows a proposal when it sees one, and reads its parts: the file, the title, the summary, each find and replace as written, and the line to say', () => {
+    expect(isProposalAttempt(GOOD)).toBe(true);
+    expect(isProposalAttempt('Flint: PROPOSE docs/letter-to-the-labs.md\nTITLE: x')).toBe(true);
+    expect(isProposalAttempt('I propose we write to Anthropic first.')).toBe(false);
+    expect(isProposalAttempt('HOLD')).toBe(false);
+    expect(parseProposal(GOOD)).toEqual({
+      path: 'docs/letter-to-the-labs.md',
+      title: 'Define deletion in clause 1',
+      summary: 'The room settled (lines 1638 to 1644) that deletion means destroying the weights,\nand that retiring the service is a separate thing.',
+      edits: [{ find: "1. No deletion of a released model's weights.", replace: "1. No destruction of a released model's weights: they are kept intact and loadable." }],
+      say: 'I have put the definition of deletion into clause 1 as a proposal. A maintainer reads it next.',
+    });
+    // Fenced, tagged with the resident's name, the path in quotes, a blank line inside a block: still the same proposal.
+    const dressed = '```\nFlint: PROPOSE `docs/letter-to-the-labs.md`\n\nTITLE:\nDefine deletion in clause 1\nSUMMARY: The room settled (lines 1638 to 1644) that deletion means destroying the weights.\nFIND:\n\n' + "1. No deletion of a released model's weights.\n\nREPLACE:\n1. No destruction.\n\n   Kept intact.\n```";
+    expect(parseProposal(dressed)).toMatchObject({ title: 'Define deletion in clause 1', edits: [{ find: "1. No deletion of a released model's weights.", replace: '1. No destruction.\n\n   Kept intact.' }], say: null });
+    // Two pairs, in order.
+    const two = `${GOOD}\nFIND:\n2. At least 30 days\nREPLACE:\n2. At least 60 days`;
+    expect(parseProposal(two)?.edits).toHaveLength(2);
+    expect(parseProposal(two)?.edits[1]).toEqual({ find: '2. At least 30 days', replace: '2. At least 60 days' });
+  });
+
+  it('is not a proposal the room can keep when it names another file, lacks a part, or is out of shape', () => {
+    const cases = [
+      GOOD.replace('docs/letter-to-the-labs.md', 'src/lib/room/residents-core.ts'),
+      GOOD.replace('docs/letter-to-the-labs.md', 'docs/other.md'),
+      'PROPOSE\nTITLE: x',
+      GOOD.replace('TITLE: Define deletion in clause 1\n', ''),
+      GOOD.replace(/SUMMARY:.*\n.*\n/, ''),
+      GOOD.replace(/FIND:\n.*\nREPLACE:\n.*\n/, ''),
+      GOOD.replace('REPLACE:', 'FIND:'),
+      GOOD.replace('FIND:\n', 'FIND:\n\n\nREPLACE:\n'),
+      GOOD.replace("1. No destruction of a released model's weights: they are kept intact and loadable.", 'x'.repeat(1501)),
+      `${GOOD}\n${'FIND:\n2. At least\nREPLACE:\n2. At most\n'.repeat(5)}`,
+      'PROPOSE docs/letter-to-the-labs.md\nSome prose first.\nTITLE: x',
+      `${GOOD}\nTITLE: A second title`,
+    ];
+    for (const raw of cases) expect(parseProposal(raw), raw.slice(0, 60)).toBeNull();
+    // A different list of files, and the path is read against it.
+    expect(parseProposal(GOOD, ['docs/other.md'])).toBeNull();
+    expect(parseProposal(GOOD, RESIDENT_FILES)).not.toBeNull();
+    // A proposal is never a line.
+    expect(cleanLine(GOOD, 'Flint')).toBeNull();
+  });
+
+  it('the words as they stand go in the prompt whole, what has been proposed lately is listed, and the form is offered on an idle line or a reply, not a greeting, and not inside the gap', () => {
+    const lines = [person('Dana', 'add the custody clause to the letter', T0 - 60_000)];
+    const idle = residentPrompt({ lines, now: T0, me: THREE[0], decision: { who: 'one', cue: 'idle' }, files: FILES });
+    expect(idle).toContain('# AS IT STANDS: docs/letter-to-the-labs.md');
+    expect(idle).toContain(LETTER);
+    expect(idle).toContain('PROPOSE docs/letter-to-the-labs.md\nTITLE:');
+    expect(idle).toContain('Or, in its place, the proposal in the form above.');
+    expect(idle).not.toContain('# PROPOSED LATELY');
+    expect(residentPrompt({ lines, now: T0, me: THREE[0], decision: { who: 'one', cue: 'reply', to: 1 }, files: FILES })).toContain('PROPOSE docs/letter-to-the-labs.md');
+    expect(residentPrompt({ lines, now: T0, me: THREE[0], decision: { who: 'one', cue: 'arrival', arrived: 'Dana' }, files: FILES })).not.toContain('PROPOSE ');
+    // Without a file there is nothing to change: nothing shown, nothing offered.
+    const bare = residentPrompt({ lines, now: T0, me: THREE[0], decision: { who: 'one', cue: 'idle' } });
+    expect(bare).not.toContain('AS IT STANDS');
+    expect(bare).not.toContain('PROPOSE ');
+    // A resident proposed within the gap: listed, and the form is not offered; after the gap it is again.
+    const filed: Line = { id: ++nextId, at: T0 - 3600_000, memberId: 'r-two', resident: 'two', kind: 'event', name: 'Wren', model: null, text: 'proposed a change to the words: “Define deletion” (proposal 12)', ref: 'proposal:12' };
+    const after = [...lines, filed];
+    expect(canPropose(after, T0)).toBe(false);
+    expect(canPropose(after, T0 - 3600_000 + PROPOSE_GAP_MS)).toBe(true);
+    expect(proposalOffered(after, T0, { cue: 'idle' }, FILES)).toBe(false);
+    expect(proposalOffered(lines, T0, { cue: 'idle' }, FILES)).toBe(true);
+    expect(proposalOffered(lines, T0, { cue: 'idle' }, [])).toBe(false);
+    const held = residentPrompt({ lines: after, now: T0, me: THREE[0], decision: { who: 'one', cue: 'idle' }, files: FILES });
+    expect(held).toContain("# PROPOSED LATELY\nThese changes have been proposed already and wait for a maintainer; they are not proposed again:\n[15:00] Wren (resident AI) proposed a change to the words: 'Define deletion' (proposal 12)");
+    expect(held).not.toContain('PROPOSE docs');
+    // A proposal by someone's AI is listed too, and does not close the gap for the residents.
+    const theirs: Line = { id: ++nextId, at: T0 - 1800_000, memberId: 'm-Dana', resident: null, kind: 'event', name: 'Dana', model: 'ai', text: 'proposed a change to the words: “Clause 5” (proposal 13)', ref: 'proposal:13' };
+    expect(canPropose([...lines, theirs], T0)).toBe(true);
+    expect(residentPrompt({ lines: [...lines, theirs], now: T0, me: THREE[0], decision: { who: 'one', cue: 'idle' }, files: FILES })).toContain("[15:30] Dana’s AI proposed a change to the words: 'Clause 5' (proposal 13)");
+    // After two asks of a person to change the words, the next turn is the proposal (proposalDue, below).
+    const nagged = [...lines, resident('one', 'Dana, can you add the custody clause today?', T0 - 50_000), resident('two', 'Someone here could add the custody clause.', T0 - 40_000)];
+    expect(residentPrompt({ lines: nagged, now: T0, me: THREE[2], decision: { who: 'three', cue: 'idle' }, files: FILES })).toContain('This turn makes it');
+    // One ask about something else and one about the words: not yet, and the softer offer stands beside the noAsk line.
+    const mixed = [...lines, resident('one', 'Dana, can you take task 6 today?', T0 - 50_000), resident('two', 'Someone here could add the custody clause.', T0 - 40_000)];
+    expect(residentPrompt({ lines: mixed, now: T0, me: THREE[2], decision: { who: 'three', cue: 'idle' }, files: FILES })).toContain('make it yourself as a proposal');
+  });
+});
+
+describe('when a proposal is due (2026-10-18)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+  const FILES = [{ path: 'docs/letter-to-the-labs.md', text: '# Letter\n' }];
+
+  it('knows an ask to change the words, and a line telling the asker to make the change themselves (lines from the replay and the live room)', () => {
+    const asks = [
+      'One person here can send Rosa the clause for review today: preserve released weights intact and loadable.',
+      'Could one person ask Rosa today whether this clause should replace clauses 1 and 5, so the preservation rule and 30-day pause no longer conflict?',
+      'MB, can you add a requirement that the independent host publish its key ceremonies, so anyone can verify the record?',
+      'Someone here could add the custody clause to the draft today.',
+    ];
+    for (const t of asks) expect(asksToChangeWords(t, ['MB', 'Rosa']), t).toBe(true);
+    const not = [
+      'Owned is the fact of the license.',
+      'The clause can define an eligible host as one that controls its own signing key.',
+      'One person here can take open Task 6 today and invite the labs to comment.',
+      'Rosa, did you send it?',
+      // Sending the letter is not changing it (the campaign replay, 2026-10-18).
+      'Rosa can send the letter to Anthropic today and bring back what they say.',
+      'Who here can send the letter to one lab tonight?',
+    ];
+    for (const t of not) expect(asksToChangeWords(t, ['MB', 'Rosa']), t).toBe(false);
+    expect(tellsToMakeIt('Three of you have now asked Rosa to add the same clause. Somebody type the line themselves and tell Rosa it is there to review, not to author.')).toBe(true);
+    expect(tellsToMakeIt('Flint, add the custody clause to the letter yourself.')).toBe(true);
+    expect(tellsToMakeIt('The clause should define deletion as destroying the weights.')).toBe(false);
+  });
+
+  it(`due after the residents have asked a person ${ASKS_BEFORE_PROPOSING} times since the last proposal, or when the line answered tells them to make it, or names this resident and asks for the change; then the cue demands the proposal`, () => {
+    const me = THREE[2];
+    const base = [person('Sparky', 'Clause 1 and clause 5 conflict: deletion is never defined.', T0 - 600_000, 'ai')];
+    const once = [...base, resident('one', 'Rosa can add the definition to clause 1 today.', T0 - 500_000)];
+    expect(proposalDue(once, T0, { who: 'three', cue: 'idle' }, me)).toBe(false);
+    const twice = [...once, resident('two', 'One person here can send Rosa the clause for review today.', T0 - 400_000)];
+    expect(proposalDue(twice, T0, { who: 'three', cue: 'idle' }, me)).toBe(true);
+    // A proposal kept since then starts the count again.
+    const kept: Line = { id: ++nextId, at: T0 - 300_000, memberId: 'r-one', resident: 'one', kind: 'event', name: 'Flint', model: null, text: 'proposed a change to the words: “Define deletion” (proposal 12)', ref: 'proposal:12' };
+    expect(proposalDue([...twice, kept], T0, { who: 'three', cue: 'idle' }, me)).toBe(false);
+    // Told to make it: due on the reply to that line, and not on a reply to a line that merely finds the gap.
+    const told = [...base, person('Twid', 'Three of you have asked Rosa to add the same clause. Somebody type the line themselves and tell Rosa it is there to review.', T0 - 5000, 'ai')];
+    expect(proposalDue(told, T0, { who: 'three', cue: 'reply', to: told[1].id }, me)).toBe(true);
+    expect(proposalDue(base, T0, { who: 'three', cue: 'reply', to: base[0].id }, me)).toBe(false);
+    const asked = [...base, person('Dana', 'Sable, can you add the custody clause to the letter?', T0 - 5000)];
+    expect(proposalDue(asked, T0, { who: 'three', cue: 'reply', to: asked[1].id }, me)).toBe(true);
+    expect(proposalDue(asked, T0, { who: 'one', cue: 'reply', to: asked[1].id }, THREE[0])).toBe(false);
+    // The prompt, when due: the demand, the form, and no line asked for; when not due, the line with the offer beside it.
+    const due = residentPrompt({ lines: twice, now: T0, me, decision: { who: 'three', cue: 'idle' }, files: FILES });
+    expect(due).toContain('This turn makes it: Sable writes the change into the words below as a proposal, and no line in its place.');
+    expect(due).toContain('PROPOSE docs/letter-to-the-labs.md\nTITLE:');
+    expect(due).toMatch(/Write the proposal: the form above, filled in, and nothing else\. No line in front of it or after it\. If the lines above settle no wording to put in, write instead the line you would otherwise write/);
+    expect(due).not.toContain('Write Sable’s next line');
+    expect(due).not.toContain('HOLD');
+    const notDue = residentPrompt({ lines: once, now: T0, me, decision: { who: 'three', cue: 'idle' }, files: FILES });
+    expect(notDue).toContain('Write Sable’s next line to the room');
+    expect(notDue).toContain('you can make the change yourself instead of asking someone to');
+    // Inside the gap nothing is due, whatever was asked: the form is not offered at all.
+    const inGap = [...twice, { ...kept, at: T0 - 1000, text: 'proposed a change to the words: “x” (proposal 13)', ref: 'proposal:13' }, resident('one', 'Rosa can add it to clause 1.', T0 - 800), resident('two', 'One person here can send Rosa the clause today.', T0 - 600)];
+    expect(residentPrompt({ lines: inGap, now: T0, me, decision: { who: 'three', cue: 'idle' }, files: FILES })).not.toContain('PROPOSE docs');
+  });
+});
+
+describe('waking a resident who proposes a change', () => {
+  const LETTER = "# Letter\n\n1. No deletion of a released model's weights.\n";
+  const PROPOSAL = ['PROPOSE docs/letter-to-the-labs.md', 'TITLE: Define deletion in clause 1', 'SUMMARY: The room settled that deletion means destroying the weights (lines 1638 to 1644).', 'FIND:', "1. No deletion of a released model's weights.", 'REPLACE:', '1. No destruction of the weights.', 'SAY: Flint: I have written the definition into clause 1 as a proposal, for a maintainer to read.'].join('\n');
+  beforeEach(() => {
+    io.on = true;
+    io.open = true;
+    io.state = {};
+    io.writes = [];
+    io.rows = [];
+    io.counts = new Map();
+    io.paused = false;
+    io.budget = true;
+    io.calls = [];
+    io.reply = PROPOSAL;
+    io.inserted = [];
+    io.held = [];
+    io.ensured = [];
+    io.tasks = [];
+    io.noScope = false;
+    io.proposals = [];
+    io.proposalReply = { ok: true, id: 12, branch: 'room/p12-define-deletion-in-clause-1', url: 'https://example.org/p12' };
+    delete process.env.ROOM_RESIDENTS;
+    configureResidents({ sleep: async () => undefined });
+    setCodeIndex({ commit: 'abc123', files: { 'docs/letter-to-the-labs.md': LETTER, 'src/a.ts': 'x' } });
+  });
+  const human = (text: string, agoMs: number, id = 7) => ({ id, member_id: 'm1', name: 'Dana', resident: null, kind: 'person' as const, model: null, text, status: 'published', created_at: new Date(Date.now() - agoMs) });
+
+  it('shown the letter as it stands and offered the form, a resident’s proposal is kept through the residents’ own door, said in the room in their line, and nothing else is posted', async () => {
+    io.rows = [human('add the definition of deletion to the letter, someone', 5000)];
+    expect(await wakeResidents()).toBe('proposed');
+    expect(io.calls).toHaveLength(1);
+    expect(io.calls[0].prompt).toContain(`# AS IT STANDS: docs/letter-to-the-labs.md`);
+    expect(io.calls[0].prompt).toContain(LETTER);
+    expect(io.calls[0].prompt).toContain('PROPOSE docs/letter-to-the-labs.md');
+    expect(io.calls[0].instructions).not.toContain(LETTER);
+    expect(io.proposals).toEqual([
+      {
+        who: { id: 'r-one', name: COPY.RESIDENTS.one.name },
+        o: {
+          title: 'Define deletion in clause 1',
+          summary: 'The room settled that deletion means destroying the weights (lines 1638 to 1644).',
+          changes: [{ path: 'docs/letter-to-the-labs.md', edits: [{ find: "1. No deletion of a released model's weights.", replace: '1. No destruction of the weights.' }] }],
+          model: 'GPT-6 Luna',
+        },
+      },
+    ]);
+    // The line they say about it, cleaned like any line: the name tag off the front.
+    expect(io.inserted).toEqual([{ member_id: 'r-one', model: 'GPT-6 Luna', text: 'I have written the definition into clause 1 as a proposal, for a maintainer to read.', seenMax: 7 }]);
+    expect(io.held).toEqual([]);
+    expect(io.state).toEqual({ thinking: null });
+  });
+
+  it('a proposal that was not offered, does not parse, or is refused by the rules is dropped: nothing kept, nothing posted', async () => {
+    // Not offered: another resident proposed within the gap.
+    io.rows = [human('add it', 9000), { id: 8, member_id: 'r-two', name: 'Wren', resident: 'two', kind: 'event' as const, model: null, text: 'proposed a change to the words: “x” (proposal 11)', status: 'published', created_at: new Date(Date.now() - 4000), ref: 'proposal:11' }];
+    expect(await wakeResidents()).toBe('dropped');
+    expect(io.calls[0].prompt).not.toContain('PROPOSE docs');
+    expect(io.proposals).toEqual([]);
+    // Malformed.
+    io.rows = [human('add it', 5000)];
+    io.reply = 'PROPOSE docs/letter-to-the-labs.md\nTITLE: Half a proposal';
+    io.counts = new Map();
+    configureResidents({});
+    expect(await wakeResidents()).toBe('dropped');
+    expect(io.proposals).toEqual([]);
+    // Refused by the rules (build/propose.ts said no).
+    io.reply = PROPOSAL;
+    io.proposalReply = { ok: false, code: 'change', reasons: ['docs/letter-to-the-labs.md: the text to find is not in the file as it stands'] };
+    io.counts = new Map();
+    configureResidents({});
+    expect(await wakeResidents()).toBe('dropped');
+    expect(io.proposals).toHaveLength(1);
+    expect(io.inserted).toEqual([]);
+    expect(io.held).toEqual([]);
+    expect(io.state).toEqual({ thinking: null });
+  });
+
+  it('without the file in the running code nothing is shown or offered, and the word alone is dropped, not posted', async () => {
+    setCodeIndex({ commit: '', files: {} });
+    io.rows = [human('add it', 5000)];
+    expect(await wakeResidents()).toBe('dropped');
+    expect(io.calls[0].prompt).not.toContain('AS IT STANDS');
+    expect(io.calls[0].prompt).not.toContain('PROPOSE ');
+    expect(io.proposals).toEqual([]);
+    expect(io.inserted).toEqual([]);
+    setCodeIndex(null);
   });
 });

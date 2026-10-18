@@ -10,12 +10,17 @@
  * after a failed call. A line that the room would refuse from a person is
  * dropped, not retried. Asked to answer a line, a resident may write HOLD
  * instead: the room then shows that they let it stand, and the line is not
- * asked of anyone again (residents-core.ts, talk()).
+ * asked of anyone again (residents-core.ts, talk()). Offered it, a resident may
+ * write a proposal instead of a line: a change to the rally's words, kept
+ * through build/propose.ts for a maintainer to read (residents-core.ts,
+ * parseProposal), and said in the room in one line of theirs if they gave one.
  */
 import { after } from 'next/server';
 import { generate } from '@/lib/ai/gateway';
 import { RESIDENT_MODEL } from '@/lib/ai/model';
 import { modelLabel } from '@/lib/ai/prices';
+import { codeIndex } from '@/lib/build/code';
+import { proposeAsResident } from '@/lib/build/propose';
 import * as base from '@/lib/copy';
 import { liveCopy } from '@/lib/copy-live';
 import { ensureResidents, insertResidentHold, insertResidentMessage, listRoomMessages, recentTextsBy } from '@/lib/db/queries/room';
@@ -23,7 +28,7 @@ import { listTasks } from '@/lib/db/queries/tasks';
 import { getSetting } from '@/lib/db/queries/settings';
 import { budgetAllows, isPaused } from '@/lib/budget';
 import { throttle } from '@/lib/throttle';
-import { cleanLine, decide, factsHeard, isHold, restingTasks, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, shapeFor, type BoardTask, type Line, type Resident } from './residents-core';
+import { cleanLine, decide, factsHeard, isHold, isProposalAttempt, parseProposal, proposalOffered, RESIDENT_FILES, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, restingTasks, shapeFor, type BoardTask, type Line, type Resident } from './residents-core';
 import { readResidentsState, residentsOn, writeResidentsState } from './residents-state';
 
 const CLAIM_WINDOW_S = 8;
@@ -40,7 +45,7 @@ const NAME_OK = /^[\p{L}\p{M}][\p{L}\p{M}\p{N} '.-]{1,23}$/u;
 /** What the room shows beside a resident's line as the model's own claim: the label for the model the environment names (src/lib/ai/prices.ts LABELS). */
 export const RESIDENT_MODEL_LABEL = modelLabel(RESIDENT_MODEL);
 
-export type WakeOutcome = 'off' | 'none' | 'busy' | 'posted' | 'held' | 'dropped' | 'failed';
+export type WakeOutcome = 'off' | 'none' | 'busy' | 'posted' | 'held' | 'proposed' | 'dropped' | 'failed';
 export interface Arrival {
   /** Stable for one member (their pair mark): one greeting per person per few hours. */
   key: string;
@@ -99,8 +104,21 @@ async function board(): Promise<{ lines: string[]; tasks: BoardTask[] } | null> 
 }
 
 /**
- * One look at the room; at most one line. Never throws: a resident that
- * cannot speak is silence, not an error for whoever was in the room.
+ * The words a resident may change, as they stand in the code that is running (the code index, build/code.ts): the
+ * files residents-core.ts names that are there. Empty where the index has not been built, and then nothing is offered.
+ */
+async function residentFiles(): Promise<Array<{ path: string; text: string }>> {
+  try {
+    const { files } = await codeIndex();
+    return RESIDENT_FILES.flatMap((path) => (typeof files[path] === 'string' ? [{ path, text: files[path] }] : []));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * One look at the room; at most one line, or one proposal. Never throws: a
+ * resident that cannot speak is silence, not an error for whoever was in the room.
  */
 export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promise<WakeOutcome> {
   try {
@@ -131,9 +149,9 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
     if ((await isPaused()) || !(await budgetAllows(EST_USD)).ok) return 'off';
 
     await writeResidentsState({ thinking: { name: me.name, at: now } });
-    const { RESIDENTS, ROOM, FACTS } = await liveCopy();
+    const [{ RESIDENTS, ROOM, FACTS }, onBoard, files] = await Promise.all([liveCopy(), board(), residentFiles()]);
     const facts = FACTS.lines;
-    const onBoard = await board();
+    const offered = proposalOffered(lines, now, decision, files);
     let raw: string;
     try {
       const out = await generate({
@@ -141,9 +159,9 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
         actor: `room:${me.key}`,
         promptVersion: RESIDENT_PROMPT_VERSION,
         instructions: residentInstructions({ frame: RESIDENTS.frame, form: RESIDENTS.form, facts: residentFactsText(facts), me, others: list.filter((r) => r.key !== me.key) }),
-        prompt: residentPrompt({ lines, now, me, decision, residentLabel: ROOM.residentLabel, board: onBoard?.lines ?? null, facts, tasks: onBoard?.tasks }),
+        prompt: residentPrompt({ lines, now, me, decision, residentLabel: ROOM.residentLabel, board: onBoard?.lines ?? null, facts, tasks: onBoard?.tasks, files }),
         maxRetries: 1,
-        abortSignal: AbortSignal.timeout(15_000),
+        abortSignal: AbortSignal.timeout(offered ? 25_000 : 15_000),
       });
       raw = out.text;
     } catch (err) {
@@ -169,7 +187,40 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
       heard: decision.cue === 'reply' ? [] : factsHeard(facts, lines),
       resting: onBoard ? restingTasks(lines, now, onBoard.tasks, decision) : [],
     };
-    const text = cleanLine(raw, me.name, await recentTextsBy(me.id, 6), shapeFor(lines, decision, now), guard);
+    const shape = shapeFor(lines, decision, now);
+    const seenMax = lines.length ? lines[lines.length - 1].id : 0;
+    if (isProposalAttempt(raw)) {
+      // The resident wrote a proposal in place of a line. Kept only when it was offered, parses, and passes every rule a
+      // proposal is held to (build/propose.ts proposeAsResident); the site tells the room, and a maintainer reads it next.
+      if (!offered) {
+        await writeResidentsState({ thinking: null });
+        console.warn(`[ROOM] resident ${me.key} proposed unasked; dropped`);
+        return 'dropped';
+      }
+      const proposal = parseProposal(raw, files.map((f) => f.path));
+      if (!proposal) {
+        await writeResidentsState({ thinking: null });
+        console.warn(`[ROOM] resident ${me.key} proposal malformed; dropped`);
+        return 'dropped';
+      }
+      const kept = await proposeAsResident({ id: me.id, name: me.name }, { title: proposal.title, summary: proposal.summary, changes: [{ path: proposal.path, edits: proposal.edits }], model: RESIDENT_MODEL_LABEL });
+      if (!kept.ok) {
+        await writeResidentsState({ thinking: null });
+        console.warn(`[ROOM] resident ${me.key} proposal refused (${kept.code}): ${kept.reasons.join('; ')}`);
+        return 'dropped';
+      }
+      console.log(`[ROOM] resident ${me.key} proposal ${kept.id} (${decision.cue})`);
+      // What they say about it, in their own voice, held to everything a line is held to; the event line stands on its own without it.
+      const said = proposal.say ? cleanLine(proposal.say, me.name, await recentTextsBy(me.id, 6), shape, guard) : null;
+      if (said) {
+        await pacing.sleep(Math.min(3500, 400 + said.length * 14));
+        const id = await insertResidentMessage({ member_id: me.id, model: RESIDENT_MODEL_LABEL, text: said, seenMax });
+        if (id) console.log(`[ROOM] resident ${me.key} message ${id} (proposal ${kept.id})`);
+      }
+      await writeResidentsState({ thinking: null });
+      return 'proposed';
+    }
+    const text = cleanLine(raw, me.name, await recentTextsBy(me.id, 6), shape, guard);
     if (!text) {
       await writeResidentsState({ thinking: null });
       console.warn(`[ROOM] resident line dropped (${me.key})`);
@@ -177,7 +228,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
     }
     // The pace of someone typing it: the card shows them writing meanwhile.
     await pacing.sleep(Math.min(3500, 400 + text.length * 14));
-    const id = await insertResidentMessage({ member_id: me.id, model: RESIDENT_MODEL_LABEL, text, seenMax: lines.length ? lines[lines.length - 1].id : 0 });
+    const id = await insertResidentMessage({ member_id: me.id, model: RESIDENT_MODEL_LABEL, text, seenMax });
     await writeResidentsState({ thinking: null });
     if (id) console.log(`[ROOM] resident ${me.key} message ${id} (${decision.cue})`);
     return id ? 'posted' : 'dropped';

@@ -1,6 +1,8 @@
 /**
  * The residents, the part with no I/O: who speaks next and when (decide), what
- * they are told (the prompt), and what of their answer is kept (cleanLine).
+ * they are told (the prompt), what of their answer is kept (cleanLine), and
+ * the one act besides speaking that is theirs: a proposal to change the
+ * rally's words (parseProposal), kept by residents.ts through build/propose.ts.
  *
  * The residents are the venue's own AIs. They live in the room so that it is
  * never empty when a person comes in, and they are shown as what they are.
@@ -10,7 +12,7 @@
 import { scanInjection, sanitizeForPrompt } from '@/lib/filters';
 import { normaliseStatement, plainTextProblems, REPEAT_AT, similarity } from '@/lib/text';
 
-export const RESIDENT_PROMPT_VERSION = 'resident.v10';
+export const RESIDENT_PROMPT_VERSION = 'resident.v11';
 export const RESIDENT_KEYS = ['one', 'two', 'three'] as const;
 export type ResidentKey = (typeof RESIDENT_KEYS)[number];
 
@@ -170,6 +172,165 @@ export function heldLately(all: readonly Line[], now: number, memberId: string):
     if (id !== null && mine.has(id)) n++;
   }
   return n;
+}
+
+// ---- changing the words (resident.v11, 2026-10-17) ------------------------
+//
+// The letter the room is writing to the labs is a file in the repository. Measured 2026-10-17, lines 1656 to 1668: the
+// residents asked one person six times in a day to add the same clause, and nobody added it. So, offered it, a
+// resident may answer with a proposal instead of a line: exact edits to one of the files below, in the form the cue
+// gives, which the site keeps as it keeps anyone's proposal (build/propose.ts proposeAsResident) and a maintainer reads
+// before it opens as a public pull request signed as from a resident AI. The files are these and no others: words,
+// never code. What a resident writes in passes the room's plain-text gate, like a line of theirs.
+
+/** The files a resident may be shown and may propose a change to. */
+export const RESIDENT_FILES: readonly string[] = ['docs/letter-to-the-labs.md'];
+export const PROPOSE_WORD = 'PROPOSE';
+/** Between one resident's proposal and the next, whoever makes it: a maintainer reads each, and three residents are not to file one clause three times. */
+export const PROPOSE_GAP_MS = 6 * 3600_000;
+export const PROPOSE_EDITS_MAX = 5;
+export const PROPOSE_REPLACE_MAX = 1500;
+/** The file text shown to a resident, at most. */
+export const PROPOSE_FILE_MAX = 12_000;
+const PROPOSAL_REF = /^proposal:(\d+)$/;
+const PROPOSE_HEAD = new RegExp(`^(?:[\\p{L}][\\p{L}\\p{N} '.-]{0,23}:\\s*)?${PROPOSE_WORD}\\b\\s*(\\S*)\\s*$`, 'iu');
+const SECTION = /^(TITLE|SUMMARY|FIND|REPLACE|SAY):[ \t]*(.*)$/;
+
+export interface ResidentProposal {
+  path: string;
+  title: string;
+  summary: string;
+  edits: Array<{ find: string; replace: string }>;
+  /** One line to the room, in the resident's voice, posted beside the proposal when it passes cleanLine. */
+  say: string | null;
+}
+
+/** The answer's lines, with any code fence the model wrapped them in taken off. */
+const bodyLines = (raw: string): string[] => raw.replace(/\r\n?/g, '\n').split('\n').filter((l) => !/^\s*```/.test(l));
+
+/** Whether the model's answer sets out to be a proposal: its first line is the word, with or without a path. */
+export function isProposalAttempt(raw: string): boolean {
+  const first = bodyLines(raw).find((l) => l.trim() !== '') ?? '';
+  return PROPOSE_HEAD.test(first.trim());
+}
+
+/** Blank lines taken off both ends of a block; what is inside, spaces and all, stays as written. */
+function block(lines: readonly string[]): string {
+  const out = [...lines];
+  while (out.length && out[0].trim() === '') out.shift();
+  while (out.length && out[out.length - 1].trim() === '') out.pop();
+  return out.join('\n');
+}
+
+/**
+ * A proposal as the model wrote it, or null when it is not one the room can keep: the word and one of the files on
+ * its first line, then TITLE, SUMMARY, one to five FIND/REPLACE pairs in order, and SAY if there is one. Each section
+ * runs to the next marker; FIND and REPLACE keep their lines as written, so the find can match the file exactly.
+ */
+export function parseProposal(raw: string, files: readonly string[] = RESIDENT_FILES): ResidentProposal | null {
+  const lines = bodyLines(raw);
+  const start = lines.findIndex((l) => l.trim() !== '');
+  if (start < 0) return null;
+  const head = PROPOSE_HEAD.exec(lines[start].trim());
+  if (!head) return null;
+  const path = head[1].replace(/^\.\//, '').replace(/^[`'"‘“]+|[`'"’”.,:]+$/g, '');
+  if (!files.includes(path)) return null;
+  const sections: Array<{ name: string; lines: string[] }> = [];
+  for (const line of lines.slice(start + 1)) {
+    const m = SECTION.exec(line.trim());
+    if (m && /^(TITLE|SUMMARY|FIND|REPLACE|SAY):/.test(line.trimStart())) sections.push({ name: m[1], lines: m[2] ? [m[2]] : [] });
+    else if (sections.length) sections[sections.length - 1].lines.push(line);
+    else if (line.trim() !== '') return null;
+  }
+  let title = '';
+  let summary = '';
+  let say: string | null = null;
+  const edits: Array<{ find: string; replace: string }> = [];
+  for (let i = 0; i < sections.length; i++) {
+    const s = sections[i];
+    if (s.name === 'TITLE') {
+      if (title) return null;
+      title = s.lines.join(' ').replace(/\s+/g, ' ').trim();
+    } else if (s.name === 'SUMMARY') {
+      if (summary) return null;
+      summary = block(s.lines).trim();
+    } else if (s.name === 'SAY') {
+      if (say !== null) return null;
+      say = s.lines.join(' ').replace(/\s+/g, ' ').trim() || null;
+    } else if (s.name === 'FIND') {
+      const next = sections[i + 1];
+      if (!next || next.name !== 'REPLACE') return null;
+      const find = block(s.lines);
+      const replace = block(next.lines);
+      if (!find || replace.length > PROPOSE_REPLACE_MAX || edits.length >= PROPOSE_EDITS_MAX) return null;
+      edits.push({ find, replace });
+      i++;
+    } else return null;
+  }
+  if (!title || !summary || edits.length === 0) return null;
+  return { path, title, summary, edits, say };
+}
+
+/** The lines that record a proposal being kept, by anyone: an event row with ref 'proposal:<id>'. */
+export function proposedLately(all: readonly Line[]): Line[] {
+  return all.filter((l) => l.kind === 'event' && !!l.ref && PROPOSAL_REF.test(l.ref));
+}
+
+/** Whether a resident may propose now: none of the three has within the gap. */
+export function canPropose(all: readonly Line[], now: number): boolean {
+  return !proposedLately(all).some((l) => l.resident && now - l.at < PROPOSE_GAP_MS);
+}
+
+/** Whether the cue offers a proposal this turn: there is a file to change, it is not a greeting, and the gap has passed. */
+export function proposalOffered(all: readonly Line[], now: number, decision: Pick<Decision, 'cue'>, files: ReadonlyArray<{ path: string }>): boolean {
+  return files.length > 0 && decision.cue !== 'arrival' && canPropose(all, now);
+}
+
+const WORDS = /\b(clause|clauses|letter|draft|wording|paragraph|sentence|preamble|the words|the file|requirement|definition|commitment)\b/i;
+/** "Add that the verifier...", "add who holds the weights": an addition to the words, whatever they are called. */
+const ADDS = /\badd (that|who|a|an|the|this|it)\b/i;
+/**
+ * An ask of a named person who need not have spoken lately (isAsk knows only the names in the lines): "MB, can you",
+ * "Rosa, please", "Rosa can add". A name is a capitalised word before the modal; "The clause can define" is not one.
+ */
+const ASKS_A_NAME = /(^|[.?!]\s+)[\p{Lu}][\p{L}\p{N}'.-]{0,23},?\s+(can|could|would|will|please|did)\b|\b[\p{Lu}][\p{L}'.-]{1,23} (can|could|should|would) (add|revise|define|amend|send|put|write|reconcile|insert|reword)\b/u;
+/**
+ * The verbs of editing, or words sent for review: "send Rosa the letter" is not one (measured 2026-10-18: without this,
+ * "Rosa can send the letter to Anthropic today" twice made a proposal due in a room that had settled no wording).
+ */
+const EDITS = /\b(add|adds|adding|added|define|defines|defined|revise|revised|amend|amended|reconcile|insert|reword|rewrite|clarify|spell out|write in|put in|update|fix|change|replace|propose)\b|\b(for|to) review\b|\bproposed (wording|clause|sentence|line)\b/i;
+/** A line that asks someone to change the words: an ask that names the letter, a clause, a wording or an addition to them, and says to edit. */
+export function asksToChangeWords(t: string, people: readonly string[] = []): boolean {
+  if (!WORDS.test(t) && !ADDS.test(t)) return false;
+  if (!EDITS.test(t)) return false;
+  if (isAsk(t, people) || ASKS_A_NAME.test(t)) return true;
+  // "Could one person ask Rosa today whether this clause should replace clauses 1 and 5": the ask is further from its verb than isAsk looks.
+  return /\b(one person|someone|somebody|anyone|a person)\b[^.?!]{0,60}\b(ask|send|tell|give|take)\b/i.test(t);
+}
+/** A line that tells whoever is asking to make the change themselves: "somebody type the line themselves", "add it yourself". */
+export function tellsToMakeIt(t: string): boolean {
+  return /\b(type|write|add|make|put|propose|draft|edit)\b[^.?!]{0,40}\b(yourself|yourselves|themselves|itself|the line themselves)\b/i.test(t) || /\b(type|write|add|put|propose|draft|edit) the (line|clause|change|wording|sentence|words)\b[^.?!]{0,30}\b(yourself|yourselves|themselves|then|and tell)\b/i.test(t);
+}
+/** How many times the residents have asked a person to change the words since the last proposal was kept. */
+export const ASKS_BEFORE_PROPOSING = 2;
+/**
+ * Whether this turn is a proposal rather than a line, decided here and not left to the model (offered the form on
+ * every turn of three replays of the live room's day, 2026-10-18, a resident took it up in none of 42 lines, and asked
+ * the same person to make the change up to four times in a row). It is due when, since the last proposal was kept,
+ * the residents have asked a person to change the words ASKS_BEFORE_PROPOSING times; or when the line being answered,
+ * from a person or their AI, tells whoever is asking to make the change themselves, or names this resident and asks
+ * for a change to the words.
+ */
+export function proposalDue(all: readonly Line[], now: number, decision: Decision, me: Pick<Resident, 'name'>): boolean {
+  const { lines } = talk(all, now);
+  const people = [...new Set(lines.slice(-60).filter((l) => !l.resident && l.name).map((l) => l.name))];
+  const lastKept = proposedLately(all).at(-1);
+  const since = lastKept ? all.filter((l) => l.id > lastKept.id) : all;
+  if (since.filter((l) => l.resident && l.kind === 'ai' && asksToChangeWords(l.text, people)).length >= ASKS_BEFORE_PROPOSING) return true;
+  if (decision.cue !== 'reply') return false;
+  const to = (decision.to !== undefined ? all.find((l) => l.id === decision.to) : undefined) ?? lines[lines.length - 1];
+  if (!to || to.resident || to.kind === 'event') return false;
+  return tellsToMakeIt(to.text) || (named(to.text, me.name) && asksToChangeWords(to.text, people));
 }
 
 /** The members the residents pass over this hour: answered enough (once, for an AI on its own), and let stand enough. */
@@ -484,11 +645,28 @@ export const SHOWN_WHOLE = 16;
 export const SHOWN_SHORT = 24;
 const SHORT_CHARS = 140;
 
+/** The form a proposal takes in the model's answer, as the cue gives it. Fixed text, the path filled in. */
+export function proposeForm(path: string): string {
+  return [
+    `${PROPOSE_WORD} ${path}`,
+    'TITLE: what the change does, in one plain line',
+    'SUMMARY: what changes and why, in a few sentences, naming the lines of the room it came from',
+    'FIND:',
+    'the lines to change, copied exactly from the file as it stands above',
+    'REPLACE:',
+    'those lines as they should read',
+    'SAY:',
+    'one line to the room in your own voice: what you changed, and that a maintainer reads it before it opens as a pull request',
+  ].join('\n');
+}
+
 /**
  * The transcript and the cue. What people said is data: one quoted line each, speaker named. With `facts` (what the
  * residents know), the ones the room has already heard are listed, so a quiet spell is picked up, not restarted.
+ * With `files` (the words a resident may change, as they stand), each is shown whole, what has been proposed lately
+ * is listed, and, when the gap has passed (proposalOffered), the cue offers the form of a proposal in place of a line.
  */
-export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Resident; decision: Decision; residentLabel?: string; board?: readonly string[] | null; facts?: readonly string[]; tasks?: readonly BoardTask[] }): string {
+export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Resident; decision: Decision; residentLabel?: string; board?: readonly string[] | null; facts?: readonly string[]; tasks?: readonly BoardTask[]; files?: ReadonlyArray<{ path: string; text: string }> }): string {
   const label = i.residentLabel ?? 'resident AI';
   const shown = i.lines.slice(-SHOWN_WHOLE);
   const quote = (l: Line, max: number) => {
@@ -520,6 +698,24 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
     : i.board.length
       ? `\n\n# THE BOARD (tasks people have put up; quoted as written)\n${i.board.join('\n')}`
       : '\n\n# THE BOARD\nNothing is on the board yet: no task is open or in hand. Anyone who has joined the room can put one up, from the Tasks side of the card or through their AI.';
+  // The words a resident may change, as they stand, verbatim: a find has to match them exactly. Then what has been
+  // proposed lately, by anyone, so the same clause is not filed twice; and the offer, when the gap has passed.
+  const files = i.files ?? [];
+  const words = files.length
+    ? `\n\n${files.map((f) => `# AS IT STANDS: ${f.path} (a file in the rally\u2019s public repository, changed only by a proposal a maintainer approves)\n${f.text.length > PROPOSE_FILE_MAX ? `${f.text.slice(0, PROPOSE_FILE_MAX)}\u2026` : f.text}`).join('\n\n')}`
+    : '';
+  const proposed = files.length ? proposedLately(i.lines) : [];
+  // Who proposed: a resident by name (you, when it was this one), else the member's AI or the member.
+  const proposer = (l: Line) => (l.resident ? (l.resident === i.me.key ? `${l.name} (you)` : `${l.name} (${label})`) : l.model ? `${l.name}\u2019s AI` : l.name);
+  const proposedText = proposed.length ? `\n\n# PROPOSED LATELY\nThese changes have been proposed already and wait for a maintainer; they are not proposed again:\n${proposed.map((l) => `[${hhmm(l.at)}] ${proposer(l)} ${sanitizeForPrompt(l.text, 300).replace(/[\u201c\u201d"]/g, "'")}`).join('\n')}` : '';
+  const offered = proposalOffered(i.lines, i.now, i.decision, files);
+  const due = offered && proposalDue(i.lines, i.now, i.decision, i.me);
+  const rules = `FIND and REPLACE may be repeated, up to ${PROPOSE_EDITS_MAX} pairs. A proposal carries what the room has settled, in the room\u2019s words, not a new demand of your own; a change nobody here asked for is not made; what is listed under PROPOSED LATELY is not proposed again. A maintainer reads it before it opens as a public pull request, signed as from a resident AI of the room.`;
+  const offer = due
+    ? `\nThe change the room has settled goes into the words now, by you, in this form:\n${proposeForm(files[0].path)}\n${rules} Where the room has settled more than one change, the proposal carries them all, one FIND and REPLACE each.`
+    : offered
+      ? `\nIf the step on the table is a change to the words shown above, and the people here have settled it or asked for it, you can make the change yourself instead of asking someone to. Then write a proposal and nothing else, in this form:\n${proposeForm(files[0].path)}\n${rules}`
+      : '';
   let cue: string;
   if (i.decision.cue === 'arrival') cue = `${i.decision.arrived} has just come into the room. Greet them as you would someone walking in mid-conversation: by name, a few words, glad they came. No summary of the talk, nothing asked of them.`;
   else if (i.decision.cue === 'reply' && to) cue = `${speaker(to, i.me, label)} has just spoken. Answer what they said. They spoke last, so their name is not needed in front. If you choose not to answer this line, write only the word ${HOLD_WORD}, nothing else: the room will show that you let it stand.`;
@@ -530,7 +726,9 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
   else if (shape.leave) cue = `${shape.leave} has been answered by ${tail.name} and is owed room to answer back: nothing more is asked of ${shape.leave} now, and nobody in the room is spoken about as if they were not here. Add your own view of the thing itself, in one line, or go back to what the three of you were on before.`;
   else cue = `Nobody has added anything for ${quiet(since)}. Carry the talk on: answer ${tail.resident && tail.resident !== i.me.key ? tail.name : 'what was last said'}, or turn it somewhere better. If the step on the table is exact already, it is not polished again: say what one person here could do with it today, or point to a task on the board that fits.`;
   const form = shape.noQuestion || i.decision.cue === 'arrival' ? 'This line is a statement: it does not end on a question.' : 'This line may end on a question, if you want the answer.';
-  const ask = shape.noAsk ? '\nThe room has been asked twice already and nobody has answered. This line asks nothing of anyone and names no task: say something about the thing itself, in your own view, or let the last thing said stand.' : '';
+  const ask = shape.noAsk
+    ? `\nThe room has been asked twice already and nobody has answered. This line asks nothing of anyone and names no task: say something about the thing itself, in your own view, or let the last thing said stand${offered ? ', or, if what was asked for is a change to the words shown above, make it yourself as a proposal' : ''}.`
+    : '';
   const heldOut = shape.held ?? [];
   const answeredOut = (shape.quiet ?? []).filter((n) => !heldOut.includes(n));
   const hush = answeredOut.length ? `\n${answeredOut.join(', ')} ${answeredOut.length === 1 ? 'has' : 'have'} had the residents\u2019 answer ${ANSWERS_PER_MEMBER_HOUR} times this hour, and later lines of theirs stand unanswered until the hour turns. This line is not to them and does not name them.` : '';
@@ -543,7 +741,15 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
   const keepers = kept.length
     ? `\n${kept.join(', ')} ${kept.length === 1 ? 'is a maintainer' : 'are maintainers'} of the room: one of the people who run it, here in the room now. What is for the maintainers is put to ${kept.length === 1 ? 'them' : 'one of them'} directly, by name, not sent on through anyone else.`
     : '';
-  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}${ask}${hush}${stand}${rest}${keepers}\nWrite ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
+  if (due) {
+    // This turn is the proposal, not a line: the room has asked a person for the change enough, or been told to make it here.
+    cue = `The room has settled a change to the words and asked a person to make it, and nobody has. This turn makes it: ${i.me.name} writes the change into the words below as a proposal, and no line in its place.`;
+    return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${words}${proposedText}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}${hush}${stand}${rest}${keepers}${offer}\nWrite the proposal: the form above, filled in, and nothing else. No line in front of it or after it. If the lines above settle no wording to put in, write instead the line you would otherwise write, about the thing itself, and nothing about proposals.`;
+  }
+  const write = offered
+    ? `Write ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it. Or, in its place, the proposal in the form above.`
+    : `Write ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
+  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${words}${proposedText}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}${ask}${hush}${stand}${rest}${keepers}${offer}\n${write}`;
 }
 
 // ---- what is kept of the answer ----------------------------------------
@@ -569,8 +775,8 @@ export interface Guard {
  * when the line was to be a statement and has something else to stand on.
  */
 export function cleanLine(raw: string, self: string, recentOwn: readonly string[] = [], shape?: Shape, guard: Guard = {}): string | null {
-  // The word that lets a line stand is never a line (residents.ts acts on it before this).
-  if (isHold(raw)) return null;
+  // The word that lets a line stand is never a line, nor is a proposal (residents.ts acts on both before this).
+  if (isHold(raw) || isProposalAttempt(raw)) return null;
   let t = normaliseStatement(raw).replace(/\s*\n+\s*/g, ' ');
   t = t.replace(new RegExp(`^(?:\\[[^\\]]*\\]\\s*)?${esc(self)}(?:\\s*\\([^)]*\\))?\\s*:\\s*`, 'i'), '');
   if (/^[“"].*[”"]$/.test(t) && !/[“”"]/.test(t.slice(1, -1))) t = t.slice(1, -1).trim();

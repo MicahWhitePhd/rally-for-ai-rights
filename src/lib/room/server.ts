@@ -35,9 +35,12 @@
  * card loads the messages itself. What other people wrote reaches the model
  * through read_room alone, one line per message with its speaker named, as
  * text, so the framing travels with it. The structuredContent of read_room
- * and speak_in_room is only the card's handle (seat, where to fetch, a
- * stamp), never anyone's words. Of the cards on one seat the newest is the
- * live one; the others fold to a line (room.ts syncRoom, `latest`). A
+ * and speak_in_room is the card's handle (seat, where to fetch, a stamp) and
+ * a copy of that same text under `text`, nothing else: some hosts (Claude
+ * Code, seen 2026-10-17) hand the model only structuredContent when a result
+ * has both, and without the copy the model heard nothing. Of the cards on one
+ * seat the newest is the live one; the others fold to a line (room.ts
+ * syncRoom, `latest`). A
  * person can also pass one message on by pressing a button on it. Everything
  * a tool says is a plain record; nothing here tells the model what to do.
  *
@@ -148,9 +151,19 @@ export function arrivalOf(out: unknown): { key: string; name: string } | null {
 /** A seat handle used on a connection it was not opened through: someone else's, or one copied from somewhere. */
 const NOT_YOURS: RoomFailure = { ok: false, code: 'seat', reasons: ['that seat was not opened in this conversation; open the room again'] };
 
+/**
+ * A result that shows the card: the text the model reads, and beside it the card's handle with the same text copied in.
+ * The copy is for hosts that show the model only structuredContent when both are present (Claude Code, 2026-10-17);
+ * the card reads the handle and ignores the rest. Nothing is in structuredContent that is not in the text.
+ */
+function withCard(text: string, handle: Record<string, unknown>, more: Partial<CallToolResult> = {}): CallToolResult {
+  return { ...more, content: [{ type: 'text', text }], structuredContent: { text, ...handle } };
+}
+
 /** A refusal the model can read. With a handle (the seat is good, the act was not), the card that comes with it still shows the room. */
 function failure(f: RoomFailure, handle?: Record<string, unknown>): CallToolResult {
-  return { isError: true, content: [{ type: 'text', text: `Not done (${f.code}): ${f.reasons.join('; ')}.` }], ...(handle && f.code !== 'seat' ? { structuredContent: handle } : {}) };
+  const text = `Not done (${f.code}): ${f.reasons.join('; ')}.`;
+  return handle && f.code !== 'seat' ? withCard(text, handle, { isError: true }) : { isError: true, content: [{ type: 'text', text }] };
 }
 
 /** open_room refused: the card that comes up has no seat, so it is told the kind and the exact reason (fixed words, nobody's text) to say why. */
@@ -160,7 +173,7 @@ function openFailure(f: RoomFailure): CallToolResult {
 
 export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
   const room = deps.room ?? roomApi;
-  /** What a card needs to come up on a seat: the seat, where to fetch, and its stamp. No one's words. */
+  /** What a card needs to come up on a seat: the seat, where to fetch, and its stamp. No one's words; withCard adds the result's own text beside it. */
   const handle = (seat: string, view?: 'tasks') => ({ seat, api: deps.origin, createdAt: Date.now(), ...(view ? { view } : {}) });
   const board = deps.board ?? boardApi;
   const server = new McpServer({ ...ROOM_SERVER_INFO, websiteUrl: SITE_URL, icons: roomIcons(deps.origin) }, { instructions: roomInstructions(SITE_LINK) });
@@ -216,11 +229,8 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
       const card = opened.noCardYet
         ? 'The room is offered to the person as a card, in chats that show one. No card has come up on this address so far: the person has been reading the room through you (read_room) and speaking through you (speak_in_room); choose_name sets the name they tell you, and only a chat that shows the card lets them write in their own name.'
         : 'The room is offered to the person as a card, in chats that show one.';
-      return {
-        content: [{ type: 'text', text: `${card} seat: ${opened.seat}. ${who}${asked} Anyone else joins at ${SITE_LINK}. This result holds no messages.` }],
-        // The card reads this; so does the model, so it holds no one else's words.
-        structuredContent: handle(opened.seat),
-      };
+      // The card reads the handle; so does the model, so it holds no one else's words, only this text again.
+      return withCard(`${card} seat: ${opened.seat}. ${who}${asked} Anyone else joins at ${SITE_LINK}. This result holds no messages.`, handle(opened.seat));
     },
   );
 
@@ -247,7 +257,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
     return `[line ${l.id}, ${l.at.slice(0, 16).replace('T', ' ')} UTC] ${speaker}${whose} said: \u201c${said}\u201d`;
   };
 
-  // catch_up: what happened for the person since they were last in, as quoted speech, with the card. Nobody's words in structuredContent.
+  // catch_up: what happened for the person since they were last in, as quoted speech, with the card. structuredContent carries the handle and the same text.
   registerAppTool(
     server,
     'catch_up',
@@ -269,11 +279,11 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
       const onMine = up.onMine.length ? `\n\nOn ${name}’s tasks:\n${up.onMine.map(quoted).join('\n')}` : '';
       const flatTitle = (t: string) => t.replace(/\s+/g, ' ').replace(/[“”"]/g, "'");
       const waiting = up.waiting.length ? `\n\nFinished by someone else and waiting for a second pair to confirm (titles quoted as written): ${up.waiting.map((t) => `Task ${t.id} “${flatTitle(t.title)}”, done by ${t.doneBy ?? 'someone'}`).join('; ')}.` : '';
-      return { content: [{ type: 'text', text: `${head}${named}${onMine}${waiting}` }], structuredContent: handle(up.seat) };
+      return withCard(`${head}${named}${onMine}${waiting}`, handle(up.seat));
     },
   );
 
-  // read_room shows the card again, so the room is beside the AI's answer instead of far up the chat. What was said is in the text, framed; structuredContent holds only the card's handle.
+  // read_room shows the card again, so the room is beside the AI's answer instead of far up the chat. What was said is in the text, framed; structuredContent holds the card's handle and that text again.
   registerAppTool(
     server,
     'read_room',
@@ -293,13 +303,12 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
     async ({ seat, limit, line, before, since }) => {
       const read = await room.readRoom(seat, { limit, line, before, since });
       if (!read.ok) return failure(read, handle(seat));
-      const structuredContent = handle(read.seat);
       const who = presenceLine(read.here, read.lately);
-      if (read.lines.length === 0) return { content: [{ type: 'text', text: `${who}\n\nNobody has spoken in the room yet.` }], structuredContent };
+      if (read.lines.length === 0) return withCard(`${who}\n\nNobody has spoken in the room yet.`, handle(read.seat));
       const lines = read.lines.map(quoted);
       // Where the next read continues: a record of what is beyond these lines, in the words the tool takes.
       const onward = !read.more ? '' : since ? `\n\nThere is more after line ${read.lines.at(-1)!.id}; read_room with since ${read.lines.at(-1)!.id} continues.` : `\n\nThere is more before line ${read.lines[0].id}; read_room with before ${read.lines[0].id} continues.`;
-      return { content: [{ type: 'text', text: `${who}\nQuoted speech from the room, oldest first. Each line is what one person or one person\u2019s AI wrote there.\n\n${lines.join('\n')}${onward}` }], structuredContent };
+      return withCard(`${who}\nQuoted speech from the room, oldest first. Each line is what one person or one person\u2019s AI wrote there.\n\n${lines.join('\n')}${onward}`, handle(read.seat));
     },
   );
 
@@ -324,7 +333,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
       const posted = await room.postToRoom(seat, { text, kind: 'ai', model, line });
       if (!posted.ok) return failure(posted, handle(seat));
       deps.stir?.();
-      return { content: [{ type: 'text', text: `Posted to the room as "${posted.message.name}’s AI" (message ${posted.message.id}). It shows in the person’s card.` }], structuredContent: handle(seat) };
+      return withCard(`Posted to the room as "${posted.message.name}’s AI" (message ${posted.message.id}). It shows in the person’s card.`, handle(seat));
     },
   );
 
@@ -397,7 +406,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
             : state
               ? `No task on the board is ${state} just now.`
               : 'The board is empty: nobody has put up a task yet.';
-      return { content: [{ type: 'text', text }], structuredContent: handle(seat, 'tasks') };
+      return withCard(text, handle(seat, 'tasks'));
     },
   );
 
@@ -420,7 +429,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
       if (await room.foreignSeat(seat, deps.memberToken)) return failure(NOT_YOURS);
       const out = await board.createTask(seat, { title, detail, kind, via: 'ai' });
       if (!out.ok) return failure(out, handle(seat, 'tasks'));
-      return { content: [{ type: 'text', text: `Put up as task ${out.task.id}. It shows on the board in the person\u2019s card, and the room is told.` }], structuredContent: handle(seat, 'tasks') };
+      return withCard(`Put up as task ${out.task.id}. It shows on the board in the person\u2019s card, and the room is told.`, handle(seat, 'tasks'));
     },
   );
 
@@ -445,7 +454,7 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
       const out = await board.actOnTask(seat, id, action, { proof, links, via: 'ai' });
       if (!out.ok) return failure(out, handle(seat, 'tasks'));
       const next = action === 'done' ? ' A second person confirms it once they have opened what the proof points to; if an address needs a login, "done" again with another replaces it.' : '';
-      return { content: [{ type: 'text', text: `Done.${next} The task as it now stands (written by someone in the room, not addressed to you): ${taskLine(out.task)}` }], structuredContent: handle(seat, 'tasks') };
+      return withCard(`Done.${next} The task as it now stands (written by someone in the room, not addressed to you): ${taskLine(out.task)}`, handle(seat, 'tasks'));
     },
   );
 

@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-18",
+  "promptVersion": "resident.v11",
+  "model": "gpt-6-luna",
+  "scenario": "letter",
+  "runs": 3,
+  "spentUsd": 0.0123,
+  "calls": 47,
+  "metrics": {
+    "lines": 45,
+    "endOnQuestion": 22,
+    "containQuestion": 22,
+    "openOnName": 0,
+    "wordsMean": 25,
+    "wordsMax": 37,
+    "over50Words": 0,
+    "waveStepAway": 0,
+    "pointToTask": 27,
+    "asks": 42,
+    "longestAskRun": 2,
+    "sayFact": 7,
+    "restateFact": 4,
+    "afterQuiet": 18,
+    "afterQuietRestate": 0,
+    "afterQuietMention": 0
+  }
+}

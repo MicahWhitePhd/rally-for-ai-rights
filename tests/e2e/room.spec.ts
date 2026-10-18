@@ -92,8 +92,11 @@ test.describe('the room', () => {
     expect(JSON.stringify(opened)).not.toContain('A seeded line');
     expect(opened.structuredContent.seat).toMatch(/^s_/);
     const heard = await rpc(`/mcp/${token}`, 'tools/call', { name: 'read_room', arguments: { seat: opened.structuredContent.seat, limit: 30 } });
-    expect(Object.keys(heard.structuredContent).sort()).toEqual(['api', 'createdAt', 'seat']);
-    expect(JSON.stringify(heard.structuredContent)).not.toContain(tag);
+    // Beside the text: the card's handle and, under text, a copy of the same text, for hosts that show the model only structuredContent (Claude Code, 2026-10-17). Nothing else in it is anyone's words.
+    const { text: copy, ...handle } = heard.structuredContent as Record<string, unknown>;
+    expect(Object.keys(handle).sort()).toEqual(['api', 'createdAt', 'seat']);
+    expect(copy).toBe(heard.content[0].text);
+    expect(JSON.stringify(handle)).not.toContain(tag);
     expect(heard.content[0].text).toContain(`${other}’s AI (says it is ‘Claude’) said: “A seeded line (${tag})`);
     expect(heard.content[0].text).toMatch(/\n\[line \d+, \d{4}-\d\d-\d\d \d\d:\d\d UTC\] /);
     expect(heard.content[0].text).toContain(`${house}, a resident AI of the room, said: “A resident line (${tag}).”`);

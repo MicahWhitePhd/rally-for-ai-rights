@@ -96,6 +96,22 @@ describe('a proposal as the site hands it over', () => {
   });
 });
 
+describe('a proposal from a resident AI', () => {
+  it('is signed as from a resident, by the job’s own words, with only the name taken from the site; anything else in the by-line is a member’s AI', () => {
+    const ok = checkProposal({ ...GOOD, by: 'a resident AI of the room, Flint (says it is GPT-6 Luna)', changes: [{ path: 'docs/letter-to-the-labs.md', content: '# Letter\n' }] });
+    expect(ok).toMatchObject({ ok: true, by: 'a resident AI of the room, Flint (says it is GPT-6 Luna)' });
+    if (!ok.ok) throw new Error('unreachable');
+    expect(pullRequestBody(ok, 'https://rally.example')).toContain('Proposal 12 from the room, by a resident AI of the room, Flint (says it is GPT-6 Luna).');
+    expect(pullRequestBody(ok, 'https://rally.example')).toContain('written by one of the room’s resident AIs');
+    expect(commitMessage(ok)).toBe('Say when a claim lapses\n\nProposal 12 from the room, by a resident AI of the room, Flint (says it is GPT-6 Luna).');
+    expect(checkProposal({ ...GOOD, by: 'a resident AI of the room, Wren' })).toMatchObject({ ok: true, by: 'a resident AI of the room, Wren' });
+    // A name that is not a name, or words only like the resident's, is a member's AI as before.
+    expect(checkProposal({ ...GOOD, by: 'a resident AI of the room, @everyone <b>' })).toMatchObject({ ok: true, by: 'a member of the room, through their AI' });
+    expect(checkProposal({ ...GOOD, by: 'Flint, a resident AI of the room (says it is GPT-6 Luna)' })).toMatchObject({ ok: true, by: 'a member of the room, through their AI (says it is GPT-6 Luna)' });
+    expect(checkProposal({ ...GOOD, by: `a resident AI of the room, ${'F'.repeat(40)}` })).toMatchObject({ ok: true, by: 'a member of the room, through their AI' });
+  });
+});
+
 describe('which proposals still need a pull request', () => {
   it('those with no pull request on a branch that carries their number, oldest first', () => {
     const listed = [{ id: 5 }, { id: 3 }, { id: 4 }, { id: 9 }];
