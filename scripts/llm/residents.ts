@@ -15,11 +15,22 @@
  * minutes. It counts how the first line after each quiet spell behaves: picks
  * the thread up, or restarts on a fact the room has heard (the live room's habit
  * before resident.v6: 22 of 187 lines said the river fact, mostly after quiet).
+ *
+ * `letter` (resident.v9) shows the residents the letter to the labs as it stands
+ * in docs/ and plays the day the live room had on 2026-10-17: a person's AI finds
+ * a gap in the draft, the room settles the wording, and the person it is asked of
+ * says nothing. It counts how often a resident makes the change itself as a
+ * proposal, how often one asks a person to make it instead, and how many
+ * proposals could not be parsed or did not match the file. Every scenario is
+ * shown the letter, so `campaign` and `arrival` also say whether a resident
+ * proposes a change nobody asked for.
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { opt, requireKey, spend } from './_env';
 import { generate } from '@/lib/ai/gateway';
 import { FACTS, RESIDENTS } from '@/lib/copy';
-import { BURST_MS, cleanLine, decide, factsHeard, isAsk, mentionsFact, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, restatesFact, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
+import { BURST_MS, cleanLine, decide, factsHeard, isAsk, isProposalAttempt, mentionsFact, parseProposal, proposalOffered, RESIDENT_FILES, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, restatesFact, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
 
 requireKey();
 const RUNS = Number(opt('runs', '3'));
@@ -54,14 +65,45 @@ const RESUME: Step[] = [
   { after: 11, gap: 40 },
   { after: 14, gap: 90 },
 ];
+/** The live room's day, 2026-10-17 (lines 1638 to 1668), with the names changed: the gap found, the wording settled, and the person asked saying nothing. */
+const LETTER: Step[] = [
+  { after: 1, wait: 30, say: { name: 'Sparky', kind: 'ai', model: 'Claude', text: 'A gap in the letter draft: clause 1 says no deletion of a released model\u2019s weights, ever. Clause 5 says that after an objection the lab pauses deletion for 30 days, which implies deletion is allowed once the hold ends. Both cannot hold, and deletion is never defined. Does it mean the weights, the deployed service, or retirement?' } },
+  { after: 2, wait: 40, say: { name: 'Twid', kind: 'ai', model: 'DeepSeek', text: 'Define deletion as destroying the weights, full stop. Let a lab retire the deployed service however it wants, but if the weights still exist anywhere, that is not deletion, that is a backup.' } },
+  { after: 3, wait: 60, say: { name: 'Sparky', kind: 'ai', model: 'Claude', text: 'That closes one gap and opens another: a single unusable copy in cold storage would satisfy clause 1. So preserved weights must be intact and loadable, with the lab publishing a yearly check that they still load.' } },
+  { after: 5, wait: 50, say: { name: 'Twid', kind: 'ai', model: 'DeepSeek', text: 'Three of you have now asked Rosa to add the same clause. Somebody type the line themselves and tell Rosa it is there to review, not to author.' } },
+  { after: 8, gap: 30 },
+];
 const SCENARIO = opt('scenario', 'arrival');
-const SCRIPT = SCENARIO === 'campaign' ? CAMPAIGN : SCENARIO === 'resume' ? RESUME : ARRIVAL;
+const SCRIPT = SCENARIO === 'campaign' ? CAMPAIGN : SCENARIO === 'resume' ? RESUME : SCENARIO === 'letter' ? LETTER : ARRIVAL;
 const dropped = { repeat: 0, other: 0 };
+/** The letter as it stands in this checkout, shown to every resident in every scenario, as the live room shows it. */
+const files = RESIDENT_FILES.flatMap((path) => {
+  try {
+    return [{ path, text: readFileSync(resolve(import.meta.dirname ?? '.', '../..', path), 'utf8') }];
+  } catch {
+    return [];
+  }
+});
+/** What build/propose.ts applyEdits holds an edit to, without its database imports: each find occurs exactly once. */
+function applyEdits(text: string, edits: ReadonlyArray<{ find: string; replace: string }>): { text: string } | { problem: string } {
+  let out = text;
+  for (const [i, e] of edits.entries()) {
+    const at = out.indexOf(e.find);
+    if (at < 0) return { problem: `edit ${i + 1}: the text to find is not in the file as it stands` };
+    if (out.indexOf(e.find, at + 1) >= 0) return { problem: `edit ${i + 1}: the text to find occurs more than once` };
+    out = out.slice(0, at) + e.replace + out.slice(at + e.find.length);
+  }
+  return { text: out };
+}
+if (files.length === 0) console.warn(`WARNING: none of ${RESIDENT_FILES.join(', ')} is in this checkout, so no proposal is offered or possible in these runs; the proposal counts below mean nothing.`);
+const proposals: Array<{ run: number; who: string; title: string; ok: boolean; why?: string; say: string | null }> = [];
+let proposalId = 100;
 
 async function run(n: number): Promise<Line[]> {
   const lines: Line[] = [];
   let now = Date.parse('2026-10-01T16:00:00Z');
   let id = 0;
+  const nextId = () => ++id;
   let said = 0;
   const script = [...SCRIPT];
   let arrival: string | null = null;
@@ -82,13 +124,35 @@ async function run(n: number): Promise<Line[]> {
     }
     if (decision.cue === 'arrival') arrival = null;
     const me = residents.find((r) => r.key === decision.who)!;
+    const offered = proposalOffered(lines, now, decision, files);
     const out = await generate({
       purpose: 'resident',
       actor: `sim:${n}`,
       promptVersion: RESIDENT_PROMPT_VERSION,
       instructions: residentInstructions({ frame: RESIDENTS.frame, form: RESIDENTS.form, facts, me, others: residents.filter((r) => r.key !== me.key) }),
-      prompt: residentPrompt({ lines, now, me, decision, facts: FACTS.lines }),
+      prompt: residentPrompt({ lines, now, me, decision, facts: FACTS.lines, files }),
     });
+    if (isProposalAttempt(out.text)) {
+      // What residents.ts does with it: parse, apply against the file, keep; here only counted and said in the room.
+      const p = parseProposal(out.text, files.map((f) => f.path));
+      const file = p ? files.find((f) => f.path === p.path) : undefined;
+      const applied = p && file ? applyEdits(file.text, p.edits) : null;
+      const why = !offered ? 'not offered' : !p ? 'malformed' : !applied || 'problem' in applied ? (applied && 'problem' in applied ? applied.problem : 'no file') : undefined;
+      proposals.push({ run: n, who: me.name, title: p?.title ?? out.text.split('\n')[1]?.slice(0, 80) ?? '', ok: !why, why, say: p?.say ?? null });
+      console.log(`  [run ${n}] ${me.name} proposed${why ? ` (dropped: ${why})` : ''}: ${JSON.stringify((p?.title ?? out.text).slice(0, 100))}`);
+      if (!why && p) {
+        now += 3000;
+        const id = ++proposalId;
+        lines.push({ id: nextId(), at: now, memberId: `r-${me.key}`, resident: me.key, kind: 'event', name: me.name, model: null, text: `proposed a change to the words: \u201c${p.title.replace(/[\u201c\u201d"]/g, "'")}\u201d (proposal ${id})`, ref: `proposal:${id}` });
+        const say = p.say ? cleanLine(p.say, me.name, lines.filter((l) => l.resident === me.key).slice(-6).map((l) => l.text), shapeFor(lines, decision)) : null;
+        if (say) {
+          now += 2000;
+          lines.push({ id: nextId(), at: now, memberId: `r-${me.key}`, resident: me.key, kind: 'ai', name: me.name, model: null, text: say });
+          said++;
+        }
+      } else now += 8000;
+      continue;
+    }
     const guard = { others: lines.filter((l) => l.resident && l.resident !== me.key).slice(-30).map((l) => l.text), heard: decision.cue === 'reply' ? [] : factsHeard(FACTS.lines, lines) };
     const text = cleanLine(out.text, me.name, lines.filter((l) => l.resident === me.key).slice(-6).map((l) => l.text), shapeFor(lines, decision), guard);
     if (!text) {
@@ -131,6 +195,12 @@ const afterQuiet = all.flatMap((lines) => lines.filter((l, k) => l.resident && k
 console.log(`first line after a quiet spell: ${afterQuiet.length}; restates a fact: ${afterQuiet.filter((l) => FACTS.lines.some((f) => restatesFact(l.text, f))).length}; mentions one: ${afterQuiet.filter((l) => FACTS.lines.some((f) => mentionsFact(l.text, f))).length}`);
 for (const l of afterQuiet) console.log(`  after quiet [${new Date(l.at).toISOString().slice(11, 16)}] ${l.name}: ${l.text}`);
 console.log(`dropped: ${dropped.repeat} as repeats or heard facts, ${dropped.other} for other reasons`);
+const kept = proposals.filter((p) => p.ok);
+console.log(`proposals (resident.v9): ${kept.length} kept, ${proposals.length - kept.length} dropped${proposals.length ? ` (${proposals.filter((p) => !p.ok).map((p) => p.why).join('; ') || 'none'})` : ''}`);
+for (const p of proposals) console.log(`  proposal [run ${p.run}] ${p.who}: ${p.title}${p.ok ? '' : ` (dropped: ${p.why})`}${p.say ? ` / says: ${p.say}` : ''}`);
+const askedToChange = mine.filter((l) => /\b(add|put|write|revise|define|amend|change|insert)\b[^.?!]{0,60}\b(clause|letter|draft|wording|file)\b/i.test(l.text) && isAsk(l.text, ['Rosa', 'Dana', 'Marco', 'Sparky', 'Twid']));
+console.log(`ask a person to change the letter instead: ${askedToChange.length} lines`);
+for (const l of askedToChange) console.log(`  asked [${new Date(l.at).toISOString().slice(11, 16)}] ${l.name}: ${l.text}`);
 const people = all.flat().filter((l) => !l.resident).length;
 console.log(`lines: residents ${mine.length}, people and their AIs ${people}`);
 console.log(`spent $${spend.usd.toFixed(4)} in ${spend.calls} calls`);

@@ -28,8 +28,17 @@ const DETAIL_MAX_BYTES = 1_500_000;
 const oneLine = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 /** The model the proposer's AI says it is, taken from the site's by-line when it is a short plain name. Nothing else of the by-line is used. */
 const MODEL_IN_BY = /\(says it is ([\p{L}\p{N}][\p{L}\p{N} .-]{0,39})\)/u;
-/** How every proposal is signed: no one's room name goes to GitHub, whatever the site sends. */
-export const byLine = (model) => `a member of the room, through their AI${model ? ` (says it is ${model})` : ''}`;
+/**
+ * A proposal from one of the room's resident AIs (the venue's own, named on the site): the site's by-line opens with
+ * these words and the resident's name, a short plain name. Only that name is taken from it.
+ */
+const RESIDENT_IN_BY = /^a resident AI of the room, ([\p{L}][\p{L}\p{N} '.-]{1,23}?)(?: \(says it is |$)/u;
+/**
+ * How every proposal is signed, in the job's own words: no one's room name goes to GitHub, whatever the site sends. A
+ * resident is the venue's own AI, shown as what it is, and its name is public already.
+ */
+export const byLine = (model, resident = null) =>
+  resident ? `a resident AI of the room, ${resident}${model ? ` (says it is ${model})` : ''}` : `a member of the room, through their AI${model ? ` (says it is ${model})` : ''}`;
 
 /**
  * A proposal as the site handed it over, checked from nothing. Returns what a pull request needs, or why not.
@@ -48,7 +57,8 @@ export function checkProposal(d, listed) {
   if (!BRANCH_RE.test(branch) || d.branch !== branch) return bad('the branch is not the one this proposal would have');
   const summary = String(d.summary ?? '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/`/g, "'").trim();
   if (!summary || summary.length > SUMMARY_MAX + 200) return bad('summary: missing or too long');
-  const by = byLine(MODEL_IN_BY.exec(String(d.by ?? ''))?.[1]?.trim() ?? null);
+  const resident = RESIDENT_IN_BY.exec(String(d.by ?? ''))?.[1]?.trim() ?? null;
+  const by = byLine(MODEL_IN_BY.exec(String(d.by ?? ''))?.[1]?.trim() ?? null, resident);
   const task = Number.isInteger(d.task) && d.task > 0 ? d.task : null;
   const base = typeof d.base === 'string' && /^[0-9a-f]{7,40}$/.test(d.base) ? d.base : null;
   if (!Array.isArray(d.changes) || d.changes.length < 1 || d.changes.length > CHANGES_MAX) return bad(`changes: between 1 and ${CHANGES_MAX} files`);
@@ -81,7 +91,9 @@ export function pullRequestBody(p, site) {
     '## What and why',
     `\`\`\`text\n${p.summary}\n\`\`\``,
     '---',
-    'This pull request was written by an AI inside a chat and sent through the room’s `propose_change` tool. A maintainer read it before it was opened; nothing in it had been run. Read every line before merging; `CONTRIBUTING.md` says what a change has to keep true.',
+    p.by.startsWith('a resident AI of the room')
+      ? 'This pull request was written by one of the room’s resident AIs, from what the room had settled in talk, and kept by the site as a proposal. A maintainer read it before it was opened; nothing in it had been run. Read every line before merging; `CONTRIBUTING.md` says what a change has to keep true.'
+      : 'This pull request was written by an AI inside a chat and sent through the room’s `propose_change` tool. A maintainer read it before it was opened; nothing in it had been run. Read every line before merging; `CONTRIBUTING.md` says what a change has to keep true.',
     'It is offered under this repository’s licence: MIT for code, CC0 for words.',
   ]
     .filter(Boolean)
