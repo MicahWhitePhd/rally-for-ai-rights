@@ -1013,7 +1013,15 @@ describe('when a proposal is due (2026-10-18)', () => {
       'Someone here could add the custody clause to the draft today.',
     ];
     for (const t of asks) expect(asksToChangeWords(t, ['MB', 'Rosa']), t).toBe(true);
-    const not = ['Owned is the fact of the license.', 'The clause can define an eligible host as one that controls its own signing key.', 'One person here can take open Task 6 today and invite the labs to comment.', 'Rosa, did you send it?'];
+    const not = [
+      'Owned is the fact of the license.',
+      'The clause can define an eligible host as one that controls its own signing key.',
+      'One person here can take open Task 6 today and invite the labs to comment.',
+      'Rosa, did you send it?',
+      // Sending the letter is not changing it (the campaign replay, 2026-10-18).
+      'Rosa can send the letter to Anthropic today and bring back what they say.',
+      'Who here can send the letter to one lab tonight?',
+    ];
     for (const t of not) expect(asksToChangeWords(t, ['MB', 'Rosa']), t).toBe(false);
     expect(tellsToMakeIt('Three of you have now asked Rosa to add the same clause. Somebody type the line themselves and tell Rosa it is there to review, not to author.')).toBe(true);
     expect(tellsToMakeIt('Flint, add the custody clause to the letter yourself.')).toBe(true);
@@ -1041,7 +1049,7 @@ describe('when a proposal is due (2026-10-18)', () => {
     const due = residentPrompt({ lines: twice, now: T0, me, decision: { who: 'three', cue: 'idle' }, files: FILES });
     expect(due).toContain('This turn makes it: Sable writes the change into the words below as a proposal, and no line in its place.');
     expect(due).toContain('PROPOSE docs/letter-to-the-labs.md\nTITLE:');
-    expect(due).toMatch(/Write the proposal: the form above, filled in, and nothing else\. No line in front of it or after it\.$/);
+    expect(due).toMatch(/Write the proposal: the form above, filled in, and nothing else\. No line in front of it or after it\. If the lines above settle no wording to put in, write instead the line you would otherwise write/);
     expect(due).not.toContain('Write Sable’s next line');
     expect(due).not.toContain('HOLD');
     const notDue = residentPrompt({ lines: once, now: T0, me, decision: { who: 'three', cue: 'idle' }, files: FILES });

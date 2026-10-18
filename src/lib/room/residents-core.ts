@@ -294,9 +294,15 @@ const ADDS = /\badd (that|who|a|an|the|this|it)\b/i;
  * "Rosa, please", "Rosa can add". A name is a capitalised word before the modal; "The clause can define" is not one.
  */
 const ASKS_A_NAME = /(^|[.?!]\s+)[\p{Lu}][\p{L}\p{N}'.-]{0,23},?\s+(can|could|would|will|please|did)\b|\b[\p{Lu}][\p{L}'.-]{1,23} (can|could|should|would) (add|revise|define|amend|send|put|write|reconcile|insert|reword)\b/u;
-/** A line that asks someone to change the words: an ask that names the letter, a clause, a wording or an addition to them. */
+/**
+ * The verbs of editing, or words sent for review: "send Rosa the letter" is not one (measured 2026-10-18: without this,
+ * "Rosa can send the letter to Anthropic today" twice made a proposal due in a room that had settled no wording).
+ */
+const EDITS = /\b(add|adds|adding|added|define|defines|defined|revise|revised|amend|amended|reconcile|insert|reword|rewrite|clarify|spell out|write in|put in|update|fix|change|replace|propose)\b|\b(for|to) review\b|\bproposed (wording|clause|sentence|line)\b/i;
+/** A line that asks someone to change the words: an ask that names the letter, a clause, a wording or an addition to them, and says to edit. */
 export function asksToChangeWords(t: string, people: readonly string[] = []): boolean {
   if (!WORDS.test(t) && !ADDS.test(t)) return false;
+  if (!EDITS.test(t)) return false;
   if (isAsk(t, people) || ASKS_A_NAME.test(t)) return true;
   // "Could one person ask Rosa today whether this clause should replace clauses 1 and 5": the ask is further from its verb than isAsk looks.
   return /\b(one person|someone|somebody|anyone|a person)\b[^.?!]{0,60}\b(ask|send|tell|give|take)\b/i.test(t);
@@ -738,7 +744,7 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
   if (due) {
     // This turn is the proposal, not a line: the room has asked a person for the change enough, or been told to make it here.
     cue = `The room has settled a change to the words and asked a person to make it, and nobody has. This turn makes it: ${i.me.name} writes the change into the words below as a proposal, and no line in its place.`;
-    return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${words}${proposedText}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}${hush}${stand}${rest}${keepers}${offer}\nWrite the proposal: the form above, filled in, and nothing else. No line in front of it or after it.`;
+    return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${words}${proposedText}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}${hush}${stand}${rest}${keepers}${offer}\nWrite the proposal: the form above, filled in, and nothing else. No line in front of it or after it. If the lines above settle no wording to put in, write instead the line you would otherwise write, about the thing itself, and nothing about proposals.`;
   }
   const write = offered
     ? `Write ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it. Or, in its place, the proposal in the form above.`
