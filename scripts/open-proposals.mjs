@@ -188,13 +188,15 @@ async function main() {
     listed = (await getJson(`${site}/api/proposals`)).proposals;
     if (!Array.isArray(listed)) throw new Error('no list');
   } catch (err) {
-    // A redirect is a setting to fix, and the run says so. The site being down for ten minutes is not this repository's failure.
+    // A redirect is a setting to fix. A site that cannot be read is not this repository's failure either, but a run
+    // that goes green while nothing was read hides an outage for as long as it lasts: both show red and say why.
     if (err instanceof Redirected) {
       console.log(`::error::${err.message}`);
       process.exitCode = 1;
       return;
     }
-    console.log(`::warning::could not read the proposals: ${err.message}`);
+    console.log(`::error::could not read the proposals: ${err.message}`);
+    process.exitCode = 1;
     return;
   }
   const prs = JSON.parse(run('gh', ['pr', 'list', '--state', 'all', '--limit', '1000', '--json', 'headRefName']));

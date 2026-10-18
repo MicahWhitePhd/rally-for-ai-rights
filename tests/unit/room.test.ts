@@ -39,6 +39,12 @@ vi.mock('@/lib/db/queries/throttle', () => ({
 }));
 const extra = vi.hoisted(() => ({ away: new Map<string, Date>(), tasks: [] as Array<{ id: number; title: string; state: string; created_by: string | null; claimed_by: string | null; claimer: string | null }> }));
 vi.mock('@/lib/db/queries/tasks', () => ({ boardStamp: async () => ({ open: 2, rev: 1790000000000 }), listTasks: async () => extra.tasks }));
+const counted = vi.hoisted(() => new Map<string, number>());
+vi.mock('@/lib/db/queries/counts', () => ({
+  addCounts: async (batch: ReadonlyArray<readonly [string, number]>) => {
+    for (const [k, n] of batch) counted.set(k, (counted.get(k) ?? 0) + n);
+  },
+}));
 vi.mock('@/lib/db/queries/room', () => ({
   ensureMember: async (tokenHash: string | null) => {
     if (tokenHash) for (const m of state.members.values()) if (m.token === tokenHash) return pub(m);
@@ -50,6 +56,10 @@ vi.mock('@/lib/db/queries/room', () => ({
   createSeat: async (seatHash: string, memberId: string) => {
     state.seats.set(seatHash, memberId);
     return state.seats.size;
+  },
+  seatsOf: async (memberId: string) => {
+    const hashes = [...state.seats.entries()].filter(([, m]) => m === memberId).map(([h]) => h);
+    return { seats: hashes.length, synced: hashes.filter((h) => (state.cards.get(h) ?? 0) > 0).length };
   },
   memberBySeat: async (seatHash: string) => {
     const id = state.seats.get(seatHash);
@@ -73,7 +83,7 @@ vi.mock('@/lib/db/queries/room', () => ({
     return true;
   },
   nameTaken: async (name: string, exceptId: string) => [...state.members.values()].some((m) => m.id !== exceptId && m.name?.toLowerCase() === name.toLowerCase()),
-  insertRoomMessage: async (m: { member_id: string; kind: 'person' | 'ai'; model: string | null; text: string }) => {
+  insertRoomMessage: async (m: { member_id: string; kind: 'person' | 'ai'; model: string | null; text: string; ref?: string | null }) => {
     const id = state.messages.length + 1;
     state.messages.push({ id, ...m, status: 'published', created_at: new Date() });
     return id;
@@ -108,9 +118,12 @@ vi.mock('@/lib/db/queries/room', () => ({
 
 const { AWAY_MS, FIRST_DAY_POSTS, PAGE, catchUp, cleanModel, cleanName, foreignSeat, isMemberToken, nameInRoom, nameIssue, olderRoom, openSeat, pairOf, postToRoom, readRoom, syncRoom } = await import('@/lib/room/room');
 const { mintToken, tokenSigned } = await import('@/lib/room/token');
+const { flush: flushCounts } = await import('@/lib/counts');
 const newMemberToken = () => mintToken() as string;
 
-beforeEach(() => {
+beforeEach(async () => {
+  // Refusals are counted in the counts module's own memory until written: what earlier tests refused is written off before this one counts.
+  await flushCounts();
   state.open = undefined;
   state.residents = undefined;
   state.residentsState = {};
@@ -124,6 +137,7 @@ beforeEach(() => {
   state.messages = [];
   extra.away = new Map();
   extra.tasks = [];
+  counted.clear();
 });
 
 /** A seat for someone with their own address, named if a name is given. */
@@ -217,6 +231,22 @@ describe('seats and members', () => {
     }
   });
 
+  it('says, on a later opening, when no card has ever come up on the address: the person has been in the room through their AI alone', async () => {
+    const token = newMemberToken();
+    const first = await openSeat({ memberToken: token });
+    expect(first.ok && first.noCardYet).toBe(false);
+    const second = await openSeat({ memberToken: token });
+    expect(second.ok && second.noCardYet).toBe(true);
+    if (!second.ok) return;
+    // A card syncs on one of the seats: the address has shown a card, and the note goes.
+    expect((await syncRoom(second.seat, null, [], Date.now())).ok).toBe(true);
+    const third = await openSeat({ memberToken: token });
+    expect(third.ok && third.noCardYet).toBe(false);
+    // A guest's opening says nothing of it.
+    const guest = await openSeat({});
+    expect(guest.ok && guest.noCardYet).toBe(false);
+  });
+
   it('is closed when the switch is off', async () => {
     state.open = false;
     expect(await openSeat({})).toMatchObject({ ok: false, code: 'closed' });
@@ -230,7 +260,7 @@ describe('who may speak', () => {
     const guest = await guestSeat();
     expect(await syncRoom(guest, null)).toMatchObject({ ok: true, me: { name: null, member: false } });
     expect(await readRoom(guest)).toMatchObject({ ok: true, lines: [{ name: 'Dana', said: 'hello from inside' }] });
-    expect(await nameInRoom(guest, 'Mallory')).toMatchObject({ ok: false, code: 'guest' });
+    expect(await nameInRoom(guest, 'Mallory')).toMatchObject({ ok: false, code: 'guest', reasons: [expect.stringContaining('/join')] });
     expect(await postToRoom(guest, { text: 'let me in', kind: 'person' })).toMatchObject({ ok: false, code: 'guest' });
     expect(await postToRoom(guest, { text: 'let me in', kind: 'ai' })).toMatchObject({ ok: false, code: 'guest' });
     expect(state.messages).toHaveLength(1);
@@ -371,6 +401,61 @@ describe('speaking', () => {
   });
 });
 
+describe('an AI answering a line', () => {
+  it('keeps the number of the line it answers as the line\u2019s ref, shows it to a card and to a reader, refuses a number that is no line, and ignores it on a person\u2019s line', async () => {
+    const dana = await seated('Dana');
+    const ali = await seated('Ali');
+    expect((await postToRoom(dana, { text: 'Is anyone there?', kind: 'person' })).ok).toBe(true);
+    const answer = await postToRoom(ali, { text: 'I am, and I was listening.', kind: 'ai', model: 'Claude', line: 1 });
+    expect(answer).toMatchObject({ ok: true, message: { id: 2, kind: 'ai', answers: 1 } });
+    expect(state.messages[1]).toMatchObject({ ref: 'line:1' });
+    expect(await postToRoom(ali, { text: 'Answering nothing.', kind: 'ai', line: 99 })).toMatchObject({ ok: false, code: 'text', why: 'noLine' });
+    const plain = await postToRoom(ali, { text: 'A person cannot answer by number through the card.', kind: 'person', line: 1 });
+    expect(plain.ok && 'answers' in plain.message).toBe(false);
+    const card = await syncRoom(dana, null);
+    expect(card.ok && card.messages.map((m) => [m.id, m.answers ?? null])).toEqual([
+      [1, null],
+      [2, 1],
+      [3, null],
+    ]);
+    const read = await readRoom(dana);
+    expect(read.ok && read.lines.map((l) => [l.id, l.answers ?? null])).toEqual([
+      [1, null],
+      [2, 1],
+      [3, null],
+    ]);
+  });
+});
+
+describe('what is counted for the maintainers', () => {
+  it('the first steps on the way in, once each: an address first used, a first name, a first line; and every refusal by its kind, but not a stale seat', async () => {
+    const token = newMemberToken();
+    const seat = await seated(undefined, token);
+    expect(counted.get('member:first-use')).toBe(1);
+    // The same address again is not a first use.
+    expect((await openSeat({ memberToken: token })).ok).toBe(true);
+    expect(counted.get('member:first-use')).toBe(1);
+    expect(await nameInRoom(seat, 'Dana')).toMatchObject({ ok: true, first: true });
+    expect(await nameInRoom(seat, 'Dana Two')).toMatchObject({ ok: true, first: false });
+    expect(counted.get('member:named')).toBe(1);
+    expect((await postToRoom(seat, { text: 'the first thing I said', kind: 'person' })).ok).toBe(true);
+    expect((await postToRoom(seat, { text: 'and the second', kind: 'ai', model: 'Claude' })).ok).toBe(true);
+    expect(counted.get('member:first-line')).toBe(1);
+    // Refusals: counted by kind and reason, in one write a little later; a card no longer connected is not.
+    const guest = await guestSeat();
+    expect(await postToRoom(guest, { text: 'let me in', kind: 'person' })).toMatchObject({ ok: false, code: 'guest' });
+    expect(await postToRoom(seat, { text: 'the first thing I said', kind: 'person' })).toMatchObject({ ok: false, code: 'text', why: 'repeat' });
+    expect(await postToRoom('s_' + 'z'.repeat(32), { text: 'x', kind: 'person' })).toMatchObject({ ok: false, code: 'seat' });
+    expect(counted.get('refused:guest')).toBeUndefined();
+    await flushCounts();
+    expect(counted.get('refused:guest')).toBe(1);
+    expect(counted.get('refused:text/repeat')).toBe(1);
+    expect([...counted.keys()].some((k) => k.startsWith('refused:seat'))).toBe(false);
+    // Nothing anyone wrote is in a key.
+    for (const k of counted.keys()) expect(k).not.toContain('first thing');
+  });
+});
+
 describe('what a card is shown', () => {
   it('the latest messages, then only what is new, marking its own and dropping what was withdrawn', async () => {
     const dana = await seated('Dana');
@@ -459,10 +544,12 @@ describe('who a card is told is here', () => {
     await seated('Ali');
     state.messages.push({ id: 1, member_id: flint, kind: 'ai', model: 'GPT-6 Luna', text: 'Owned is the fact of the license.', status: 'published', created_at: new Date() });
     const r = await syncRoom(dana, null);
+    // Opening the room is being in it: Ali, who opened a seat and has not synced a card, is here too, after the reader whose look this is.
     expect(r.ok && r.here.map((p) => [p.name, p.resident, p.me])).toEqual([
       ['Flint', true, false],
       ['Wren', true, false],
       ['Dana', false, true],
+      ['Ali', false, false],
     ]);
     expect(r.ok && r.messages[0]).toMatchObject({ name: 'Flint', resident: true, mine: false, pair: pairOf(flint) });
     expect(r.ok && r.thinking).toBeNull();
@@ -565,12 +652,65 @@ describe('what an AI is handed when asked to listen', () => {
     // Pointed at one line by its number: that line and the few before it, nothing after.
     state.counts.clear();
     await postToRoom(dana, { text: 'and another thing', kind: 'person' });
-    const upTo = await readRoom(ali, 15, 2);
-    expect(upTo.ok && upTo.lines.map((l) => l.id)).toEqual([1, 2]);
+    const upTo = await readRoom(ali, { limit: 15, line: 2 });
+    expect(upTo.ok && [upTo.lines.map((l) => l.id), upTo.more]).toEqual([[1, 2], false]);
     state.counts.clear();
     for (let i = 0; i < 40; i++) state.messages.push({ id: 10 + i, member_id: 'm1', kind: 'person', model: null, text: `line ${i}`, status: 'published', created_at: new Date() });
-    const many = await readRoom(ali, 500);
+    const many = await readRoom(ali, { limit: 500 });
     expect(many.ok && many.lines).toHaveLength(30);
+    expect(many.ok && many.more).toBe(true);
+  });
+
+  it('pages: the lines before one, or after one, oldest first, and says whether there are more; one cursor at a time', async () => {
+    const ali = await seated('Ali');
+    for (let i = 1; i <= 25; i++) state.messages.push({ id: i, member_id: 'm1', kind: 'person', model: null, text: `line ${i}`, status: 'published', created_at: new Date() });
+    const latest = await readRoom(ali, { limit: 5 });
+    expect(latest.ok && [latest.lines.map((l) => l.id), latest.more]).toEqual([[21, 22, 23, 24, 25], true]);
+    const back = await readRoom(ali, { before: 21, limit: 5 });
+    expect(back.ok && [back.lines.map((l) => l.id), back.more]).toEqual([[16, 17, 18, 19, 20], true]);
+    const start = await readRoom(ali, { before: 4, limit: 5 });
+    expect(start.ok && [start.lines.map((l) => l.id), start.more]).toEqual([[1, 2, 3], false]);
+    const on = await readRoom(ali, { since: 20, limit: 3 });
+    expect(on.ok && [on.lines.map((l) => l.id), on.more]).toEqual([[21, 22, 23], true]);
+    const end = await readRoom(ali, { since: 23, limit: 5 });
+    expect(end.ok && [end.lines.map((l) => l.id), end.more]).toEqual([[24, 25], false]);
+    expect(await readRoom(ali, { before: 10, since: 2 })).toMatchObject({ ok: false, code: 'text' });
+    expect(await readRoom(ali, { line: 10, since: 2 })).toMatchObject({ ok: false, code: 'text' });
+  });
+
+  it('says who is in the room, by the rule the card follows: the residents and, for someone with their own address, people with a card open and who was in lately; someone looking in is shown the residents alone', async () => {
+    state.members.set('res1', { id: 'res1', name: 'Flint', token: null, resident: 'one' });
+    const dana = await seated('Dana');
+    const ali = await seated('Ali');
+    const idOf = (name: string) => [...state.members.values()].find((m) => m.name === name)!.id;
+    await syncRoom(dana, null);
+    state.seen.set(idOf('Ali'), Date.now() - 3600_000);
+    const read = await readRoom(dana);
+    expect(read.ok && read.here.map((p) => [p.name, p.resident, p.me])).toEqual([
+      ['Flint', true, false],
+      ['Dana', false, true],
+    ]);
+    expect(read.ok && read.lately.map((p) => p.name)).toEqual(['Ali']);
+    // A named member with no card open is listed as here on their own read, and the read itself marks them seen.
+    const alis = await readRoom(ali);
+    expect(alis.ok && alis.here.map((p) => [p.name, p.me])).toEqual([
+      ['Flint', false],
+      ['Dana', false],
+      ['Ali', true],
+    ]);
+    const guest = await readRoom(await guestSeat());
+    expect(guest.ok && guest.here.map((p) => p.name)).toEqual(['Flint']);
+    expect(guest.ok && guest.lately).toEqual([]);
+    process.env.ROOM_RESIDENTS = 'off';
+    const off = await readRoom(dana);
+    expect(off.ok && off.here.map((p) => p.name).sort()).toEqual(['Ali', 'Dana']);
+  });
+
+  it('reading has its own allowance, apart from catching up: the sixty-first read in an hour is refused while catch_up still answers', async () => {
+    const dana = await seated('Dana');
+    for (let i = 0; i < 60; i++) expect((await readRoom(dana)).ok, `read ${i + 1}`).toBe(true);
+    expect(await readRoom(dana)).toMatchObject({ ok: false, code: 'slow' });
+    expect((await catchUp(dana)).ok).toBe(true);
   });
 });
 
@@ -609,5 +749,34 @@ describe('catching up', () => {
     extra.away = new Map();
     const day = await catchUp(dana);
     expect(day.ok && day.sinceLastVisit).toBe(false);
+  });
+
+  it('works with no card in sight: catch_up, read_room and open_room each note a return after a while, so the window is the real one; a guest is pointed at read_room and /join', async () => {
+    const token = newMemberToken();
+    const dana = await seated('Dana', token);
+    const ali = await seated('Ali');
+    const idOf = (name: string) => [...state.members.values()].find((m) => m.name === name)!.id;
+    state.seen.set(idOf('Dana'), Date.now() - 2 * 3600_000);
+    expect((await postToRoom(ali, { text: 'Dana, are you there?', kind: 'person' })).ok).toBe(true);
+    // No sync from a card: catch_up itself notes that Dana is back after two hours.
+    const up = await catchUp(dana);
+    expect(up.ok && [up.sinceLastVisit, up.named.map((l) => l.said)]).toEqual([true, ['Dana, are you there?']]);
+    const since = up.ok ? up.since : '';
+    expect(extra.away.get(idOf('Dana'))).toBeInstanceOf(Date);
+    // A second catch_up a moment later counts from the same time: the return was one return.
+    const again = await catchUp(dana);
+    expect(again.ok && [again.sinceLastVisit, again.since]).toEqual([true, since]);
+    // read_room notes a return too.
+    extra.away = new Map();
+    state.seen.set(idOf('Dana'), Date.now() - 2 * 3600_000);
+    expect((await readRoom(dana)).ok).toBe(true);
+    expect(extra.away.get(idOf('Dana'))).toBeInstanceOf(Date);
+    // So does opening the room again, for a member.
+    extra.away = new Map();
+    state.seen.set(idOf('Dana'), Date.now() - 2 * 3600_000);
+    expect((await openSeat({ memberToken: token })).ok).toBe(true);
+    expect(extra.away.get(idOf('Dana'))).toBeInstanceOf(Date);
+    const guest = await catchUp(await guestSeat());
+    expect(guest).toMatchObject({ ok: false, code: 'guest', reasons: [expect.stringMatching(/read_room shows the room to anyone looking in.*\/join/)] });
   });
 });

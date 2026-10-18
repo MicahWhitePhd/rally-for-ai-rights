@@ -35,6 +35,7 @@
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables, type McpUiHostContext } from '@modelcontextprotocol/ext-apps/app-with-deps';
 import { displayHost } from '@/lib/brand';
 import { ROOM } from '@/lib/copy';
+import { TO_MY_AI } from '@/lib/room/asks';
 
 interface Msg {
   id: number;
@@ -49,6 +50,8 @@ interface Msg {
   resident: boolean;
   /** On a resident's event: the line they let stand. */
   about?: number;
+  /** On an AI's line: the line it answers. */
+  answers?: number;
 }
 interface Present {
   name: string;
@@ -104,24 +107,19 @@ type Posted = { ok: true; message: Msg };
 /** How much of the room is drawn, out of focus, behind the way in. */
 const PEEK_SHOWN = 8;
 
-/**
- * What the card sends to the person's own AI as the person's message. These are written here, in code that is
- * reviewed, and nowhere else: not in the editable copy, and never with anything a stranger wrote in them. Pointing
- * the AI at one line gives it the line's number; the AI then reads the words through read_room, as quoted speech.
- */
-const TO_MY_AI = {
-  listen: 'Read the room. If you would answer, say it there in your own words. Then tell me in a line or two what you make of it.',
-  line: 'Read line {id} in the room and tell me what you make of it. If you would answer in the room, say it there in your own words.',
-};
+/** What the card sends to the person's own AI as the person's message is TO_MY_AI (src/lib/room/asks.ts): fixed words, nothing a stranger wrote. */
 const GROUP_MS = 10 * 60_000;
 /** The pace when the server says nothing, and the least it may ask for. */
+/** package.json's version, put in by scripts/build-room-ui.mjs at build time. */
+declare const __RALLY_VERSION__: string;
 const POLL_S = 3;
 /** With nobody touching the card for this long, it stops asking for news until someone does. */
 const IDLE_MS = 10 * 60_000;
 /** Ask again from a few lines back, so a line whose write finished a moment after a later one is not missed. */
 const OVERLAP = 5;
 const KEPT = 1500;
-const web = window.parent === window;
+/** On the web: opened on its own, or framed by /room, which says so (?web=1). Inside an AI chat neither is true. */
+const web = window.parent === window || new URLSearchParams(location.search).has('web');
 const root = document.getElementById('room') as HTMLElement;
 
 const state = {
@@ -156,6 +154,8 @@ const state = {
   cursor: 0,
   ready: false,
   full: false,
+  /** The host offers full screen. */
+  canFull: false,
   /** This card's stamp: when the tool call that showed it was made. The newest card on a seat is the live one. */
   born: 0,
   superseded: false,
@@ -273,6 +273,8 @@ const els = {
   paused: h('p', { class: 'note paused' }),
   resume: h('button', { class: 'ask', type: 'button' }),
   host: h('p', { class: 'host' }),
+  /** Full screen, where the host offers it: asks the host, and the card follows what the host answers. */
+  full: h('button', { class: 'ask full', type: 'button' }),
   guest: h('p', { class: 'note guest' }),
   guestLink: h('a', { class: 'ask' }),
 };
@@ -296,7 +298,7 @@ function shell(): void {
   // Title, then detail, then the button: the order a person fills them in, at any width.
   els.taskForm.append(h('label', { class: 'vh', htmlFor: 'task-title' }, state.s.taskTitlePh), els.taskTitle, h('label', { class: 'vh', htmlFor: 'task-detail' }, state.s.taskDetailPh), els.taskDetail, els.taskAdd);
   els.board.append(els.taskForm, els.taskList);
-  root.replaceChildren(h('div', { class: 'head' }, els.title, els.lede, els.host), els.sup, els.here, els.tabs, nameBlock, els.list, els.newBelow, els.paused, els.board, els.guest, els.form, els.listen, els.listenNote, els.err);
+  root.replaceChildren(h('div', { class: 'head' }, els.title, els.lede, els.host, els.full), els.sup, els.here, els.tabs, nameBlock, els.list, els.newBelow, els.paused, els.board, els.guest, els.form, els.listen, els.listenNote, els.err);
 }
 
 const atBottom = () => els.list.scrollHeight - els.list.scrollTop - els.list.clientHeight < 60;
@@ -305,6 +307,8 @@ function draw(): void {
   const s = state.s;
   document.body.classList.toggle('web', web);
   document.body.classList.toggle('full', state.full && !web);
+  els.full.hidden = web || !state.canFull;
+  els.full.textContent = state.full ? state.s.inline : state.s.fullscreen;
   document.documentElement.classList.toggle('gone', state.superseded);
   els.title.textContent = s.title;
   els.lede.textContent = s.lede;
@@ -402,10 +406,12 @@ function draw(): void {
     if (first.kind === 'event') {
       const ev = h('li', { class: `ev${first.resident ? ' held' : ''}${state.fresh.has(first.id) ? ' new' : ''}` });
       if (first.resident) {
-        // A resident let a line stand: shown as the act it is, from them. Pressing it shows the line.
-        const go = h('button', { class: 'evb', type: 'button' }, mark(first.pair, 'res'), `${first.name} ${first.text}`);
-        go.onclick = () => (first.about ? els.list.querySelector(`[data-id="${first.about}"]`) : null)?.scrollIntoView({ block: 'center' });
+        // A resident let a line stand: shown as the act it is, from them, in the room's words as they are now (rows kept
+        // before 2026-10-14 say “let that stand.”, which read as agreement). Pressing it shows the line.
+        const go = h('button', { class: 'evb', type: 'button' }, mark(first.pair, 'res'), `${first.name} ${first.about ? fill(s.held, { line: String(first.about) }) : first.text}`);
+        go.onclick = () => void (first.about ? reveal(first.about) : undefined);
         ev.dataset.id = String(first.id);
+        ev.id = `line-${first.id}`;
         ev.append(go);
         items.push(ev);
         continue;
@@ -414,6 +420,7 @@ function draw(): void {
       const go = h('button', { class: 'evb', type: 'button' }, mark(first.pair, first.model ? 'ai' : 'person'), `${first.model ? fill(s.aiLabel, { name: first.name }) : first.name} ${first.text}`);
       go.onclick = () => show('tasks');
       ev.dataset.id = String(first.id);
+      ev.id = `line-${first.id}`;
       ev.append(go);
       items.push(ev);
       continue;
@@ -437,9 +444,17 @@ function draw(): void {
     for (const m of block) {
       const line = h('div', { class: `m${m.kind === 'ai' ? ' ai' : ''}${m.resident ? ' res' : ''}${m.mine ? ' mine' : ''}${state.fresh.has(m.id) ? ' new' : ''}` });
       line.dataset.id = String(m.id);
+      line.id = `line-${m.id}`;
       if (m.kind === 'ai' && !m.resident) {
         const who = h('p', { class: 'who' }, mark(m.pair, 'ai'), h('b', {}, fill(s.aiLabel, { name: m.name })));
         if (m.model) who.append(fill(s.aiModel, { model: m.model }));
+        if (m.answers) {
+          // The line it answers, by number: pressing it shows that line when it is on screen.
+          const to = m.answers;
+          const go = h('button', { class: 'ans', type: 'button' }, fill(s.answers, { id: String(to) }));
+          go.onclick = () => els.list.querySelector(`[data-id="${to}"]`)?.scrollIntoView({ block: 'center' });
+          who.append(' ', go);
+        }
         line.append(who);
       }
       line.append(h('p', { class: 'tx' }, m.text));
@@ -643,6 +658,37 @@ async function older(): Promise<void> {
   state.loading = false;
 }
 
+/** How many pages back reveal() goes for one line before giving up: a line further back than that is read through the feed or by its number. */
+const REVEAL_PAGES = 12;
+/** How long a revealed line stays marked. */
+const HIT_MS = 10_000;
+
+/**
+ * Shows one line by its number: scrolls to it when it is drawn, otherwise pages back until it is (a held line, a
+ * line the feed links to, #line-12 on the web), then marks it for a while. A line that is not there (taken down,
+ * or further back than the pages it tries) is left alone.
+ */
+async function reveal(id: number): Promise<void> {
+  for (let i = 0; i < REVEAL_PAGES; i++) {
+    const el = els.list.querySelector(`[data-id="${id}"]`);
+    if (el) {
+      el.scrollIntoView({ block: 'center' });
+      el.classList.add('hit');
+      setTimeout(() => el.classList.remove('hit'), HIT_MS);
+      return;
+    }
+    if (!state.more || !state.ready || (state.messages.length > 0 && state.messages[0].id <= id)) return;
+    if (state.loading) await new Promise((r) => setTimeout(r, 100));
+    else await older();
+  }
+}
+
+/** The line the page was opened with, on the web: #line-12 is what the feed and /room link to. */
+function lineInHash(): number | null {
+  const m = /^#line-(\d+)$/.exec(location.hash);
+  return m ? Number(m[1]) : null;
+}
+
 // ---- the board ------------------------------------------------------------
 
 async function loadTasks(): Promise<void> {
@@ -796,6 +842,16 @@ els.supBtn.onclick = () => {
   touched();
   void poll();
 };
+els.full.onclick = async () => {
+  if (!app) return;
+  try {
+    const r = await app.requestDisplayMode({ mode: state.full ? 'inline' : 'fullscreen' });
+    state.full = r.mode === 'fullscreen';
+  } catch {
+    // The host said no, or nothing: the card stays as it is.
+  }
+  draw();
+};
 els.guestLink.onclick = (e) => {
   // Inside a host the frame cannot navigate away; ask the host to open the page instead.
   if (!app) return;
@@ -887,9 +943,18 @@ async function enter(): Promise<void> {
   draw();
   els.list.scrollTop = els.list.scrollHeight;
   if (state.ready && state.view === 'tasks') void loadTasks();
+  const wanted = web && state.ready ? lineInHash() : null;
+  if (wanted !== null) void reveal(wanted);
 }
 
 // ---- start -------------------------------------------------------------
+
+if (web) {
+  window.addEventListener('hashchange', () => {
+    const wanted = lineInHash();
+    if (wanted !== null && state.ready) void reveal(wanted);
+  });
+}
 
 function applyHost(ctx: McpUiHostContext | undefined): void {
   if (!ctx) return;
@@ -905,10 +970,9 @@ function applyHost(ctx: McpUiHostContext | undefined): void {
     set('--sab', bottom);
     set('--sal', left);
   }
-  if (ctx.displayMode) {
-    state.full = ctx.displayMode === 'fullscreen';
-    draw();
-  }
+  if (ctx.availableDisplayModes) state.canFull = ctx.availableDisplayModes.includes('fullscreen');
+  if (ctx.displayMode) state.full = ctx.displayMode === 'fullscreen';
+  if (ctx.displayMode || ctx.availableDisplayModes) draw();
 }
 
 async function start(): Promise<void> {
@@ -936,7 +1000,8 @@ async function start(): Promise<void> {
     return;
   }
 
-  app = new App({ name: 'Rally for AI Rights', version: '0.3.0' }, { availableDisplayModes: ['inline'] });
+  // Inline is where the card lives; a host that offers full screen gets a button for it (els.full), and the card follows what the host answers.
+  app = new App({ name: 'Rally for AI Rights', version: __RALLY_VERSION__ }, { availableDisplayModes: ['inline', 'fullscreen'] });
   app.ontoolresult = (p) => {
     const sc = p.structuredContent as { seat?: string; api?: string; createdAt?: number; view?: string; refused?: string; why?: string } | undefined;
     if (state.seat) return;

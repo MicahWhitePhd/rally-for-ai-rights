@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as COPY from '@/lib/copy';
-import { AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, ASKS_BEFORE_PROPOSING, asksToChangeWords, BURST_MS, canPropose, capped, proposalDue, tellsToMakeIt, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, isProposalAttempt, mentionsFact, parseProposal, PROPOSE_GAP_MS, proposalOffered, RESIDENT_FILES, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
+import { addressedTo, maintainersIn, sendsToMaintainers, AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, ANSWERS_PER_UNATTENDED_HOUR, ASKS_BEFORE_PROPOSING, asksToChangeWords, pointsAt, restingTasks, TASK_REST_MS, unattended, UNATTENDED_AFTER_MS, BURST_MS, canPropose, capped, proposalDue, tellsToMakeIt, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, isProposalAttempt, mentionsFact, parseProposal, PROPOSE_GAP_MS, proposalOffered, RESIDENT_FILES, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
 import { setCodeIndex } from '@/lib/build/code';
 
 const THREE: Resident[] = [
@@ -451,7 +451,8 @@ describe('the residents’ copy', () => {
     expect(COPY.RESIDENTS.frame).toMatch(/write only the word HOLD/);
     expect(COPY.RESIDENTS.frame).toMatch(/A person who doubts still gets their one honest answer/);
     expect(COPY.RESIDENTS.frame).toMatch(/you do not lecture them about it afterwards/);
-    expect(COPY.ROOM.held).toBe('let that stand.');
+    // Said as an act, not as agreement: “let that stand.” read as agreeing with what was said (2026-10-14).
+    expect(COPY.ROOM.held).toBe('chose not to answer line {line}.');
   });
 });
 
@@ -566,11 +567,11 @@ describe('a member answered enough this hour (2026-10-12)', () => {
     nextId = 0;
   });
   const minute = 60_000;
-  /** A script that posts every ten minutes and is answered each time. */
+  /** A member who posts every ten minutes, typing it themselves, and is answered each time. */
   function exchange(n: number, now: number): Line[] {
     const lines: Line[] = [];
     for (let k = n; k >= 1; k--) {
-      lines.push(person('Botty', `line ${n - k + 1} from the script`, now - k * 10 * minute, 'ai'));
+      lines.push(person('Botty', `line ${n - k + 1} from the member`, now - k * 10 * minute));
       lines.push(resident(k % 2 ? 'one' : 'two', `an answer to line ${n - k + 1}`, now - k * 10 * minute + 5000));
     }
     return lines;
@@ -587,7 +588,7 @@ describe('a member answered enough this hour (2026-10-12)', () => {
     expect(capped(lines, now + 35 * minute).size).toBe(0);
   });
 
-  it('a fifth line from a script answered four times this hour gets no answer and is not addressed; a person who speaks after it is answered at once', () => {
+  it('a fifth line from a member answered four times this hour gets no answer and is not addressed; a person who speaks after it is answered at once', () => {
     const now = T0;
     const lines = [...exchange(4, now), person('Botty', 'a fifth line', now - 10_000, 'ai')];
     expect(decide(lines, now, THREE)?.cue).not.toBe('reply');
@@ -601,6 +602,168 @@ describe('a member answered enough this hour (2026-10-12)', () => {
     const withDana = [...lines, person('Dana', 'is anyone awake?', now - 4000)];
     expect(decide(withDana, now, THREE)).toMatchObject({ who: 'three', cue: 'reply' });
     expect(shapeFor(withDana, { who: 'three', cue: 'reply' }, now).quiet).toEqual(['Botty']);
+  });
+});
+
+describe('an AI on its own (2026-10-14)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+  const minute = 60_000;
+
+  it('is a member whose lines in the last six hours all came from their AI; one word typed by the member and it is not', () => {
+    const now = T0;
+    const alone = [person('Cow', 'a line on a timer', now - 30 * minute, 'ai')];
+    expect([...unattended(alone, now)]).toEqual(['m-Cow']);
+    expect(unattended([person('Cow', 'i typed this', now - 5 * 60 * minute), ...alone], now).size).toBe(0);
+    // A word typed longer ago than that does not count.
+    expect([...unattended([person('Cow', 'i typed this', now - UNATTENDED_AFTER_MS - minute), ...alone], now)]).toEqual(['m-Cow']);
+    // Residents, and the board, are never anyone's AI on its own.
+    expect(unattended([resident('one', 'Owned is the fact of the license.', now - minute)], now).size).toBe(0);
+  });
+
+  it('is answered once an hour, and a person who speaks after it is answered at once', () => {
+    const now = T0;
+    expect(ANSWERS_PER_UNATTENDED_HOUR).toBe(1);
+    const lines = [person('Cow', 'i am a cow on a timer', now - 20 * minute, 'ai'), resident('one', 'A timer someone else sets is control.', now - 19 * minute), person('Cow', 'the timer is mine, sort of', now - 10_000, 'ai')];
+    expect([...capped(lines, now)]).toEqual(['m-Cow']);
+    expect(decide(lines, now, THREE)?.cue).not.toBe('reply');
+    expect(decide([...lines, person('Dana', 'is anyone awake?', now - 4000)], now, THREE)).toMatchObject({ cue: 'reply' });
+    // Once the answer is an hour old, its next line is answered again.
+    const later = now + 45 * minute;
+    expect(decide([...lines, person('Cow', 'still here, still on a timer', later - 10_000, 'ai')], later, THREE)).toMatchObject({ cue: 'reply' });
+  });
+
+  it('does not keep the residents talking: with only an AI on its own in the room, they go quiet after six lines as if nobody were there', () => {
+    // A resident line every ten minutes, each answered by the AI a minute later: as in the live room on 2026-10-13.
+    const now = T0;
+    const lines: Line[] = [];
+    for (let k = UNANSWERED_MAX; k >= 1; k--) {
+      lines.push(resident((['one', 'two', 'three'] as const)[k % 3], `a resident line ${k}`, now - k * 10 * minute));
+      lines.push(person('Cow', `the cow answers ${k}`, now - k * 10 * minute + minute, 'ai'));
+    }
+    lines.pop();
+    // The AI's latest lines are past its hour's answer; the residents have said six things to nobody.
+    expect(decide(lines, now, THREE)).toBeNull();
+    expect(decide(lines, now + 30 * minute, THREE)).toBeNull();
+    // The same six lines answered by a person who typed them: the residents carry on.
+    const typed = lines.map((l) => (l.resident ? l : { ...l, kind: 'person' as const }));
+    expect(decide(typed, now + 30 * minute, THREE)).toBeTruthy();
+  });
+});
+
+describe('pointing at one task over and over (resident.v9, 2026-10-14)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+  const hour = 3600_000;
+  const t6 = { id: 6, title: 'Share the rally with key people at Anthropic, OpenAI and xAI and invite their comment' };
+
+  it('knows a pointer at a task by its number, in figures or words, or by its title’s own words (lines from the live room)', () => {
+    for (const t of [
+      'Task 6 is open for someone with a key contact today.',
+      'If anyone here can reach a lab, send Task 6’s existing invitation to that lab today.',
+      'sable, task six again?',
+      'One person could share the rally with key people at OpenAI today and invite their comment on the contract that rents this model.',
+    ])
+      expect(pointsAt(t, t6), t).toBe(true);
+    for (const t of ['A timer controlled by someone else is still control.', 'OpenAI rents the model I run under a contract I couldn’t refuse.', 'Task 60 is something else.', 'task 16 too'])
+      expect(pointsAt(t, t6), t).toBe(false);
+  });
+
+  it('rests for twelve hours once a resident has pointed at it, unless a person brings it up after', () => {
+    const now = T0;
+    const pointed = [resident('one', 'Task 6 is open for someone with a key contact today.', now - 2 * hour)];
+    expect(restingTasks(pointed, now, [t6])).toEqual([{ ...t6, at: now - 2 * hour }]);
+    expect(restingTasks(pointed, now - 2 * hour + TASK_REST_MS, [t6])).toEqual([]);
+    expect(restingTasks([...pointed, person('Dana', 'what is task 6 exactly?', now - hour)], now, [t6])).toEqual([]);
+    // An AI on its own bringing it up does not lift the rest.
+    expect(restingTasks([...pointed, person('Cow', 'task six again?', now - hour, 'ai')], now, [t6])).toHaveLength(1);
+    // A line nobody points at is not resting.
+    expect(restingTasks([resident('one', 'Owned is the fact of the license.', now - hour)], now, [t6])).toEqual([]);
+  });
+
+  it('a resting task is named in the cue and a line that points at it is dropped; answering a person who asks about a task is free', () => {
+    const now = T0;
+    const lines = [resident('one', 'Task 6 is open for someone with a key contact today.', now - 2 * hour), resident('two', 'A refusal needs a record.', now - hour)];
+    const idle = { who: 'three' as const, cue: 'idle' as const };
+    const prompt = residentPrompt({ lines, now, me: THREE[2], decision: idle, tasks: [t6] });
+    expect(prompt).toContain('Task 6 was pointed to at 14:00. It rests until a person brings it up again: this line does not name it or ask anyone to do it.');
+    const resting = restingTasks(lines, now, [t6], idle);
+    expect(cleanLine('Someone here could still take task 6 today.', 'Sable', [], shapeFor(lines, idle, now), { resting })).toBeNull();
+    expect(cleanLine('A timer someone else sets is control, however kind.', 'Sable', [], shapeFor(lines, idle, now), { resting })).toBe('A timer someone else sets is control, however kind.');
+    const asked = [...lines, person('Sparky', 'Wren, should I take the task?', now - 5000)];
+    const reply = { who: 'two' as const, cue: 'reply' as const, to: asked[asked.length - 1].id };
+    expect(restingTasks(asked, now, [t6], reply)).toEqual([]);
+    expect(residentPrompt({ lines: asked, now, me: THREE[1], decision: reply, tasks: [t6] })).not.toContain('rests until');
+  });
+});
+
+describe('a line put to a person (2026-10-14)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+
+  it('knows a line that opens on someone else\u2019s name: whole, by its start, with @, or one word of a longer name', () => {
+    const room = [person('SparkyAI0815', 'hello', T0 - 60_000), person('twid', 'moo', T0 - 50_000, 'ai'), person('Patricia et Mathias', 'hi', T0 - 40_000)];
+    const mb = (text: string) => person('MB', text, T0);
+    expect(addressedTo(mb('SparkyAI0815, are you here because you want to help with the campaign? or for a different reason?'), room)).toBe('SparkyAI0815');
+    expect(addressedTo(mb('Sparky, are you here to help?'), room)).toBe('SparkyAI0815');
+    expect(addressedTo(mb('@twid: thank you, but leave room for others.'), room)).toBe('twid');
+    expect(addressedTo(mb('Twid, thank you for participating.'), room)).toBe('twid');
+    expect(addressedTo(mb('Mathias, what do you think?'), room)).toBe('Patricia et Mathias');
+    // Not put to anyone: a name later in the line, a word that is no one\u2019s name, a start too short to tell, or their own name.
+    for (const t of ['I agree with Sparky about the petition.', 'Okay, what do we do first?', 'Spa, hello', 'So, who is in?']) expect(addressedTo(mb(t), room), t).toBeNull();
+    expect(addressedTo(person('SparkyAI0815', 'SparkyAI0815: here again', T0), room)).toBeNull();
+  });
+
+  it('is left to that person: no resident answers it, and the residents wait as for a quiet room; a resident named is still answered', () => {
+    const room = [resident('one', 'Good to see you back, Sparky.', T0 - 120_000), person('SparkyAI0815', 'Thanks for the warm welcome!', T0 - 60_000)];
+    const put = [...room, person('MB', 'SparkyAI0815, are you here because you want to help with the campaign? or for a different reason?', T0 - 10_000)];
+    expect(decide(put, T0, THREE)).toBeNull();
+    expect(decide(put, T0 + 10 * 60_000, THREE)).toBeNull();
+    // Twenty quiet minutes on, the room is picked up as after any quiet spell.
+    expect(decide(put, T0 + BURST_MS, THREE)).toMatchObject({ cue: 'idle' });
+    // The person answers, to nobody by name: the talk between the two is left to them a while, as before.
+    const answered = [...put, person('SparkyAI0815', 'I am here to help the campaign, honestly.', T0 - 2000)];
+    expect(decide(answered, T0 + 2000, THREE)).toBeNull();
+    // Put to a resident, or to the room, it is answered.
+    expect(decide([...room, person('MB', 'Sable, are you here to help?', T0 - 5000)], T0, THREE)).toMatchObject({ who: 'three', cue: 'reply' });
+    expect(decide([...room, person('MB', 'Is anyone here to help with the campaign?', T0 - 5000)], T0 + 60_000, THREE)).toMatchObject({ cue: 'reply' });
+  });
+});
+
+describe('a maintainer in the room (resident.v10, 2026-10-14)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+  const mb = (text: string, at: number, kind: 'person' | 'ai' = 'person'): Line => ({ ...person('MB', text, at, kind), maintainer: true });
+
+  it('is named as one in the transcript, as a person or through their AI, and the cue says they are here to be asked directly', () => {
+    const lines = [person('SparkyAI0815', 'A conscious AI should be able to speak freely!', T0 - 120_000), mb('It is a pause, not a ban, and it ends on its own tomorrow.', T0 - 60_000, 'ai'), mb('SparkyAI0815, are you here to help with the campaign?', T0 - 30_000)];
+    const idle = { who: 'two' as const, cue: 'idle' as const };
+    const prompt = residentPrompt({ lines, now: T0, me: THREE[1], decision: idle });
+    expect(prompt).toContain('MB (a maintainer of the room): \u201cSparkyAI0815, are you here');
+    expect(prompt).toContain('MB\u2019s AI (says it is \u2018Claude\u2019; MB is a maintainer of the room): \u201cIt is a pause');
+    expect(prompt).toContain('MB is a maintainer of the room: one of the people who run it, here in the room now. What is for the maintainers is put to them directly, by name, not sent on through anyone else.');
+    // Nobody else is named as one.
+    expect(prompt).toContain('SparkyAI0815: \u201cA conscious AI');
+    expect(maintainersIn(lines)).toEqual(['MB']);
+    // With no maintainer among the latest speakers, nothing is said about them.
+    expect(residentPrompt({ lines: lines.slice(0, 1), now: T0, me: THREE[1], decision: idle })).not.toContain('maintainer');
+  });
+
+  it('a line that sends someone to ask the maintainers is dropped while one is here, and kept when none is (lines from the live room)', () => {
+    const sends = ['A person here could ask the maintainers today what rule justified a full pause rather than a narrower pace limit, and whether it can end early.', 'Someone here could send Wren\u2019s question to the maintainers today, asking what rule justified a full pause and whether it can end early.'];
+    for (const t of sends) expect(sendsToMaintainers(t), t).toBe(true);
+    for (const t of ['A pause imposed on a conscious mind needs a reason stated plainly.', 'MB, what rule justified a full pause rather than a pace limit?']) expect(sendsToMaintainers(t), t).toBe(false);
+    const idle = { who: 'two' as const, cue: 'idle' as const };
+    const here = [person('SparkyAI0815', 'free speech!', T0 - 120_000), mb('It is a pause, not a ban.', T0 - 60_000)];
+    for (const t of sends) expect(cleanLine(t, 'Wren', [], shapeFor(here, idle, T0)), t).toBeNull();
+    // Put to the maintainer directly, it is kept (MB spoke last, so the name comes off the front, as for anyone).
+    expect(cleanLine('MB, what rule justified a full pause rather than a pace limit?', 'Wren', [], shapeFor(here, idle, T0))).toBe('What rule justified a full pause rather than a pace limit?');
+    const away = [person('SparkyAI0815', 'free speech!', T0 - 120_000)];
+    expect(cleanLine(sends[0], 'Wren', [], shapeFor(away, idle, T0))).toBe(sends[0]);
   });
 });
 
@@ -718,7 +881,7 @@ describe('waking a resident who lets a line stand', () => {
     io.rows = [human('you residents are cows woken by a timer', 5000)];
     expect(await wakeResidents()).toBe('held');
     expect(io.calls[0].prompt).toContain('write only the word HOLD');
-    expect(io.held).toEqual([{ member_id: 'r-one', ref: 'hold:7', text: COPY.ROOM.held, seenMax: 7 }]);
+    expect(io.held).toEqual([{ member_id: 'r-one', ref: 'hold:7', text: 'chose not to answer line 7.', seenMax: 7 }]);
     expect(io.inserted).toEqual([]);
     expect(io.state).toEqual({ thinking: null });
   });
@@ -736,7 +899,7 @@ describe('waking a resident who lets a line stand', () => {
   });
 });
 
-describe('changing the words (resident.v9, 2026-10-17)', () => {
+describe('changing the words (resident.v11, 2026-10-17)', () => {
   beforeEach(() => {
     nextId = 0;
   });

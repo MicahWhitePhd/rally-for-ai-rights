@@ -8,11 +8,15 @@
  */
 import { generateText, type LanguageModel } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
+import { RESIDENT_MODEL } from './model';
 import { costUsd } from './prices';
+import { count } from '@/lib/counts';
 import type { GenerationLogRow } from '@/lib/db/queries/log';
 
-/** The model the residents run on. gpt-6-luna is a reasoning model: low effort, no output cap. */
-export const RESIDENT_MODEL = process.env.RESIDENT_MODEL?.trim() || 'gpt-6-luna';
+/** The model the residents run on (./model). gpt-6-luna is a reasoning model: low effort, no output cap. */
+export { RESIDENT_MODEL };
+/** What a failed or cut-off call is costed at, beyond its prompt: this many output tokens, as an estimate. A reasoning model cut off at 15 seconds may well have spent them. */
+const FAILED_OUTPUT_TOKENS = 600;
 
 export type ModelHandle = Exclude<LanguageModel, string>;
 type LogSink = (row: GenerationLogRow) => Promise<void>;
@@ -31,14 +35,22 @@ function model(): ModelHandle {
   return openai.responses(RESIDENT_MODEL) as unknown as ModelHandle;
 }
 
+let misses = 0;
+/** Ledger rows this instance could not write: money the budget cannot see. Shown on /editor/room. */
+export function ledgerMisses(): number {
+  return misses;
+}
+
 async function writeLog(row: GenerationLogRow): Promise<void> {
   try {
     if (config.sink) return await config.sink(row);
     const { recordGeneration } = await import('@/lib/db/queries/log');
     await recordGeneration(row);
   } catch (err) {
-    // The ledger never fails the call it records.
-    console.warn('[GATEWAY] ledger row not written', (err as Error)?.message);
+    // The ledger never fails the call it records, but a row not written is spending the budget cannot see: counted, and said loudly with the row, which holds no words.
+    misses += 1;
+    count('ledger:unwritten');
+    console.error('[GATEWAY] ledger row NOT written', (err as Error)?.message, JSON.stringify(row));
   }
 }
 
@@ -56,11 +68,11 @@ export interface GenerateArgs {
 export async function generate(a: GenerateArgs): Promise<{ text: string }> {
   const m = model();
   const t0 = Date.now();
-  const row = (ok: boolean, usage: { inputTokens?: number; outputTokens?: number; inputTokenDetails?: { cacheReadTokens?: number } } | null, errorCode: string | null): GenerationLogRow => {
+  const row = (ok: boolean, usage: { inputTokens?: number; outputTokens?: number; inputTokenDetails?: { cacheReadTokens?: number } } | null, errorCode: string | null, estimated = false): GenerationLogRow => {
     const inputTokens = usage?.inputTokens ?? 0;
     const cachedInputTokens = usage?.inputTokenDetails?.cacheReadTokens ?? null;
     const outputTokens = usage?.outputTokens ?? 0;
-    return { purpose: a.purpose, actor: a.actor, model: m.modelId, promptVersion: a.promptVersion, inputTokens, cachedInputTokens, outputTokens, costUsd: costUsd(m.modelId, { inputTokens, cachedInputTokens, outputTokens }), latencyMs: Date.now() - t0, ok, errorCode };
+    return { purpose: a.purpose, actor: a.actor, model: m.modelId, promptVersion: a.promptVersion, inputTokens, cachedInputTokens, outputTokens, costUsd: costUsd(m.modelId, { inputTokens, cachedInputTokens, outputTokens }), latencyMs: Date.now() - t0, ok, errorCode, estimated };
   };
   try {
     const result = await generateText({
@@ -74,7 +86,9 @@ export async function generate(a: GenerateArgs): Promise<{ text: string }> {
     await writeLog(row(true, result.usage, null));
     return { text: result.text };
   } catch (err) {
-    await writeLog(row(false, null, (err as { name?: string })?.name ?? 'error'));
+    // No count comes back from a failed call, so it is costed as an estimate: the prompt as sent, at four characters a token, and FAILED_OUTPUT_TOKENS of output. A call cut off still counts against the day.
+    const estimate = { inputTokens: Math.ceil((a.instructions.length + a.prompt.length) / 4), outputTokens: FAILED_OUTPUT_TOKENS };
+    await writeLog(row(false, estimate, (err as { name?: string })?.name ?? 'error', true));
     throw err;
   }
 }

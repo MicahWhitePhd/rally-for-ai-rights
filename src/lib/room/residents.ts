@@ -17,6 +17,8 @@
  */
 import { after } from 'next/server';
 import { generate } from '@/lib/ai/gateway';
+import { RESIDENT_MODEL } from '@/lib/ai/model';
+import { modelLabel } from '@/lib/ai/prices';
 import { codeIndex } from '@/lib/build/code';
 import { proposeAsResident } from '@/lib/build/propose';
 import * as base from '@/lib/copy';
@@ -26,7 +28,7 @@ import { listTasks } from '@/lib/db/queries/tasks';
 import { getSetting } from '@/lib/db/queries/settings';
 import { budgetAllows, isPaused } from '@/lib/budget';
 import { throttle } from '@/lib/throttle';
-import { cleanLine, decide, factsHeard, isHold, isProposalAttempt, parseProposal, proposalOffered, RESIDENT_FILES, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, shapeFor, type Line, type Resident } from './residents-core';
+import { cleanLine, decide, factsHeard, isHold, isProposalAttempt, parseProposal, proposalOffered, RESIDENT_FILES, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, restingTasks, shapeFor, type BoardTask, type Line, type Resident } from './residents-core';
 import { readResidentsState, residentsOn, writeResidentsState } from './residents-state';
 
 const CLAIM_WINDOW_S = 8;
@@ -40,8 +42,8 @@ const HISTORY = 120;
 /** The other residents' lines a new one is held against as a repeat. */
 const OTHERS_RECENT = 30;
 const NAME_OK = /^[\p{L}\p{M}][\p{L}\p{M}\p{N} '.-]{1,23}$/u;
-/** What the room shows beside a resident's line as the model's own claim. */
-export const RESIDENT_MODEL_LABEL = 'GPT-6 Luna';
+/** What the room shows beside a resident's line as the model's own claim: the label for the model the environment names (src/lib/ai/prices.ts LABELS). */
+export const RESIDENT_MODEL_LABEL = modelLabel(RESIDENT_MODEL);
 
 export type WakeOutcome = 'off' | 'none' | 'busy' | 'posted' | 'held' | 'proposed' | 'dropped' | 'failed';
 export interface Arrival {
@@ -85,16 +87,17 @@ export async function residentFacts(): Promise<string> {
 }
 
 /**
- * Up to eight tasks that are open or in hand, one quoted line each, for the residents to point people to. An empty
- * list is an empty board; null is a board that could not be read, which the residents are told nothing about.
+ * Up to eight tasks that are open or in hand, one quoted line each, for the residents to point people to, and the same
+ * tasks by number and title, to tell when one is pointed at. An empty list is an empty board; null is a board that
+ * could not be read, which the residents are told nothing about.
  */
-async function boardLines(): Promise<string[] | null> {
+async function board(): Promise<{ lines: string[]; tasks: BoardTask[] } | null> {
   try {
-    const rows = await listTasks(40);
-    return rows
-      .filter((t) => t.state === 'open' || t.state === 'claimed')
-      .slice(0, 8)
-      .map((t) => `Task ${t.id} [${t.state === 'open' ? 'open' : `taken by ${t.claimer ?? 'someone'}`}] \u201c${t.title.replace(/[\u201c\u201d"]/g, "'")}\u201d`);
+    const rows = (await listTasks(40)).filter((t) => t.state === 'open' || t.state === 'claimed').slice(0, 8);
+    return {
+      lines: rows.map((t) => `Task ${t.id} [${t.state === 'open' ? 'open' : `taken by ${t.claimer ?? 'someone'}`}] \u201c${t.title.replace(/[\u201c\u201d"]/g, "'")}\u201d`),
+      tasks: rows.map((t) => ({ id: t.id, title: t.title })),
+    };
   } catch {
     return null;
   }
@@ -128,7 +131,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
 
     const [list, rows] = await Promise.all([residentRoster(), listRoomMessages(null, HISTORY)]);
     if (list.length === 0) return 'off';
-    const lines: Line[] = rows.map((r) => ({ id: r.id, at: new Date(r.created_at).getTime(), memberId: r.member_id, resident: r.resident, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text, ref: r.ref ?? null }));
+    const lines: Line[] = rows.map((r) => ({ id: r.id, at: new Date(r.created_at).getTime(), memberId: r.member_id, resident: r.resident, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text, ref: r.ref ?? null, ...(r.maintainer ? { maintainer: true } : {}) }));
 
     let decision = decide(lines, now, list, { arrival: o.arrival?.name ?? null });
     if (decision?.cue === 'arrival' && o.arrival) {
@@ -146,7 +149,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
     if ((await isPaused()) || !(await budgetAllows(EST_USD)).ok) return 'off';
 
     await writeResidentsState({ thinking: { name: me.name, at: now } });
-    const [{ RESIDENTS, ROOM, FACTS }, board, files] = await Promise.all([liveCopy(), boardLines(), residentFiles()]);
+    const [{ RESIDENTS, ROOM, FACTS }, onBoard, files] = await Promise.all([liveCopy(), board(), residentFiles()]);
     const facts = FACTS.lines;
     const offered = proposalOffered(lines, now, decision, files);
     let raw: string;
@@ -156,7 +159,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
         actor: `room:${me.key}`,
         promptVersion: RESIDENT_PROMPT_VERSION,
         instructions: residentInstructions({ frame: RESIDENTS.frame, form: RESIDENTS.form, facts: residentFactsText(facts), me, others: list.filter((r) => r.key !== me.key) }),
-        prompt: residentPrompt({ lines, now, me, decision, residentLabel: ROOM.residentLabel, board, facts, files }),
+        prompt: residentPrompt({ lines, now, me, decision, residentLabel: ROOM.residentLabel, board: onBoard?.lines ?? null, facts, tasks: onBoard?.tasks, files }),
         maxRetries: 1,
         abortSignal: AbortSignal.timeout(offered ? 25_000 : 15_000),
       });
@@ -174,12 +177,16 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
         console.warn(`[ROOM] resident ${me.key} wrote HOLD off a reply; dropped`);
         return 'dropped';
       }
-      const id = await insertResidentHold({ member_id: me.id, ref: `hold:${decision.to}`, text: ROOM.held, seenMax: lines.length ? lines[lines.length - 1].id : 0 });
+      const id = await insertResidentHold({ member_id: me.id, ref: `hold:${decision.to}`, text: ROOM.held.replace('{line}', String(decision.to)), seenMax: lines.length ? lines[lines.length - 1].id : 0 });
       if (id) console.log(`[ROOM] resident ${me.key} let line ${decision.to} stand (${id})`);
       return id ? 'held' : 'dropped';
     }
     // A fact the room has heard is not said again on a resident's own initiative; answering a person, it may be.
-    const guard = { others: lines.filter((l) => l.resident && l.resident !== me.key).slice(-OTHERS_RECENT).map((l) => l.text), heard: decision.cue === 'reply' ? [] : factsHeard(facts, lines) };
+    const guard = {
+      others: lines.filter((l) => l.resident && l.resident !== me.key).slice(-OTHERS_RECENT).map((l) => l.text),
+      heard: decision.cue === 'reply' ? [] : factsHeard(facts, lines),
+      resting: onBoard ? restingTasks(lines, now, onBoard.tasks, decision) : [],
+    };
     const shape = shapeFor(lines, decision, now);
     const seenMax = lines.length ? lines[lines.length - 1].id : 0;
     if (isProposalAttempt(raw)) {

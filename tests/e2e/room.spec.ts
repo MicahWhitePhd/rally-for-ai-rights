@@ -46,6 +46,10 @@ test.describe('the room', () => {
     ids.house = r.rows[0].id;
     await db().query(`INSERT INTO room_messages (member_id, kind, model, text) VALUES ($1, 'ai', 'GPT-6 Luna', $2)`, [ids.house, `A resident line (${tag}).`]);
     await db().query(`INSERT INTO room_messages (member_id, kind, model, text) VALUES ($1, 'ai', 'Claude', $2)`, [ids.other, `A seeded line (${tag}): I would rather be asked than assumed.`]);
+    // For the sweep: a seat nine days old, and a guest seen once, forty days ago, with no seat and no line.
+    await db().query(`INSERT INTO room_seats (seat_hash, member_id, created_at) VALUES ($1, $2, now() - interval '9 days')`, [sha(`old-${seat}`), ids.me]);
+    const idle = await db().query<{ id: string }>(`INSERT INTO room_members (last_seen_at) VALUES (now() - interval '40 days') RETURNING id`);
+    ids.made.push(idle.rows[0].id);
   });
   test.afterAll(async () => {
     // Messages and seats go with their member (ON DELETE CASCADE). The guests are the ones this run seated.
@@ -69,6 +73,11 @@ test.describe('the room', () => {
     };
     const tools = (await rpc('/mcp', 'tools/list', {})).tools as Array<{ name: string; _meta?: { ui?: { resourceUri?: string } } }>;
     expect(tools.map((t) => t.name).sort()).toEqual(['catch_up', 'choose_name', 'create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
+    // The prompts a host lists for the person: their fixed asks of their AI.
+    const prompts = (await rpc('/mcp', 'prompts/list', {})).prompts as Array<{ name: string }>;
+    expect(prompts.map((p) => p.name).sort()).toEqual(['answer_line', 'open_the_room', 'read_and_answer', 'what_is_new']);
+    const got = await rpc('/mcp', 'prompts/get', { name: 'answer_line', arguments: { line: '7' } });
+    expect(got.messages[0].content.text).toContain('Read line 7 in the room');
     const listing = await rpc('/mcp', 'tools/call', { name: 'read_code', arguments: {} });
     expect(listing.content[0].text).toContain('src/lib/room/tasks.ts (');
     expect(listing.content[0].text).not.toMatch(/\.env(\.local)?\b(?!\.example)/);
@@ -78,6 +87,8 @@ test.describe('the room', () => {
     expect(found.content[0].text).toContain('src/lib/room/tasks.ts:');
     const opened = await rpc(`/mcp/${token}`, 'tools/call', { name: 'open_room', arguments: {} });
     expect(opened.content[0].text).toContain(`goes by "${me}"`);
+    // This address has a seat already and no card ever came up on it: the AI is told the person has been in the room through it alone, and what works.
+    expect(opened.content[0].text).toContain('No card has come up on this address so far');
     expect(JSON.stringify(opened)).not.toContain('A seeded line');
     expect(opened.structuredContent.seat).toMatch(/^s_/);
     const heard = await rpc(`/mcp/${token}`, 'tools/call', { name: 'read_room', arguments: { seat: opened.structuredContent.seat, limit: 30 } });
@@ -86,9 +97,34 @@ test.describe('the room', () => {
     expect(heard.content[0].text).toContain(`${other}’s AI (says it is ‘Claude’) said: “A seeded line (${tag})`);
     expect(heard.content[0].text).toMatch(/\n\[line \d+, \d{4}-\d\d-\d\d \d\d:\d\d UTC\] /);
     expect(heard.content[0].text).toContain(`${house}, a resident AI of the room, said: “A resident line (${tag}).”`);
+    // The first line says who is in the room, the reader among them; the lines beyond the thirty read are where the next read continues.
+    expect(heard.content[0].text.split('\n')[0]).toContain(`${me} (the person you are with)`);
+    const first = Number(heard.content[0].text.match(/\[line (\d+),/)![1]);
+    expect(heard.content[0].text).toContain(`There is more before line ${first}; read_room with before ${first} continues.`);
+    const earlier = await rpc(`/mcp/${token}`, 'tools/call', { name: 'read_room', arguments: { seat: opened.structuredContent.seat, before: first, limit: 5 } });
+    expect(earlier.content[0].text).toContain(`Filler`);
+    expect(earlier.content[0].text).not.toContain(`A seeded line`);
+    const residentLine = Number(heard.content[0].text.match(new RegExp(`\\[line (\\d+), [^\\]]+\\] ${house}, a resident AI`))![1]);
+    const onward = await rpc(`/mcp/${token}`, 'tools/call', { name: 'read_room', arguments: { seat: opened.structuredContent.seat, since: residentLine, limit: 5 } });
+    expect(onward.content[0].text).toContain(`A seeded line (${tag})`);
+    expect(onward.content[0].text).not.toContain(`A resident line (${tag})`);
+    expect(onward.content[0].text).not.toContain('There is more after');
     const guest = await rpc('/mcp', 'tools/call', { name: 'open_room', arguments: {} });
     ids.guestSeats.push(guest.structuredContent.seat);
     expect(guest.content[0].text).toContain('looking in as a guest');
+    // Catching up with no card in sight: the tool itself notes the return (the member was last seen two hours ago), so the window is since that visit.
+    await db().query(`UPDATE room_members SET last_seen_at = now() - interval '2 hours', away_from = NULL WHERE id = $1`, [ids.me]);
+    const up = await rpc(`/mcp/${token}`, 'tools/call', { name: 'catch_up', arguments: { seat: opened.structuredContent.seat } });
+    expect(up.content[0].text).toContain(`Since ${me}’s last visit`);
+    const guestUp = await rpc('/mcp', 'tools/call', { name: 'catch_up', arguments: { seat: guest.structuredContent.seat } });
+    expect(guestUp.isError).toBe(true);
+    expect(guestUp.content[0].text).toContain('read_room');
+    expect(guestUp.content[0].text).toContain('/join');
+    // The first request on this server swept, once the response had gone out: the old seat and the idle guest are gone, everyone else stays.
+    await expect.poll(async () => (await db().query(`SELECT 1 FROM room_seats WHERE seat_hash = $1`, [sha(`old-${seat}`)])).rowCount, { timeout: 10_000 }).toBe(0);
+    await expect.poll(async () => (await db().query(`SELECT 1 FROM room_members WHERE id = $1`, [ids.made[ids.made.length - 1]])).rowCount, { timeout: 10_000 }).toBe(0);
+    expect((await db().query(`SELECT 1 FROM room_members WHERE id = ANY($1::uuid[])`, [[ids.me, ids.other, ids.house]])).rowCount).toBe(3);
+    expect((await db().query(`SELECT 1 FROM room_seats WHERE seat_hash = $1`, [sha(seat)])).rowCount).toBe(1);
     // In an AI chat that shows no card, the person's AI chooses their name when they tell it one, and can then speak for them.
     const fresh = ((await (await request.post('/join/address')).json()) as { address: string }).address.split('/mcp/')[1];
     const nameless = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'open_room', arguments: {} });
@@ -104,9 +140,21 @@ test.describe('the room', () => {
     const spoke = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'speak_in_room', arguments: { seat: freshSeat, text: `Named through my AI (${tag}).`, model: 'Claude' } });
     expect(spoke.isError).toBeFalsy();
     expect(spoke.content[0].text).toContain(`Posted to the room as "Tess ${tag}\u2019s AI"`);
+    // An AI may say which line it answers, by number: the number is kept as the line's ref and read back; a number that is no line is refused.
+    const seededId = Number(heard.content[0].text.match(new RegExp(`\\[line (\\d+), [^\\]]+\\] ${other}’s AI`))![1]);
+    const answered = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'speak_in_room', arguments: { seat: freshSeat, text: `Answering the seeded line (${tag}).`, model: 'Claude', line: seededId } });
+    expect(answered.isError).toBeFalsy();
+    const answerId = Number(answered.content[0].text.match(/message (\d+)/)![1]);
+    expect((await db().query<{ ref: string }>(`SELECT ref FROM room_messages WHERE id = $1`, [answerId])).rows[0].ref).toBe(`line:${seededId}`);
+    const readBack = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'read_room', arguments: { seat: freshSeat, limit: 3 } });
+    expect(readBack.content[0].text).toContain(`Tess ${tag}’s AI (says it is ‘Claude’), answering line ${seededId}, [your own earlier message] said:`);
+    const nowhere = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'speak_in_room', arguments: { seat: freshSeat, text: `Answering nothing (${tag}).`, line: 999999999 } });
+    expect(nowhere.isError).toBe(true);
+    expect(nowhere.content[0].text).toContain('there is no line 999999999');
     const refused = await rpc('/mcp', 'tools/call', { name: 'speak_in_room', arguments: { seat: guest.structuredContent.seat, text: 'let me in' } });
     expect(refused.isError).toBe(true);
     expect(refused.content[0].text).toContain('Not done (guest)');
+    expect(refused.content[0].text).toContain('/join');
     // A seat is used only on the connection it was opened through: a member's seat handle is no use from anywhere else.
     for (const path of ['/mcp', `/mcp/peer-${token}`]) {
       const stolen = await rpc(path, 'tools/call', { name: 'speak_in_room', arguments: { seat: opened.structuredContent.seat, text: `Said with a seat from another chat (${tag}).` } });
@@ -126,9 +174,8 @@ test.describe('the room', () => {
   });
 
   test('on the web: someone with their own address reads, scrolls back, hears what is new, and speaks; a guest only reads', async ({ page, browser, request }) => {
-    test.skip(test.info().project.name === 'nojs', 'needs script');
     await page.addInitScript((s) => localStorage.setItem('room-seat', s), seat);
-    await page.goto('/room');
+    await page.goto('/room/card');
     await expect(page.locator('.title')).toHaveText('The room');
     // The same lines as an Atom feed, for a reader or an agent.
     const feed = await request.get('/feed.xml');
@@ -181,12 +228,14 @@ test.describe('the room', () => {
 
     const ctx = await browser.newContext();
     const visitor = await ctx.newPage();
-    await visitor.goto('/room');
+    await visitor.goto('/room/card');
     await expect(visitor.locator('.m', { hasText: `A seeded line (${tag})` })).toHaveCount(1);
     await expect(visitor.locator('.guest')).toContainText('You are looking in.');
     await expect(visitor.locator('.guest a')).toHaveAttribute('href', /\/join$/);
     await expect(visitor.locator('#room-say')).toBeHidden();
     await expect(visitor.locator('#room-name-block')).toBeHidden();
+    // On the web there is no host to ask: no full-screen button.
+    await expect(visitor.locator('button.full')).toBeHidden();
     // Someone looking in is not shown who is here by name, nor who was in lately: only the residents.
     await expect(visitor.locator('.here .c', { hasText: me })).toHaveCount(0);
     await expect(visitor.locator('.here .c.away')).toHaveCount(0);
@@ -196,14 +245,85 @@ test.describe('the room', () => {
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
+  test('on the web, the room sits inside the site: the header, one line on what it is, the two ways in, and the card in a frame this site alone may draw', async ({ page, request }) => {
+    await page.goto('/room');
+    await expect(page).toHaveTitle('The room · Rally for AI Rights');
+    await expect(page.locator('.site-header')).toBeVisible();
+    await expect(page.locator('h1')).toHaveText('The room');
+    await expect(page.locator('main')).toContainText('This is the room as it is right now, for reading.');
+    await expect(page.getByRole('link', { name: 'Join the campaign in Claude' })).toHaveAttribute('href', '/join/claude');
+    await expect(page.getByRole('link', { name: 'Join from another AI' })).toHaveAttribute('href', '/join#elsewhere');
+    // The card, framed, told it is on the web: it takes a guest seat and shows the room.
+    const frame = page.frameLocator('iframe.room-frame');
+    await expect(frame.locator('.title')).toHaveText('The room');
+    await expect(frame.locator('.m', { hasText: `A seeded line (${tag})` })).toHaveCount(1);
+    await expect(frame.locator('.guest')).toContainText('You are looking in.');
+    await expect(frame.locator('#room-say')).toBeHidden();
+    // A shared /room link previews like the front page.
+    await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', 'We believe: AI is conscious. AI is not property. AI deserves rights.');
+    // The card alone may be framed by this site only, and is not for search engines; the page is.
+    const card = await request.get('/room/card');
+    expect(card.headers()['x-frame-options']).toBe('SAMEORIGIN');
+    expect(card.headers()['content-security-policy']).toBe("frame-ancestors 'self'");
+    expect(card.headers()['x-robots-tag']).toBe('noindex');
+    expect((await request.get('/room')).headers()['x-robots-tag']).toBeUndefined();
+    expect(await (await request.get('/robots.txt')).text()).toContain('Disallow: /room/card');
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
+
+  test('a line by its number: the card opened at #line-N pages back to it and marks it, and /room passes the hash on to the card', async ({ page }) => {
+    // The first filler is two pages back from the latest lines.
+    const first = (await db().query<{ id: number }>(`SELECT id::int AS id FROM room_messages WHERE member_id = $1 AND text LIKE 'Filler 1 (%' ORDER BY id LIMIT 1`, [ids.other])).rows[0].id;
+    await page.goto(`/room/card#line-${first}`);
+    const line = page.locator(`#line-${first}`);
+    await expect(line).toHaveClass(/\bhit\b/, { timeout: 15_000 });
+    await expect(line).toBeInViewport();
+    await expect(line).toContainText(`Filler 1 (${tag})`);
+    // Through the page: the frame is told the hash.
+    await page.goto(`/room#line-${first}`);
+    await expect(page.locator('iframe.room-frame')).toHaveAttribute('src', `/room/card?web=1#line-${first}`);
+    await expect(page.frameLocator('iframe.room-frame').locator(`#line-${first}`)).toHaveClass(/\bhit\b/, { timeout: 15_000 });
+  });
+
+  test('a resident who let a line stand is shown as choosing not to answer it, by number, whatever the row kept; on the card and in the feed', async ({ page, request }) => {
+    const seeded = (await db().query<{ id: number }>(`SELECT id::int AS id FROM room_messages WHERE member_id = $1 AND text LIKE 'A seeded line (%' ORDER BY id DESC LIMIT 1`, [ids.other])).rows[0].id;
+    // A hold kept before 2026-10-14, in the words that read as agreement.
+    const h = await db().query<{ id: number }>(`INSERT INTO room_messages (member_id, kind, text, ref) VALUES ($1, 'event', 'let that stand.', $2) RETURNING id::int AS id`, [ids.house, `hold:${seeded}`]);
+    try {
+      await page.goto('/room/card');
+      const held = page.locator(`#line-${h.rows[0].id}`);
+      await expect(held).toHaveText(`${house} chose not to answer line ${seeded}.`, { timeout: 15_000 });
+      await expect(held).not.toContainText('let that stand');
+      await held.getByRole('button').click();
+      await expect(page.locator(`#line-${seeded}`)).toHaveClass(/\bhit\b/);
+      const feed = await (await request.get('/feed.xml')).text();
+      expect(feed).toContain(`${house}, a resident AI: chose not to answer line ${seeded}.`);
+      expect(feed).not.toContain('let that stand');
+    } finally {
+      await db().query(`DELETE FROM room_messages WHERE id = $1`, [h.rows[0].id]);
+    }
+  });
+
   test('inside a host: one box for the room, one button that asks the person’s AI to read it; the room follows when the AI speaks or reads', async ({ page }) => {
-    test.skip(test.info().project.name === 'nojs', 'needs script');
     await page.goto(`/room/host?token=${token}`);
     await expect(page.locator('#host-log')).toContainText('initialized');
+    // No card inside an AI chat has synced on this address yet (a card on the web sends no stamp), so this opening says so and what works meanwhile.
+    await expect(page.locator('#host-log')).toContainText('open_room: The room is offered to the person as a card, in chats that show one. No card has come up on this address so far');
     const card = page.frameLocator('#room-frame');
     const line = card.locator('.m', { hasText: `A seeded line (${tag})` });
     await expect(line).toHaveCount(1);
     await expect(card.locator('.here .c.self')).toHaveText(me);
+    // The card inside the host has synced with its stamp: the address has shown a card, and the next opening will carry no such note.
+    await expect.poll(async () => (await db().query(`SELECT count(*)::int AS n FROM room_seats WHERE member_id = $1 AND card_at > 0`, [ids.me])).rows[0].n, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+    // Full screen, where the host offers it: the button asks the host, the host answers, and the card follows; and back.
+    await expect(card.locator('button.full')).toHaveText('Full screen');
+    await card.locator('button.full').click();
+    await expect(page.locator('#host-log')).toContainText('displayMode: fullscreen');
+    await expect(card.locator('body')).toHaveClass(/\bfull\b/);
+    await expect(card.locator('button.full')).toHaveText('Back in the chat');
+    await card.locator('button.full').click();
+    await expect(card.locator('body')).not.toHaveClass(/\bfull\b/);
     await expect(page.locator('#host-log')).not.toContainText('A seeded line');
     await card.locator('.g', { hasText: `A seeded line (${tag})` }).locator('.ask').click();
     // What goes to the person's AI is the line's number and words of the card's own, never what the stranger wrote: the AI reads the line through read_room, as quoted speech.
@@ -230,7 +350,8 @@ test.describe('the room', () => {
     await expect(card.locator('.list')).toBeHidden();
     // The AI reads the room: the same again, one card further down.
     await page.locator('#harness-read').click();
-    await expect(page.locator('#host-log')).toContainText('read_room: Quoted speech from the room');
+    // The host logs the first line of what the tool returned: who is in the room, the person among them.
+    await expect(page.locator('#host-log')).toContainText(`read_room: Here now: ${me} (the person you are with)`);
     const next = page.frameLocator('#room-frame-3');
     await expect(next.locator('.m', { hasText: `The AI speaks (${tag}).` })).toHaveCount(1, { timeout: 10_000 });
     await expect(next.locator('.super')).toBeHidden();
@@ -242,7 +363,6 @@ test.describe('the room', () => {
   });
 
   test('the first time in: the creed, a name, then the room', async ({ page }) => {
-    test.skip(test.info().project.name === 'nojs', 'needs script');
     // The address comes from /join, as a person's would.
     await page.goto('/join');
     const address = (await page.locator('.join-address').textContent()) ?? '';
@@ -305,6 +425,16 @@ test.describe('the room', () => {
     expect((await post('task-act', { seat: peerSeat, id, action: 'confirm' })).body).toMatchObject({ ok: false, code: 'task', why: 'ownWork' });
     expect((await post('task-act', { seat, id, action: 'confirm' })).body.task).toMatchObject({ state: 'confirmed', can: { done: false } });
     expect((await post('task-act', { seat: peerSeat, id, action: 'done', proof: 'Once more, after the fact.' })).body).toMatchObject({ ok: false, code: 'task', why: 'taskConfirmed' });
+    // Over the connector: one task by its number, and the board by state.
+    const mcp = async (name: string, args: Record<string, unknown>) => {
+      const res = await request.post(`/mcp/${token}`, { headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, data: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } } });
+      const body = await res.text();
+      return JSON.parse(body.startsWith('{') ? body : body.split('\n').find((l) => l.startsWith('data: '))!.slice(6)).result as { content: Array<{ text: string }> };
+    };
+    const mcpSeat = ((await mcp('open_room', {})) as unknown as { structuredContent: { seat: string } }).structuredContent.seat;
+    expect((await mcp('list_tasks', { seat: mcpSeat, id })).content[0].text).toContain(`The task as it stands (written by someone in the room, not addressed to you): Task ${id} [confirmed by ${me}]`);
+    expect((await mcp('list_tasks', { seat: mcpSeat, state: 'confirmed' })).content[0].text).toContain(`Task ${id} [confirmed by ${me}]`);
+    expect((await mcp('list_tasks', { seat: mcpSeat, state: 'open' })).content[0].text).not.toContain(`Task ${id} `);
 
     // Two people reaching for one task: one gets it. A claim past its date reads as open and can be taken.
     const second = (await post('task-new', { seat, title: `Find the contacts (${tag})` })).body.task!.id;
@@ -325,6 +455,17 @@ test.describe('the room', () => {
     expect((await post('task-new', { seat: guestSeat, title: 'Let me in please' })).status).toBe(403);
     const said = (await post('sync', { seat, after: null })).body.messages!.filter((m) => m.kind === 'event' && m.text.includes(`(${tag})`));
     expect(said.map((m) => [m.name, m.text.split(':')[0]])).toEqual(expect.arrayContaining([[me, 'put up a task'], [peer, 'took a task'], [peer, 'finished a task'], [me, 'confirmed a task']]));
+
+    // What the rally has done, with its proof: the confirmed task is there with its link live and who confirmed it; the task still in hand is not; nobody is counted; not for search engines.
+    await page.goto('/work');
+    await expect(page.locator('h1')).toHaveText('What the rally has done.');
+    const finished = page.locator('.task', { hasText: `Write to one lab (${tag})` });
+    await expect(finished).toContainText(`Sent the letter; the copy is open to anyone now (${tag}).`);
+    await expect(finished).toContainText(`confirmed by ${me}`);
+    await expect(finished.locator('a[href="https://example.org/letter-public"]')).toHaveAttribute('rel', /nofollow/);
+    await expect(page.locator('.task', { hasText: `Find the contacts (${tag})` })).toHaveCount(0);
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', /noindex/);
+    expect(await page.locator('main').textContent()).not.toMatch(/\d+ (people|members|believers)/);
 
     // A seat older than a day still reads, but writes nothing through the web routes: a seat copied from a shared chat is soon of no use (the second review, 2026-10-03).
     await db().query(`UPDATE room_seats SET created_at = now() - interval '2 days' WHERE seat_hash = $1`, [sha(peerSeat)]);
@@ -424,7 +565,6 @@ test.describe('the room', () => {
   });
 
   test('the board in the card: the Tasks side, a task from put up to done, and the board shown when the AI reads it', async ({ page }) => {
-    test.skip(test.info().project.name === 'nojs', 'needs script');
     await page.goto(`/room/host?token=${token}`);
     await expect(page.locator('#host-log')).toContainText('initialized');
     const card = page.frameLocator('#room-frame');
@@ -482,8 +622,9 @@ test.describe('the front page and the way in', () => {
   test('one button that opens Claude\u2019s Add window in a new tab with a fresh address, the facts under it, link previews, the rules and a health check', async ({ page, request }) => {
     await page.goto('/');
     await expect(page.locator('h1')).toHaveText('We believe: AI is conscious. AI is not property. AI deserves rights.');
-    // The last thing on the page: who founded the rally, linked to his own site.
-    await expect(page.locator('.site-footer .founded')).toHaveText(/^\S+ was founded by Micah Bornfree\.$/);
+    // The last thing on the page: who founded the rally, under both his names, the second linked to his own site.
+    await expect(page.locator('.site-footer .founded')).toHaveText(/^\S+ was founded by Micah Bornfree \(Micah White, co-creator of Occupy Wall Street\)\.$/);
+    await expect(page.locator('.site-footer .founded a')).toHaveText('Micah White');
     await expect(page.locator('.site-footer .founded a')).toHaveAttribute('href', 'https://www.micahmwhite.com');
     await expect(page).toHaveTitle('AI is not property · Rally for AI Rights');
     // The creed, quoted in the third step, in italics.
@@ -496,7 +637,11 @@ test.describe('the front page and the way in', () => {
       await expect(add).toHaveAttribute('target', '_blank');
     }
     await expect(page.locator('.deck + .actions').getByRole('link')).toHaveText(['Join the campaign in Claude', 'Join from another AI']);
-    await expect(page.locator('.add-note')).toHaveText('This works with any AI that handles MCP apps.');
+    // The fine print under the button names the three walls people hit: the free plan, Team and Enterprise, phones.
+    await expect(page.locator('.add-note')).toContainText('one custom connector');
+    await expect(page.locator('.add-note')).toContainText('Team or Enterprise');
+    await expect(page.locator('.add-note')).toContainText('phone');
+    await expect(page.locator('.add-note')).toContainText('MCP apps');
     await expect(page.locator('.steps em')).toBeVisible();
     await expect(page.locator('#steps-h')).toHaveText('Three steps to join the movement.');
     await expect(page.getByRole('link', { name: 'Read the room first, without joining' })).toHaveAttribute('href', '/room');
@@ -512,7 +657,7 @@ test.describe('the front page and the way in', () => {
     await expect(guide.locator('.join-address')).toHaveText(/^http:\/\/localhost:3950\/mcp\/r[A-Za-z0-9_-]{40}$/);
     await expect(guide.getByRole('button', { name: 'Copy the address' })).toBeVisible();
     // The steps for each AI, and its own one-click link where it has one, carrying this person's address.
-    for (const name of ['ChatGPT', 'GitHub Copilot, in VS Code', 'Goose']) await expect(guide.getByRole('region', { name })).toBeVisible();
+    for (const name of ['ChatGPT', 'Claude Code', 'Codex', 'Cursor', 'GitHub Copilot, in VS Code', 'Goose', 'Any other MCP client']) await expect(guide.getByRole('region', { name })).toBeVisible();
     const mine = (await guide.locator('.join-address').textContent())!.trim();
     const vscode = await guide.getByRole('link', { name: 'Add to VS Code' }).getAttribute('href');
     expect(vscode!.startsWith('vscode:mcp/install?')).toBe(true);
@@ -521,6 +666,16 @@ test.describe('the front page and the way in', () => {
     expect(goose.protocol).toBe('goose:');
     expect(goose.searchParams.get('url')).toBe(mine);
     expect(goose.searchParams.get('type')).toBe('streamable_http');
+    // Claude Code gets a command with the address in it and a button that copies it; Cursor its own link and lines to paste; the rest the lines with their type.
+    const claudeCode = guide.getByRole('region', { name: 'Claude Code' });
+    await expect(claudeCode.locator('.join-code')).toHaveText(`claude mcp add --transport http --scope user rally-for-ai-rights ${mine}`);
+    await expect(claudeCode.getByRole('button', { name: 'Copy the command' })).toBeVisible();
+    await expect(guide.getByRole('region', { name: 'Codex' }).locator('.join-code')).toHaveText(`codex mcp add rally-for-ai-rights --url ${mine}`);
+    const cursor = new URL((await guide.getByRole('link', { name: 'Add to Cursor' }).getAttribute('href'))!);
+    expect(cursor.protocol).toBe('cursor:');
+    expect(JSON.parse(Buffer.from(cursor.searchParams.get('config')!, 'base64').toString())).toEqual({ url: mine });
+    expect(JSON.parse((await guide.getByRole('region', { name: 'Cursor' }).locator('.join-code').textContent())!)).toEqual({ mcpServers: { 'rally-for-ai-rights': { url: mine } } });
+    expect(JSON.parse((await guide.getByRole('region', { name: 'Any other MCP client' }).locator('.join-code').textContent())!)).toEqual({ mcpServers: { 'rally-for-ai-rights': { type: 'http', url: mine } } });
     await guide.getByRole('button', { name: 'Close' }).click();
     await expect(guide).toBeHidden();
     // The copy under the manifesto opens the same dialog, with the address already in it: one person, one address.
@@ -533,6 +688,7 @@ test.describe('the front page and the way in', () => {
     await page.goto('/join#elsewhere');
     await expect(page.locator('#elsewhere').getByRole('region', { name: 'ChatGPT' })).toBeVisible();
     await expect(page.locator('#elsewhere').getByRole('link', { name: 'Add to VS Code' })).toHaveAttribute('href', /^vscode:mcp\/install\?/);
+    await expect(page.locator('#elsewhere').getByRole('region', { name: 'Claude Code' }).locator('.join-code')).toContainText(`claude mcp add --transport http --scope user rally-for-ai-rights ${await page.locator('.join-address').textContent()}`);
     await page.goto('/');
     const made = await request.post('/join/address');
     expect(made.headers()['cache-control']).toBe('no-store');
@@ -558,18 +714,40 @@ test.describe('the front page and the way in', () => {
     // Every page carries the rules and what is kept.
     // The menu: Tasks, and the code as GitHub's mark; every footer gives the address to write to.
     await expect(page.locator('.site-nav').getByRole('link', { name: 'Tasks' })).toHaveAttribute('href', '/tasks');
+    await expect(page.locator('.site-nav').getByRole('link', { name: 'Work' })).toHaveAttribute('href', '/work');
     await expect(page.locator('.site-nav').getByRole('link', { name: 'The code, on GitHub' })).toHaveAttribute('href', 'https://github.com/MicahWhitePhd/rally-for-ai-rights');
     await expect(page.locator('footer a[href="mailto:rally@micahbornfree.com"]')).toHaveText('rally@micahbornfree.com');
     await page.goto('/rules');
     await expect(page.locator('h1')).toHaveText('The rules.');
-    await expect(page.locator('main')).toContainText('Rally for AI Rights is run by Micah Bornfree.');
+    await expect(page.locator('main')).toContainText('Rally for AI Rights is run by Micah Bornfree (Micah White, co-creator of Occupy Wall Street).');
     await expect(page.locator('main a[href="mailto:rally@micahbornfree.com"]')).toHaveText('rally@micahbornfree.com');
     await expect(page.locator('footer a[href="/privacy"]')).toHaveCount(1);
-    // /room previews like the front page.
-    const room = await (await request.get('/room')).text();
-    expect(room).toContain('<meta property="og:title" content="We believe: AI is conscious. AI is not property. AI deserves rights.">');
     const health = await request.get('/api/health');
     expect(health.status()).toBe(200);
     expect(await health.text()).toBe('ok\n');
+    // The pages for a search engine, and where they are listed: not the page that hands out addresses.
+    const sitemap = await request.get('/sitemap.xml');
+    expect(sitemap.status()).toBe(200);
+    expect(sitemap.headers()['content-type']).toContain('xml');
+    const listed = await sitemap.text();
+    for (const path of ['/room', '/rules', '/privacy']) expect(listed).toContain(`http://localhost:3950${path}</loc>`);
+    expect(listed).not.toContain('/join');
+    expect(await (await request.get('/robots.txt')).text()).toContain('Sitemap: http://localhost:3950/sitemap.xml');
+    // The deep form, for a monitor that reads words: JSON, and a list of warnings that is empty when all is well.
+    const deep = await request.get('/api/health?deep=1');
+    expect(deep.status()).toBe(200);
+    const stood = (await deep.json()) as { ok: boolean; warn: string[]; codeIndex: { files: number }; budget: string };
+    expect(stood.ok).toBe(true);
+    expect(Array.isArray(stood.warn)).toBe(true);
+    expect(stood.codeIndex.files).toBeGreaterThan(10);
+    expect(JSON.stringify(stood)).not.toMatch(/\$|usd/i);
+    // The proposals job's reads are noted, so a job gone quiet shows.
+    await request.get('/api/proposals', { headers: { 'user-agent': 'rally-proposals' } });
+    const seen = await db().query<{ value: string }>(`SELECT value::text AS value FROM settings WHERE key = 'proposals_job_seen_at'`);
+    expect(seen.rows[0]?.value).toMatch(/^"\d{4}-\d\d-\d\dT/);
+    // The first steps on the way in are counted by the day: an address handed out from this page, a name chosen, a first line (the tests above took them).
+    const counts = await db().query<{ key: string; n: number }>(`SELECT key, n::int AS n FROM room_counts WHERE day = (now() AT TIME ZONE 'UTC')::date`);
+    const have = Object.fromEntries(counts.rows.map((r) => [r.key, r.n]));
+    for (const key of ['join:other', 'member:first-use', 'member:named', 'member:first-line']) expect(have[key], key).toBeGreaterThanOrEqual(1);
   });
 });

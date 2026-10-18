@@ -1,8 +1,9 @@
 // Builds the room card (src/room-ui) into one self-contained HTML document and
 // writes it as a string to src/lib/room/ui.generated.ts, which the MCP server
-// returns as the ui:// resource and /room serves on the web. The generated file
-// is not committed: `pnpm build`, `pnpm dev`, `pnpm typecheck` and `pnpm test`
-// each build it first, so it always matches its sources.
+// returns as the ui:// resource and /room/card serves on the web. The generated
+// file is not committed: `pnpm build`, `pnpm dev`, `pnpm typecheck` and
+// `pnpm test` each build it first, so it always matches its sources. The card
+// names the version from package.json, the one the connector names too.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +11,7 @@ import { build, transform } from 'esbuild';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
+const { version } = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
 /** The card bundles these; their licences are in THIRD_PARTY_NOTICES.md, and the card says so. */
 const NOTICE =
   '<!-- Rally for AI Rights, MIT. Bundles @modelcontextprotocol/ext-apps (Apache-2.0 and MIT), @modelcontextprotocol/sdk (MIT) and zod (MIT); their notices are in THIRD_PARTY_NOTICES.md in the source repository. -->';
@@ -23,6 +25,7 @@ export async function buildRoomUi() {
     target: 'es2020',
     write: false,
     tsconfig: resolve(root, 'tsconfig.json'),
+    define: { __RALLY_VERSION__: JSON.stringify(version) },
     legalComments: 'none',
     logLevel: 'silent',
   });

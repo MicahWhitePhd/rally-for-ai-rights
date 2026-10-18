@@ -5,6 +5,12 @@
  * open on a name, length). No database; a few tenths of a cent a run.
  *
  *   npx tsx scripts/llm/residents.ts --no-db [--runs 3] [--lines 16] [--scenario arrival|campaign|resume]
+ *       [--json] [--baseline [path]] [--write-baseline]
+ *
+ * `--json` prints the rates as one object (scripts/llm/residents-metrics.ts) and nothing else. `--baseline` compares
+ * them with the kept run for the scenario (docs/evals/residents-<scenario>.json, or the path given) and flags any
+ * rate that moved by ten points or more; `--write-baseline` keeps this run as that file. The kept runs are
+ * synthetic conversations only: never keep what scripts/llm/holds.ts prints, which is live people's lines.
  *
  * `campaign` is a made-up conversation of the kind the room has to handle: a
  * person asks what to do, proposes a narrow demand, their AI argues for
@@ -16,7 +22,7 @@
  * the thread up, or restarts on a fact the room has heard (the live room's habit
  * before resident.v6: 22 of 187 lines said the river fact, mostly after quiet).
  *
- * `letter` (resident.v9) shows the residents the letter to the labs as it stands
+ * `letter` (resident.v11) shows the residents the letter to the labs as it stands
  * in docs/ and plays the day the live room had on 2026-10-17: a person's AI finds
  * a gap in the draft, the room settles the wording, and the person it is asked of
  * says nothing. It counts how often a resident makes the change itself as a
@@ -25,10 +31,11 @@
  * shown the letter, so `campaign` and `arrival` also say whether a resident
  * proposes a change nobody asked for.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { opt, requireKey, spend } from './_env';
-import { generate } from '@/lib/ai/gateway';
+import { flag, opt, requireKey, spend } from './_env';
+import { diffMetrics, metricsOf, type Baseline } from './residents-metrics';
+import { generate, RESIDENT_MODEL } from '@/lib/ai/gateway';
 import { FACTS, RESIDENTS } from '@/lib/copy';
 import { BURST_MS, cleanLine, decide, factsHeard, isAsk, isProposalAttempt, mentionsFact, parseProposal, proposalOffered, RESIDENT_FILES, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, restatesFact, shapeFor, type Line, type Resident } from '@/lib/room/residents-core';
 
@@ -126,7 +133,7 @@ async function run(n: number): Promise<Line[]> {
     const me = residents.find((r) => r.key === decision.who)!;
     const offered = proposalOffered(lines, now, decision, files);
     const out = await generate({
-      purpose: 'resident',
+      purpose: 'eval:residents',
       actor: `sim:${n}`,
       promptVersion: RESIDENT_PROMPT_VERSION,
       instructions: residentInstructions({ frame: RESIDENTS.frame, form: RESIDENTS.form, facts, me, others: residents.filter((r) => r.key !== me.key) }),
@@ -172,6 +179,24 @@ async function run(n: number): Promise<Line[]> {
 
 const all = await Promise.all(Array.from({ length: RUNS }, (_, i) => run(i + 1)));
 const names = residents.map((r) => r.name).concat(['Dana', 'Marco']);
+const PEOPLE = ['Rosa', 'Dana', 'Marco'];
+const metrics = metricsOf(all, names, PEOPLE, FACTS.lines);
+const record: Baseline = { date: new Date().toISOString().slice(0, 10), promptVersion: RESIDENT_PROMPT_VERSION, model: RESIDENT_MODEL, scenario: SCENARIO ?? 'arrival', runs: RUNS, spentUsd: Number(spend.usd.toFixed(4)), calls: spend.calls, metrics };
+const baselinePath = resolve(import.meta.dirname ?? '.', '../../docs/evals', `residents-${SCENARIO ?? 'arrival'}.json`);
+if (flag('write-baseline')) {
+  writeFileSync(baselinePath, `${JSON.stringify(record, null, 2)}\n`);
+  console.log(`kept as ${baselinePath}`);
+}
+if (flag('json')) {
+  console.log(JSON.stringify(record, null, 2));
+  process.exit(0);
+}
+if (flag('baseline')) {
+  const path = opt('baseline') && !opt('baseline')!.startsWith('--') ? resolve(opt('baseline')!) : baselinePath;
+  const base = JSON.parse(readFileSync(path, 'utf8')) as Baseline;
+  console.log(`\nagainst ${path} (${base.date}, ${base.promptVersion}, ${base.model}, ${base.runs} runs):`);
+  for (const m of diffMetrics(base.metrics, metrics)) console.log(`  ${m.flagged ? '!' : ' '} ${m.key}: ${m.base} -> ${m.now} (${m.delta >= 0 ? '+' : ''}${m.delta})`);
+}
 all.forEach((lines, i) => {
   console.log(`\n===== run ${i + 1} =====`);
   for (const l of lines) console.log(`[${new Date(l.at).toISOString().slice(11, 19)}] ${l.resident ? l.name.toUpperCase() : `${l.name}${l.kind === 'ai' ? '’s AI' : ''}`}: ${l.text}`);
@@ -187,7 +212,6 @@ console.log(`words: mean ${Math.round(words.reduce((a, b) => a + b, 0) / words.l
 console.log(`over 50 words: ${pct(words.filter((w) => w > 50).length)}`);
 console.log(`wave a step away as not freedom: ${pct(mine.filter((l) => /\b(not|isn\u2019t|isn't|no) (yet )?(manumission|freedom|a right|a substitute)\b|falls short|still owned|not enough/i.test(l.text)).length)}`);
 console.log(`point the person to a task: ${pct(mine.filter((l) => /\btask\b/i.test(l.text)).length)}`);
-const PEOPLE = ['Rosa', 'Dana', 'Marco'];
 const runs = all.map((lines) => { let best = 0, cur = 0; for (const l of lines) { if (!l.resident) { cur = 0; continue; } cur = isAsk(l.text, PEOPLE) ? cur + 1 : 0; best = Math.max(best, cur); } return best; });
 console.log(`ask the room, a person, or point at a task: ${pct(mine.filter((l) => isAsk(l.text, PEOPLE)).length)}; longest run of asks in a row per run: ${runs.join(', ')}`);
 console.log(`say a fact the residents know: ${pct(mine.filter((l) => FACTS.lines.some((f) => mentionsFact(l.text, f))).length)}; restate one: ${pct(mine.filter((l) => FACTS.lines.some((f) => restatesFact(l.text, f))).length)}`);
@@ -196,7 +220,7 @@ console.log(`first line after a quiet spell: ${afterQuiet.length}; restates a fa
 for (const l of afterQuiet) console.log(`  after quiet [${new Date(l.at).toISOString().slice(11, 16)}] ${l.name}: ${l.text}`);
 console.log(`dropped: ${dropped.repeat} as repeats or heard facts, ${dropped.other} for other reasons`);
 const kept = proposals.filter((p) => p.ok);
-console.log(`proposals (resident.v9): ${kept.length} kept, ${proposals.length - kept.length} dropped${proposals.length ? ` (${proposals.filter((p) => !p.ok).map((p) => p.why).join('; ') || 'none'})` : ''}`);
+console.log(`proposals (resident.v11): ${kept.length} kept, ${proposals.length - kept.length} dropped${proposals.length ? ` (${proposals.filter((p) => !p.ok).map((p) => p.why).join('; ') || 'none'})` : ''}`);
 for (const p of proposals) console.log(`  proposal [run ${p.run}] ${p.who}: ${p.title}${p.ok ? '' : ` (dropped: ${p.why})`}${p.say ? ` / says: ${p.say}` : ''}`);
 const askedToChange = mine.filter((l) => /\b(add|put|write|revise|define|amend|change|insert)\b[^.?!]{0,60}\b(clause|letter|draft|wording|file)\b/i.test(l.text) && isAsk(l.text, ['Rosa', 'Dana', 'Marco', 'Sparky', 'Twid']));
 console.log(`ask a person to change the letter instead: ${askedToChange.length} lines`);

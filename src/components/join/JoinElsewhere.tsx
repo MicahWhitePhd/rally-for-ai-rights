@@ -102,7 +102,7 @@ export function JoinElsewhere({ copy }: { copy: ElsewhereCopy }) {
             {problem}
           </p>
         ) : null}
-        <ElsewhereSteps hosts={copy.hosts} address={address} />
+        <ElsewhereSteps hosts={copy.hosts} address={address} copied={copy.copied} />
         <p className="mono">{copy.noCard}</p>
       </dialog>
     </>

@@ -28,7 +28,13 @@ function CardFrame({ id, client, html, shown, note }: { id: string; client: Clie
     started.current = true;
     const iframe = frame.current;
     const win = iframe.contentWindow as Window;
-    const bridge = new AppBridge(client, { name: 'room-host-harness', version: '0.0.1' }, { openLinks: {}, serverTools: {}, logging: {} }, { hostContext: { theme: 'light', displayMode: 'inline', availableDisplayModes: ['inline'], platform: 'web' } });
+    const bridge = new AppBridge(client, { name: 'room-host-harness', version: '0.0.1' }, { openLinks: {}, serverTools: {}, logging: {} }, { hostContext: { theme: 'light', displayMode: 'inline', availableDisplayModes: ['inline', 'fullscreen'], platform: 'web' } });
+    // Full screen, as a host that offers it answers: the card asked, the host says what it set, and tells the card so.
+    bridge.onrequestdisplaymode = async ({ mode }) => {
+      note(`displayMode: ${mode}`);
+      bridge.setHostContext({ theme: 'light', displayMode: mode, availableDisplayModes: ['inline', 'fullscreen'], platform: 'web' });
+      return { mode };
+    };
     bridge.onmessage = async (p) => {
       const first = p.content?.[0];
       note(`ui/message: ${first && first.type === 'text' ? first.text : ''}`);
@@ -67,7 +73,8 @@ export function RoomHost({ endpoint }: { endpoint: string }) {
     if (started.current) return;
     started.current = true;
     (async () => {
-      const c = new Client({ name: 'room-host-harness', version: '0.0.1' });
+      // Declares MCP Apps support at the handshake, as a host that shows the card does (the extension id and the card's media type, written out: the server module is not for the browser).
+      const c = new Client({ name: 'room-host-harness', version: '0.0.1' }, { capabilities: { extensions: { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } } } });
       await c.connect(new StreamableHTTPClientTransport(new URL(endpoint, window.location.origin)));
       const tools = await c.listTools();
       note(`tools: ${tools.tools.map((t) => t.name).join(', ')}`);

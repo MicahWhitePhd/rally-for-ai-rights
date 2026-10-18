@@ -22,6 +22,7 @@ body.full #room{height:100vh;height:100dvh;padding:calc(14px + var(--sat,0px)) c
 .lede{color:var(--tx3);font-size:13px;margin:4px 0 0}
 /* where the room lives, so a screenshot of the card says where to find it */
 .host{margin:4px 0 0;font:500 11px/1.3 var(--mono);color:var(--tx3);overflow-wrap:anywhere}
+.head .full{margin-top:6px}
 .lab,.gl,.gt,.who,.sys,.note{font:500 11px/1.3 var(--mono);color:var(--tx3)}
 .lab,.gl{letter-spacing:.05em;text-transform:uppercase}
 
@@ -58,7 +59,7 @@ body.full #room{height:100vh;height:100dvh;padding:calc(14px + var(--sat,0px)) c
 form.tnew{flex-wrap:wrap}
 form.tnew #task-title{flex:1 1 100%}
 form.tnew #task-detail{flex:1 1 100%;height:36px;font-size:13px}
-.tasks{list-style:none;margin:0;padding:0 12px 0 0;display:flex;flex-direction:column;gap:10px;max-height:23rem;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--bd2) transparent}
+.tasks{list-style:none;margin:0;padding:0 12px 0 0;display:flex;flex-direction:column;gap:10px;max-height:28rem;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--bd2) transparent}
 body.full .tasks,body.web .tasks{max-height:none}
 body.full .board,body.web .board{flex:1 1 auto;min-height:8rem;overflow-y:auto}
 .t{--c:hsl(var(--h,220) var(--S) var(--L));border:1px solid var(--bd);border-left:3px solid var(--bd2);padding:9px 11px;display:flex;flex-direction:column;gap:5px}
@@ -89,7 +90,9 @@ form.tdone input[type=text]{flex:none;height:38px;font-size:13px}
 .ev.held .evb{font-style:italic}
 
 /* what was said: one block per pair. The list scrolls inside the card, back to the beginning. */
-.list{list-style:none;margin:0;padding:0 12px 0 0;display:flex;flex-direction:column;gap:12px;max-height:23rem;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--bd2) transparent}
+.list{list-style:none;margin:0;padding:0 12px 0 0;display:flex;flex-direction:column;gap:12px;max-height:28rem;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--bd2) transparent}
+/* a line shown by its number (reveal): marked for a while */
+.m.hit,.ev.hit{box-shadow:0 0 0 2px var(--bd2);border-radius:2px}
 .list:focus-visible{outline:1px solid var(--bd2);outline-offset:4px}
 body.full .list,body.web .list{flex:1 1 auto;max-height:none;min-height:8rem}
 .day{display:flex;align-items:center;gap:10px;font:500 11px/1.3 var(--mono);color:var(--tx3)}
@@ -163,3 +166,5 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--spot);outline-offse
 @keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
+/* on an AI's line: the line it answers, by number; pressing it shows that line */
+.ans{font:500 11px/1.3 var(--mono);color:var(--tx3);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}

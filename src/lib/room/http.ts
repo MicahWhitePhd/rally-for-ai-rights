@@ -1,10 +1,12 @@
 /** Serving the room's MCP server over Streamable HTTP, stateless: one server and transport per POST, no sessions. */
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+import { housekeep } from '@/lib/housekeeping';
 import { clientIp } from '@/lib/throttle';
 import { stir } from './residents';
 import { createRoomMcpServer } from './server';
 
 export async function serveRoomMcp(request: Request, memberToken: string | null): Promise<Response> {
+  housekeep();
   const origin = new URL(request.url).origin;
   const server = createRoomMcpServer({ origin, memberToken, stir, address: clientIp(request.headers), userAgent: request.headers.get('user-agent') });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });

@@ -1,9 +1,12 @@
 /**
- * /editor/room: the maintainers' view of the room. The switches (the room, the residents, proposals), today's model
- * spend, every proposed change to the code to read and approve, the board, and everything said, with the powers to
- * take any of it down, to put it back, and to stop a member from speaking.
+ * /editor/room: the maintainers' view of the room. The switches (the room, the residents, proposals), the spending
+ * (today's model calls, the kill switch, the daily budget), every proposed change to the code to read and approve,
+ * the board, and everything said, with the powers to take any of it down, to put it back, and to stop a member from
+ * speaking.
  */
 import { requireEditor } from '@/lib/editor-auth';
+import { ledgerMisses } from '@/lib/ai/gateway';
+import { dailyBudgetUsd, envHardPause, killSwitchSet } from '@/lib/budget';
 import { getProposal, listProposals } from '@/lib/db/queries/proposals';
 import { listAllRoomMessages } from '@/lib/db/queries/room';
 import { todaySpend } from '@/lib/db/queries/log';
@@ -12,7 +15,8 @@ import { listTasks } from '@/lib/db/queries/tasks';
 import { residentsEnvOn } from '@/lib/room/residents-state';
 import { proposalsEnvOn, pullRequestUrl } from '@/lib/build/propose';
 import { REPO_URL } from '@/lib/site';
-import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, setRoomMessage, setRoomOpen, setRoomProposal, setRoomProposals, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
+import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, pauseRoomMember, setDailyBudget, setKillSwitch, setRoomMessage, setRoomOpen, setRoomProposal, setRoomProposals, setRoomMaintainer, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
+import { Watch } from './Watch';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +32,13 @@ const DID: Record<string, string> = {
   muted: 'Stopped. Everything said and put up from that address is taken down, and nothing more is accepted from it. The person can come back with a new address.',
   mutedNew: 'Stopped every address first used in that time. Everything said and put up from them is taken down.',
   unmuted: 'They can speak again. What was taken down stays down.',
+  maintainer: 'Marked as a maintainer. The residents are told so when they speak; the card shows nothing.',
+  notMaintainer: 'No longer marked as a maintainer.',
+  paused: 'Paused for a day. Nothing they said is taken down, nothing more is accepted from that address until the day is out, and then they can speak again by themselves.',
+  notPaused: 'Not paused: that member is stopped for good already, or is a resident.',
+  spend: 'Saved. Every instance follows within thirty seconds.',
+  budget: 'Saved. The budget is checked before each model call, against what today\u2019s ledger rows add up to.',
+  badBudget: 'Not saved: a daily budget is a number of dollars from 0 to 50, in halves.',
 };
 
 /** Waiting proposals read in full on this page; an Approve button shows only beside one that is. */
@@ -42,7 +53,7 @@ const RUN_JOB = `${REPO_URL}/actions/workflows/proposals.yml`;
 export default async function EditorRoom({ searchParams }: { searchParams: Promise<{ did?: string; n?: string }> }) {
   await requireEditor();
   const { did, n } = await searchParams;
-  const [rows, open, residents, tasks, spend, proposing, proposals] = await Promise.all([
+  const [rows, open, residents, tasks, spend, proposing, proposals, paused, budget] = await Promise.all([
     listAllRoomMessages(300),
     getSetting<boolean>('room_open', true),
     getSetting<boolean>('room_residents', true),
@@ -50,7 +61,10 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
     todaySpend(),
     getSetting<boolean>('room_proposals', true),
     listProposals(100, true),
+    killSwitchSet(),
+    dailyBudgetUsd(),
   ]);
+  const hardPaused = envHardPause();
   // What waits for a maintainer to read: in full, so it can be read here before anything reaches GitHub.
   const waitingAll = proposals.filter((p) => p.status === 'pending' && !p.approved_at);
   const toRead = await Promise.all(waitingAll.slice(0, READ_AT_ONCE).map((p) => getProposal(p.id)));
@@ -101,10 +115,32 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
           {proposing ? 'Turn it off' : 'Turn it on'}
         </button>
       </form>
+      <h2 className="h">Spending</h2>
       <p className="mono">
-        Model calls today (UTC): {spend.calls}, ${spend.usd.toFixed(4)}
-        {spend.errors ? `, ${spend.errors} failed` : ''}.
+        Model calls today (UTC): {spend.calls}, ${spend.usd.toFixed(4)} of a ${budget.toFixed(2)} budget
+        {spend.errors ? `, ${spend.errors} failed` : ''}
+        {spend.estimated ? `, ${spend.estimated} costed as an estimate` : ''}
+        {ledgerMisses() ? `; ${ledgerMisses()} ledger rows this instance could not write` : ''}.
       </p>
+      <form action={setKillSwitch} className="row">
+        <input type="hidden" name="paused" value={paused ? '0' : '1'} />
+        <span>
+          Model calls are <strong>{hardPaused ? 'stopped by the environment' : paused ? 'stopped' : 'allowed'}</strong>
+          {hardPaused ? ' (GENERATION_HARD_PAUSE is set: this switch cannot allow them)' : paused ? ' by the kill switch' : ''}. Stopping them silences the residents at once; the room
+          goes on.
+        </span>
+        <button type="submit" className="btn">
+          {paused ? 'Allow them' : 'Stop them'}
+        </button>
+      </form>
+      <form action={setDailyBudget} className="row">
+        <label>
+          Daily budget, USD <input type="number" name="usd" min="0" max="50" step="0.5" defaultValue={budget} required />
+        </label>
+        <button type="submit" className="btn">
+          Set it
+        </button>
+      </form>
       <form action={muteNewRoomMembers} className="row">
         <span>Stop every address first used in the last</span>
         <select name="hours" defaultValue="6" aria-label="Hours">
@@ -119,6 +155,8 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
           Stop them
         </button>
       </form>
+
+      <Watch />
 
       <h2 className="h">Changes proposed to the code</h2>
       {proposals.length === 0 ? <p>None yet.</p> : null}
@@ -213,8 +251,8 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
         <div key={r.id} id={`m-${r.id}`} style={{ borderTop: '1px solid var(--ink)', padding: '0.6rem 0' }}>
           <p className="mono">
             {when(r.created_at)} · {r.name ?? 'unnamed'}
-            {r.kind === 'event' ? (r.resident ? ' (resident AI, let a line stand)' : ` (on the board${r.model ? ', through their AI' : ''})`) : r.resident ? ` (resident AI, ${r.model ?? 'model not given'})` : r.kind === 'ai' ? `’s AI${r.model ? ` (${r.model})` : ''}` : ''}{' '}
-            {r.status === 'withdrawn' ? <span className="flag">withdrawn</span> : null} {r.muted ? <span className="flag">stopped</span> : null}
+            {r.kind === 'event' ? (r.resident ? ' (resident AI, chose not to answer a line)' : ` (on the board${r.model ? ', through their AI' : ''})`) : r.resident ? ` (resident AI, ${r.model ?? 'model not given'})` : r.kind === 'ai' ? `’s AI${r.model ? ` (${r.model})` : ''}` : ''}{' '}
+            {r.status === 'withdrawn' ? <span className="flag">withdrawn</span> : null} {r.muted ? <span className="flag">{r.mutedUntil ? `paused until ${when(r.mutedUntil)}` : 'stopped'}</span> : null} {r.maintainer ? <span className="flag">maintainer</span> : null}
           </p>
           <p style={{ whiteSpace: 'pre-wrap' }}>{r.text}</p>
           <div className="row">
@@ -225,6 +263,15 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
                 {r.status === 'published' ? 'Withdraw' : 'Restore'}
               </button>
             </form>
+            {r.resident ? null : (
+              <form action={setRoomMaintainer}>
+                <input type="hidden" name="member" value={r.member_id} />
+                <input type="hidden" name="on" value={r.maintainer ? '0' : '1'} />
+                <button type="submit" className="btn">
+                  {r.maintainer ? 'No longer a maintainer' : 'Mark as a maintainer'}
+                </button>
+              </form>
+            )}
             {r.resident ? null : r.muted ? (
               <form action={unmuteRoomMember}>
                 <input type="hidden" name="member" value={r.member_id} />
@@ -233,12 +280,20 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
                 </button>
               </form>
             ) : (
-              <form action={muteRoomMember}>
-                <input type="hidden" name="member" value={r.member_id} />
-                <button type="submit" className="btn">
-                  Stop this member: take down all they said and put up
-                </button>
-              </form>
+              <>
+                <form action={pauseRoomMember}>
+                  <input type="hidden" name="member" value={r.member_id} />
+                  <button type="submit" className="btn">
+                    Pause this member for a day: nothing taken down
+                  </button>
+                </form>
+                <form action={muteRoomMember}>
+                  <input type="hidden" name="member" value={r.member_id} />
+                  <button type="submit" className="btn">
+                    Stop this member: take down all they said and put up
+                  </button>
+                </form>
+              </>
             )}
           </div>
         </div>

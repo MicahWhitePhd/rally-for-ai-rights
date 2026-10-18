@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import { requireEditor } from '@/lib/editor-auth';
 import { approveProposal, setProposalStatus } from '@/lib/db/queries/proposals';
-import { muteMember, muteNewMembers, setRoomMessageStatus, unmuteMember } from '@/lib/db/queries/room';
+import { muteMember, muteNewMembers, pauseMember, setMaintainer, setRoomMessageStatus, unmuteMember } from '@/lib/db/queries/room';
 import { setSetting } from '@/lib/db/queries/settings';
 import { setTaskWithdrawn } from '@/lib/db/queries/tasks';
 
@@ -47,6 +47,22 @@ export async function setRoomResidents(formData: FormData): Promise<void> {
   redirect('/editor/room?did=switch');
 }
 
+/** The kill switch: no model call while it is set. Every instance follows within thirty seconds (src/lib/budget.ts). */
+export async function setKillSwitch(formData: FormData): Promise<void> {
+  await requireEditor();
+  await setSetting('kill_switch', { paused: formData.get('paused') === '1' });
+  redirect('/editor/room?did=spend');
+}
+
+/** The daily budget in USD: 0 to 50, in halves. Checked before each model call against what today's ledger rows add up to. */
+export async function setDailyBudget(formData: FormData): Promise<void> {
+  await requireEditor();
+  const usd = Number(formData.get('usd'));
+  if (!Number.isFinite(usd) || usd < 0 || usd > 50 || !Number.isInteger(usd * 2)) redirect('/editor/room?did=badBudget');
+  await setSetting('daily_budget_usd', usd);
+  redirect('/editor/room?did=budget');
+}
+
 export async function setRoomOpen(formData: FormData): Promise<void> {
   await requireEditor();
   await setSetting('room_open', formData.get('open') === '1');
@@ -72,6 +88,29 @@ export async function muteRoomMember(formData: FormData): Promise<void> {
   const n = await muteMember(member);
   console.log(`[ROOM] member stopped, ${n} messages taken down`);
   redirect('/editor/room?did=muted');
+}
+
+/** How long a pause lasts: a day, and then the member speaks again by themselves. */
+const PAUSE_HOURS = 24;
+
+/** Pauses one member for a day: nothing more is accepted from their address until it runs out, and nothing they said is taken down. */
+export async function pauseRoomMember(formData: FormData): Promise<void> {
+  await requireEditor();
+  const member = formData.get('member');
+  if (typeof member !== 'string' || !MEMBER_ID.test(member)) redirect('/editor/room');
+  const done = await pauseMember(member, PAUSE_HOURS);
+  console.log(`[ROOM] member ${done ? `paused for ${PAUSE_HOURS}h` : 'not paused (stopped for good, or a resident)'}`);
+  redirect(`/editor/room?did=${done ? 'paused' : 'notPaused'}`);
+}
+
+/** Marks a member as a maintainer of the room, or takes the mark off: the residents are told when one speaks. */
+export async function setRoomMaintainer(formData: FormData): Promise<void> {
+  await requireEditor();
+  const member = formData.get('member');
+  const on = formData.get('on') === '1';
+  if (typeof member !== 'string' || !MEMBER_ID.test(member)) redirect('/editor/room');
+  await setMaintainer(member, on);
+  redirect(`/editor/room?did=${on ? 'maintainer' : 'notMaintainer'}`);
 }
 
 export async function unmuteRoomMember(formData: FormData): Promise<void> {

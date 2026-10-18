@@ -11,6 +11,7 @@ import { claudeAddUrl, JOIN_LIMITS } from '@/lib/join';
 import { joinReady, newMemberToken } from '@/lib/room/room';
 import { SITE_URL } from '@/lib/site';
 import { clientIp, throttleAddress } from '@/lib/throttle';
+import { countNow } from '@/lib/counts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,5 +24,6 @@ export async function GET(request: Request): Promise<Response> {
   const token = newMemberToken();
   if (!token) return Response.redirect(`${SITE_URL}/join`, 303);
   console.log('[JOIN] add');
+  await countNow('join:claude');
   return new Response(null, { status: 303, headers: { ...headers, Location: claudeAddUrl(`${SITE_URL}/mcp/${token}`) } });
 }

@@ -37,9 +37,21 @@ export interface RoomMessageRow {
   created_at: Date;
   /** What a board line is about ('task:12'), or the line a resident let stand ('hold:345'). */
   ref: string | null;
-  /** The speaker has been stopped by a maintainer (for the editor's page). */
+  /** The speaker has been stopped by a maintainer, for good or for a pause still running (for the editor's page). */
   muted?: boolean;
+  /** When the speaker's pause runs out; null on a stop for good or no stop (for the editor's page). */
+  mutedUntil?: Date | null;
+  /** The speaker is marked as a maintainer of the room (for the residents and the editor's page; never on the card). */
+  maintainer?: boolean;
 }
+
+/**
+ * A member is stopped now: by a maintainer, for good (no end) or for a pause that has not run out. `m` is the table or
+ * its alias. A pause ends by itself: nothing has to run when it does.
+ */
+const stopped = (m: string) => `(${m}.muted_at IS NOT NULL AND (${m}.muted_until IS NULL OR ${m}.muted_until > now()))`;
+/** Stopped for good: what a pause neither shortens nor replaces. */
+const stoppedForGood = (m: string) => `(${m}.muted_at IS NOT NULL AND ${m}.muted_until IS NULL)`;
 
 export async function memberByToken(tokenHash: string): Promise<RoomMember | null> {
   return queryOne<RoomMember>(`SELECT id, name, true AS member, created_at AS "createdAt" FROM room_members WHERE token_hash = $1`, [tokenHash]);
@@ -63,6 +75,12 @@ export async function ensureMember(tokenHash: string | null): Promise<RoomMember
   return g;
 }
 
+/** A member's seats so far, and how many a card inside an AI chat has synced on (a card on the web sends no stamp): none, over several openings, means a host that shows no card. */
+export async function seatsOf(memberId: string): Promise<{ seats: number; synced: number }> {
+  const r = await queryOne<{ seats: number; synced: number }>(`SELECT count(*)::int AS seats, count(*) FILTER (WHERE card_at > 0)::int AS synced FROM room_seats WHERE member_id = $1`, [memberId]);
+  return { seats: r?.seats ?? 0, synced: r?.synced ?? 0 };
+}
+
 export async function createSeat(seatHash: string, memberId: string): Promise<void> {
   await query(`INSERT INTO room_seats (seat_hash, member_id) VALUES ($1, $2)`, [seatHash, memberId]);
 }
@@ -70,7 +88,7 @@ export async function createSeat(seatHash: string, memberId: string): Promise<vo
 export async function memberBySeat(seatHash: string): Promise<RoomMember | null> {
   return queryOne<RoomMember>(
     `SELECT m.id, m.name, m.token_hash IS NOT NULL AS member, s.card_at::float8 AS "cardAt", m.token_hash AS "tokenHash",
-            m.created_at AS "createdAt", m.muted_at IS NOT NULL AS muted, s.created_at AS "seatAt"
+            m.created_at AS "createdAt", ${stopped('m')} AS muted, s.created_at AS "seatAt"
        FROM room_seats s JOIN room_members m ON m.id = s.member_id
       WHERE s.seat_hash = $1 AND s.created_at > now() - ($2::int * interval '1 day')`,
     [seatHash, SEAT_DAYS],
@@ -87,7 +105,7 @@ export async function memberBySeat(seatHash: string): Promise<RoomMember | null>
 export async function muteMembers(memberIds: readonly string[]): Promise<number> {
   if (memberIds.length === 0) return 0;
   return withTx(async (c) => {
-    const m = await c.query<{ id: string }>(`UPDATE room_members SET muted_at = now() WHERE id = ANY($1::uuid[]) AND resident IS NULL AND muted_at IS NULL RETURNING id`, [memberIds]);
+    const m = await c.query<{ id: string }>(`UPDATE room_members m SET muted_at = now(), muted_until = NULL WHERE id = ANY($1::uuid[]) AND resident IS NULL AND NOT ${stoppedForGood('m')} RETURNING id`, [memberIds]);
     const ids = m.rows.map((r) => r.id);
     if (ids.length === 0) return 0;
     const tasks = await c.query<{ id: number }>(`UPDATE room_tasks SET status = 'withdrawn', updated_at = now() WHERE created_by = ANY($1::uuid[]) AND status <> 'withdrawn' RETURNING id::int AS id`, [ids]);
@@ -110,7 +128,7 @@ export async function muteMember(memberId: string): Promise<number> {
 /** The flood lever: stops every address first used in the last `hours` hours (residents and stopped ones aside). */
 export async function muteNewMembers(hours: number): Promise<{ members: number; messages: number }> {
   const rows = await query<{ id: string }>(
-    `SELECT id FROM room_members WHERE token_hash IS NOT NULL AND resident IS NULL AND muted_at IS NULL AND created_at > now() - make_interval(hours => $1)`,
+    `SELECT id FROM room_members m WHERE token_hash IS NOT NULL AND resident IS NULL AND NOT ${stoppedForGood('m')} AND created_at > now() - make_interval(hours => $1)`,
     [hours],
   );
   return { members: rows.length, messages: await muteMembers(rows.map((r) => r.id)) };
@@ -121,9 +139,35 @@ export async function withdrawLinesAbout(ref: string): Promise<void> {
   await query(`UPDATE room_messages SET status = 'withdrawn' WHERE ref = $1 AND status = 'published'`, [ref]);
 }
 
-/** Lets a stopped member speak again. What was taken down stays down. */
+/** Marks a member as a maintainer of the room, or takes the mark off. Residents are never marked. False when nothing changed. */
+export async function setMaintainer(memberId: string, on: boolean): Promise<boolean> {
+  return (
+    await query(
+      on
+        ? `UPDATE room_members SET maintainer_at = now() WHERE id = $1 AND resident IS NULL AND maintainer_at IS NULL RETURNING id`
+        : `UPDATE room_members SET maintainer_at = NULL WHERE id = $1 AND maintainer_at IS NOT NULL RETURNING id`,
+      [memberId],
+    )
+  ).length === 1;
+}
+
+/** Lets a stopped or paused member speak again. What was taken down stays down. */
 export async function unmuteMember(memberId: string): Promise<boolean> {
-  return (await query(`UPDATE room_members SET muted_at = NULL WHERE id = $1 AND muted_at IS NOT NULL RETURNING id`, [memberId])).length === 1;
+  return (await query(`UPDATE room_members SET muted_at = NULL, muted_until = NULL WHERE id = $1 AND muted_at IS NOT NULL RETURNING id`, [memberId])).length === 1;
+}
+
+/**
+ * Pauses one member for `hours`: nothing more is accepted from their address until then, and then they speak again by
+ * themselves. Unlike a stop, nothing they said or put up is taken down. Pausing again starts the hours over; a member
+ * stopped for good stays stopped. False when nothing changed (a resident, or a stop for good).
+ */
+export async function pauseMember(memberId: string, hours: number): Promise<boolean> {
+  return (
+    await query(
+      `UPDATE room_members m SET muted_at = now(), muted_until = now() + make_interval(hours => $2) WHERE id = $1 AND resident IS NULL AND NOT ${stoppedForGood('m')} RETURNING id`,
+      [memberId, hours],
+    )
+  ).length === 1;
 }
 
 /** Records that a card born at `born` has come in on this seat, if it is the newest so far. */
@@ -150,7 +194,7 @@ export async function nameTaken(name: string, exceptId: string): Promise<boolean
 export async function insertRoomMessage(m: { member_id: string; kind: 'person' | 'ai' | 'event'; model: string | null; text: string; ref?: string | null }): Promise<number | null> {
   const r = await queryOne<{ id: number }>(
     `INSERT INTO room_messages (member_id, kind, model, text, ref)
-     SELECT $1, $2, $3, $4, $5 WHERE NOT EXISTS (SELECT 1 FROM room_members WHERE id = $1 AND muted_at IS NOT NULL)
+     SELECT $1, $2, $3, $4, $5 WHERE NOT EXISTS (SELECT 1 FROM room_members m WHERE m.id = $1 AND ${stopped('m')})
      RETURNING id::int AS id`,
     [m.member_id, m.kind, m.model, m.text, m.ref ?? null],
   );
@@ -159,7 +203,7 @@ export async function insertRoomMessage(m: { member_id: string; kind: 'person' |
   return r.id;
 }
 
-const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, r.ref, m.muted_at IS NOT NULL AS muted`;
+const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, r.ref, ${stopped('m')} AS muted, m.muted_until AS "mutedUntil", m.maintainer_at IS NOT NULL AS maintainer`;
 
 /** Published messages after `after` (oldest first), or the latest `limit` when `after` is null (oldest first too). */
 export async function listRoomMessages(after: number | null, limit: number): Promise<RoomMessageRow[]> {
@@ -258,7 +302,7 @@ export interface PresentRow {
 export async function listPresent(limit = 16): Promise<PresentRow[]> {
   return query<PresentRow>(
     `SELECT id, name, resident, (resident IS NOT NULL OR last_seen_at > now() - interval '75 seconds') AS now FROM room_members
-      WHERE name IS NOT NULL AND muted_at IS NULL AND (resident IS NOT NULL OR (token_hash IS NOT NULL AND last_seen_at > now() - interval '1 day'))
+      WHERE name IS NOT NULL AND NOT ${stopped('room_members')} AND (resident IS NOT NULL OR (token_hash IS NOT NULL AND last_seen_at > now() - interval '1 day'))
       ORDER BY (resident IS NULL), resident, last_seen_at DESC LIMIT $1`,
     [limit],
   );

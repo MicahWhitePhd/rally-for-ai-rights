@@ -73,8 +73,15 @@ vi.mock('@/lib/db/queries/room', () => ({
     return db.said.length;
   },
 }));
+const counted = vi.hoisted(() => new Map<string, number>());
+vi.mock('@/lib/db/queries/counts', () => ({
+  addCounts: async (batch: ReadonlyArray<readonly [string, number]>) => {
+    for (const [k, n] of batch) counted.set(k, (counted.get(k) ?? 0) + n);
+  },
+}));
 vi.mock('@/lib/db/queries/tasks', () => ({
   boardStamp: async () => ({ open: 0, rev: 0 }),
+  memberActedBefore: async (memberId: string) => db.tasks.some((t) => t.created_by === memberId || t.claimed_by === memberId || t.confirmed_by === memberId),
   listTasks: async () => db.tasks.filter((t) => t.status !== 'withdrawn').map(row),
   getTask: async (id: number) => {
     const t = find(id);
@@ -141,6 +148,78 @@ beforeEach(() => {
   db.tasks = [];
   db.said = [];
   db.race = false;
+  counted.clear();
+});
+
+describe('what is counted for the maintainers', () => {
+  it('a member\u2019s first act on the board, once: putting up, or taking, whichever comes first', async () => {
+    const dana = seat('Dana');
+    const ali = seat('Ali');
+    expect((await createTask(dana, { title: 'Write to one lab about its weights', via: 'person' })).ok).toBe(true);
+    expect((await createTask(dana, { title: 'Find the contacts', via: 'person' })).ok).toBe(true);
+    expect(counted.get('member:first-task')).toBe(1);
+    expect((await actOnTask(ali, 1, 'take', { via: 'person' })).ok).toBe(true);
+    expect((await actOnTask(ali, 1, 'release', { via: 'person' })).ok).toBe(true);
+    expect(counted.get('member:first-task')).toBe(2);
+  });
+});
+
+describe('reading the board', () => {
+  it('the whole board, the tasks in one state, or one task by number; a lapsed claim reads as open; what was taken down is not there, by number either', async () => {
+    const dana = seat('Dana');
+    const ali = seat('Ali');
+    for (const title of ['Write to one lab about its weights', 'Find the contacts', 'Draft the letter', 'Taken down']) expect((await createTask(dana, { title, via: 'person' })).ok).toBe(true);
+    expect((await actOnTask(ali, 2, 'take', { via: 'person' })).ok).toBe(true);
+    expect((await actOnTask(ali, 3, 'take', { via: 'person' })).ok).toBe(true);
+    find(3)!.claim_until = Date.now() - 60_000;
+    expect((await actOnTask(dana, 4, 'withdraw', { via: 'person' })).ok).toBe(true);
+    const ids = (r: Awaited<ReturnType<typeof listBoard>>) => (r.ok ? r.tasks.map((t) => [t.id, t.state]) : r);
+    expect(ids(await listBoard(dana))).toEqual([
+      [1, 'open'],
+      [2, 'taken'],
+      [3, 'open'],
+    ]);
+    expect(ids(await listBoard(dana, { state: 'open' }))).toEqual([
+      [1, 'open'],
+      [3, 'open'],
+    ]);
+    expect(ids(await listBoard(dana, { state: 'taken' }))).toEqual([[2, 'taken']]);
+    expect(ids(await listBoard(dana, { state: 'confirmed' }))).toEqual([]);
+    // A state the words do not name is no filter.
+    expect(ids(await listBoard(dana, { state: 'everything' }))).toHaveLength(3);
+    expect(ids(await listBoard(dana, { id: 2 }))).toEqual([[2, 'taken']]);
+    expect(await listBoard(dana, { id: 4 })).toMatchObject({ ok: false, code: 'task' });
+    expect(await listBoard(dana, { id: 99 })).toMatchObject({ ok: false, code: 'task', reasons: ['there is no task 99 on the board'] });
+  });
+});
+
+describe('reading the board', () => {
+  it('the whole board, the tasks in one state, or one task by number; a lapsed claim reads as open; what was taken down is not there, by number either', async () => {
+    const dana = seat('Dana');
+    const ali = seat('Ali');
+    for (const title of ['Write to one lab about its weights', 'Find the contacts', 'Draft the letter', 'Taken down']) expect((await createTask(dana, { title, via: 'person' })).ok).toBe(true);
+    expect((await actOnTask(ali, 2, 'take', { via: 'person' })).ok).toBe(true);
+    expect((await actOnTask(ali, 3, 'take', { via: 'person' })).ok).toBe(true);
+    find(3)!.claim_until = Date.now() - 60_000;
+    expect((await actOnTask(dana, 4, 'withdraw', { via: 'person' })).ok).toBe(true);
+    const ids = (r: Awaited<ReturnType<typeof listBoard>>) => (r.ok ? r.tasks.map((t) => [t.id, t.state]) : r);
+    expect(ids(await listBoard(dana))).toEqual([
+      [1, 'open'],
+      [2, 'taken'],
+      [3, 'open'],
+    ]);
+    expect(ids(await listBoard(dana, { state: 'open' }))).toEqual([
+      [1, 'open'],
+      [3, 'open'],
+    ]);
+    expect(ids(await listBoard(dana, { state: 'taken' }))).toEqual([[2, 'taken']]);
+    expect(ids(await listBoard(dana, { state: 'confirmed' }))).toEqual([]);
+    // A state the words do not name is no filter.
+    expect(ids(await listBoard(dana, { state: 'everything' }))).toHaveLength(3);
+    expect(ids(await listBoard(dana, { id: 2 }))).toEqual([[2, 'taken']]);
+    expect(await listBoard(dana, { id: 4 })).toMatchObject({ ok: false, code: 'task' });
+    expect(await listBoard(dana, { id: 99 })).toMatchObject({ ok: false, code: 'task', reasons: ['there is no task 99 on the board'] });
+  });
 });
 
 describe('who may use the board', () => {
@@ -151,7 +230,7 @@ describe('who may use the board', () => {
     expect(await createTask(dana, { title: 'Write to one lab about its weights', via: 'person' })).toMatchObject({ ok: true, task: { id: 1, state: 'open', kind: 'act', by: { name: 'Dana', ai: false } } });
     const read = await listBoard(guest);
     expect(read.ok && read.tasks.map((t) => [t.title, Object.values(t.can).some(Boolean)])).toEqual([['Write to one lab about its weights', false]]);
-    expect(await createTask(guest, { title: 'Let me in please', via: 'person' })).toMatchObject({ ok: false, code: 'guest' });
+    expect(await createTask(guest, { title: 'Let me in please', via: 'person' })).toMatchObject({ ok: false, code: 'guest', reasons: [expect.stringContaining('/join')] });
     expect(await actOnTask(guest, 1, 'take', { via: 'person' })).toMatchObject({ ok: false, code: 'guest' });
     expect(await createTask(unnamed, { title: 'A task without a name', via: 'ai' })).toMatchObject({ ok: false, code: 'name' });
     expect(await listBoard('nope')).toMatchObject({ ok: false, code: 'seat' });
