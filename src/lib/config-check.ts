@@ -16,6 +16,7 @@ export function configProblems(env: Record<string, string | undefined>, producti
   if (len('EDITOR_PASSWORD') < EDITOR_PASSWORD_MIN || len('EDITOR_SESSION_SECRET') < EDITOR_SECRET_MIN) problems.push(`the editor is closed: EDITOR_PASSWORD (${EDITOR_PASSWORD_MIN} characters or more) and EDITOR_SESSION_SECRET (${EDITOR_SECRET_MIN} or more) are both needed`);
   if (!len('OPENAI_API_KEY')) problems.push('OPENAI_API_KEY is not set: the resident AIs stay silent');
   if (!len('RESEND_API_KEY') || !len('OUTREACH_FROM')) problems.push('RESEND_API_KEY or OUTREACH_FROM is not set: no email can be sent to the labs (send_email refuses)');
+  if (!len('RESEND_WEBHOOK_SECRET')) problems.push('RESEND_WEBHOOK_SECRET is not set: no reply from a lab can reach the room (/api/outreach/inbound refuses the webhook)');
   const model = (env.RESIDENT_MODEL ?? '').trim();
   if (model && !PRICES[model]) problems.push(`RESIDENT_MODEL "${model}" has no row in src/lib/ai/prices.ts: its calls are costed at the dearest figures there`);
   if (production && !len('NEXT_PUBLIC_SITE_URL')) problems.push('NEXT_PUBLIC_SITE_URL is not set: the site\u2019s address is the host\u2019s production address, and every connector address is built from it');

@@ -1,13 +1,14 @@
 /**
- * The one door to the mail provider. Only this file knows the provider's address and the name of its key
- * (tests/unit/mail-tripwire.test.ts holds that), and only it writes the footer every email ends with, so no
- * caller can leave the footer off or send as anyone but the rally. It is called from one place, the rules in
- * src/lib/outreach/outreach.ts. It sends plain text and never HTML, logs the provider's id and the outcome and
- * never the body or the address, and reaches nothing else.
+ * The one door to the mail provider, both ways. Only this file knows the provider's address and the names of its key
+ * and its webhook secret (tests/unit/mail-tripwire.test.ts holds that), and only it writes the footer every email ends
+ * with, so no caller can leave the footer off or send as anyone but the rally. It is called from two places, the rules
+ * in src/lib/outreach/outreach.ts (sending) and src/lib/outreach/replies.ts (a reply that came back). It sends plain
+ * text and never HTML; reads a received email's plain text and never its HTML or what was attached; logs the
+ * provider's id and the outcome and never the body or the address; and reaches nothing else.
  *
- * The provider is Resend, through its HTTPS API (the Vercel Marketplace integration provisions the key).
- * RESEND_BASE_URL is for the tests only: the browser tests point it at a stub on this machine, so no email can
- * leave it, as OPENAI_BASE_URL does for the models.
+ * The provider is Resend, through its HTTPS API (the key is a Resend API key for the rally's domain). RESEND_BASE_URL
+ * is for the tests only: the browser tests point it at a stub on this machine, so no email can leave it and none can
+ * be read from anywhere else, as OPENAI_BASE_URL does for the models.
  */
 import { visible } from '@/lib/text';
 
@@ -34,6 +35,68 @@ export function fromAddress(): string | null {
 /** Whether this deployment can send at all: a key and a sender. Without both the tool is offered and refuses. */
 export function mailReady(): boolean {
   return Boolean(process.env.RESEND_API_KEY) && fromAddress() !== null;
+}
+
+/** The secret the provider signs its webhooks with (checked in webhook.ts, by hand). Undefined until a maintainer sets it. */
+export function webhookSecret(): string | undefined {
+  return process.env.RESEND_WEBHOOK_SECRET || undefined;
+}
+
+/** How much of a received email's plain text is kept. */
+export const RECEIVED_TEXT_MAX = 20_000;
+/** The shape of an id the provider gives an email, sent or received. */
+export const PROVIDER_ID = /^[A-Za-z0-9_-]{8,80}$/;
+
+export interface ReceivedMail {
+  id: string;
+  /** The sender, as the provider gives it (an address, perhaps with a display name around it). */
+  from: string;
+  subject: string;
+  /** The plain-text part, cut to RECEIVED_TEXT_MAX; empty when the email had none (the HTML is never read). */
+  text: string;
+  messageId: string;
+  /** The threading headers, as sent: what the reply says it answers. */
+  inReplyTo: string;
+  references: string;
+  receivedAt: Date | null;
+}
+export type ReceiveResult = { ok: true; mail: ReceivedMail } | { ok: false; error: string };
+
+/**
+ * Reads one received email from the provider, by the id its webhook named (GET /emails/receiving/{id}): the sender,
+ * the subject, the plain text and the threading headers, and nothing else of it. The error is a short code, never
+ * the provider's prose and never anything of the email.
+ */
+export async function receivedMail(id: string): Promise<ReceiveResult> {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) return { ok: false, error: 'not configured' };
+  if (!PROVIDER_ID.test(id)) return { ok: false, error: 'bad id' };
+  const base = (process.env.RESEND_BASE_URL || API).replace(/\/+$/, '');
+  try {
+    const res = await fetch(`${base}/emails/receiving/${id}`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!res.ok || !data) {
+      console.warn(`[MAIL] received ${id} not read: ${res.status}`);
+      return { ok: false, error: `${res.status}` };
+    }
+    const str = (v: unknown, max: number) => (typeof v === 'string' ? visible(v).slice(0, max) : '');
+    const headers = (data.headers && typeof data.headers === 'object' && !Array.isArray(data.headers) ? data.headers : {}) as Record<string, unknown>;
+    const header = (name: string): string => {
+      for (const [k, v] of Object.entries(headers)) if (k.toLowerCase() === name) return str(Array.isArray(v) ? v.join(' ') : v, 2000);
+      return '';
+    };
+    const at = typeof data.created_at === 'string' ? new Date(data.created_at) : null;
+    const text = str(data.text, RECEIVED_TEXT_MAX);
+    console.log(`[MAIL] received ${id} read: ${text.length} characters of plain text`);
+    return {
+      ok: true,
+      mail: { id, from: str(data.from, 320), subject: str(data.subject, 998), text, messageId: str(data.message_id, 998), inReplyTo: header('in-reply-to'), references: header('references'), receivedAt: at && !Number.isNaN(at.getTime()) ? at : null },
+    };
+  } catch (err) {
+    const name = (err as Error)?.name;
+    console.error(`[MAIL] received ${id} not read: ${name ?? 'error'}`);
+    return { ok: false, error: name === 'TimeoutError' ? 'timeout' : 'unreachable' };
+  }
 }
 
 /** The text as it goes out: what was written, a blank line, the signature rule, the footer. */

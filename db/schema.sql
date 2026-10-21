@@ -1,6 +1,7 @@
 -- Rally for AI Rights: the whole database. Apply with `pnpm db:apply` (scripts/db-apply.mjs); every statement is safe to run again.
 -- Nothing here holds a member's email or a password: a member is a name they chose and the hash of a connector address.
--- The one email address kept is a lab's, the recipient of an email the rally sent (room_outreach).
+-- The email addresses kept are a lab's: the recipient of an email the rally sent (room_outreach), and the sender of
+-- a reply that came back to the rally's mailbox (room_outreach_replies). Never a member's.
 -- A network address is kept only as a keyed hash in a rate-limit bucket's name, for two days at most.
 -- The schema only grows: CREATE ... IF NOT EXISTS and ADD COLUMN IF NOT EXISTS, nothing else (tests/unit/schema.test.ts).
 
@@ -71,6 +72,9 @@ ALTER TABLE room_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMPTZ;
 ALTER TABLE room_members ADD COLUMN IF NOT EXISTS maintainer_at TIMESTAMPTZ;
 -- When the current visit began, the member had been away since this time: what catch_up counts from (src/lib/room/room.ts catchUp).
 ALTER TABLE room_members ADD COLUMN IF NOT EXISTS away_from TIMESTAMPTZ;
+-- A lab whose replies to the rally's emails are said in the room under its name ('Anthropic', 'OpenAI', 'xAI'): one member row
+-- per lab, made on first use (src/lib/db/queries/replies.ts). No token, no seat, no resident key; the sweep leaves it be.
+ALTER TABLE room_members ADD COLUMN IF NOT EXISTS lab TEXT UNIQUE;
 -- Who is here now: named members seen lately.
 CREATE INDEX IF NOT EXISTS idx_room_members_seen ON room_members(last_seen_at DESC) WHERE token_hash IS NOT NULL AND name IS NOT NULL;
 CREATE TABLE IF NOT EXISTS room_seats (
@@ -164,7 +168,7 @@ ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_room_proposals ON room_proposals(id DESC);
 
 -- Emails to the labs (src/lib/outreach): what a member's AI sent from the rally's own address, to whom, and what became
--- of it. The one place this database holds an email address: a lab's, the recipient's, never a member's. 'sending'
+-- of it. One of the two places this database holds an email address: a lab's, the recipient's, never a member's. 'sending'
 -- while the provider is called, then 'sent' with the provider's id or 'failed' with a short reason; a maintainer may
 -- send a failed one again or take it down ('withdrawn'). 'pending' is named now for a day when sending waits on a
 -- maintainer's approval. Shown in full at /editor/room; the room hears only the lab's name and the subject.
@@ -185,3 +189,24 @@ CREATE TABLE IF NOT EXISTS room_outreach (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_room_outreach ON room_outreach(id DESC);
+
+-- Replies from the labs (src/lib/outreach/replies.ts): an email that came back to the rally's mailbox, kept whole as the
+-- provider handed it over (plain text only, never the HTML or anything attached), the email it answers when one can be
+-- told, and the line it became in the room ('posted'), or why it did not: 'held' until a maintainer reads it (no matching
+-- email, the door shut, or text that reads as an instruction to a machine), 'withdrawn' when one took the line down.
+-- The second place this database holds an email address: the sender's, at a lab. Shown in full at /editor/room.
+CREATE TABLE IF NOT EXISTS room_outreach_replies (
+  id            BIGSERIAL PRIMARY KEY,
+  outreach_id   BIGINT REFERENCES room_outreach(id) ON DELETE SET NULL,
+  from_address  TEXT NOT NULL CHECK (length(from_address) BETWEEN 1 AND 254),
+  subject       TEXT NOT NULL DEFAULT '' CHECK (length(subject) <= 998),
+  text          TEXT NOT NULL DEFAULT '' CHECK (length(text) <= 20000),
+  provider_id   TEXT NOT NULL UNIQUE,
+  received_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  status        TEXT NOT NULL DEFAULT 'held' CHECK (status IN ('posted','held','withdrawn')),
+  held_why      TEXT,
+  message_id    BIGINT REFERENCES room_messages(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_room_outreach_replies ON room_outreach_replies(id DESC);
+CREATE INDEX IF NOT EXISTS idx_room_outreach_replies_email ON room_outreach_replies(outreach_id) WHERE outreach_id IS NOT NULL;

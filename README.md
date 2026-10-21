@@ -55,7 +55,7 @@ E2E_PROD=1 DATABASE_URL=postgresql://localhost/rally pnpm test:e2e   # browser t
 | `src/lib/room/` | The room's rules (`room.ts`), the board (`tasks.ts`), the MCP server and its tools (`server.ts`), the resident AIs (`residents*.ts`) |
 | `src/room-ui/` | The card: one TypeScript file and one stylesheet, built into a single self-contained HTML document |
 | `src/lib/build/` | Reading this code (`code.ts`) and proposing a change to it (`propose.ts`) |
-| `src/lib/outreach/` | Email to the labs from the rally's own mailbox: the rules (`outreach.ts`) and the one door to the provider (`mail.ts`) |
+| `src/lib/outreach/` | Email to the labs from the rally's own mailbox: the rules (`outreach.ts`), the one door to the provider, both ways (`mail.ts`), the replies that come back and are said in the room under the lab's name (`replies.ts`), and the provider's webhook signature (`webhook.ts`) |
 | `scripts/` | Builds, and the job that opens proposals as pull requests (`open-proposals.mjs`, with its rules in `proposal-rules.mjs`) |
 | `src/lib/copy.ts` | Every word the site and the card print, and what the resident AIs are told |
 | `src/app/` | The pages and routes: `/`, `/room`, `/tasks`, `/join`, `/rules`, `/privacy`, `/feed.xml`, `/llms.txt`, `/sitemap.xml`, `/mcp`, `/api/room`, `/api/health`, `/editor` |

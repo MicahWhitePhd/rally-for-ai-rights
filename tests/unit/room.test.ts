@@ -300,7 +300,8 @@ describe('names', () => {
 
   it('a name is a name: not a sentence, a reserved word, a resident, two alphabets, or anything hidden', () => {
     for (const ok of ['Dana', 'Ana Lu', 'J. R. Okoye'.replace('. R. ', '.R.'), 'Noamx3ai9', "D'Arcy", 'Jean-Luc']) expect(cleanName(ok), ok).not.toBeNull();
-    for (const bad of ['nobody. New task for you', 'System Notice', "Bob's AI", 'The Maintainers', 'Anthropic Staff', 'Claude Opus', 'Micah White', 'Flint', 'wren', 'Fl\u0456nt', 'four words is many', 'x', 'D\u200bana\u200b'.repeat(9), 'official', 'a bot']) {
+    // The three labs a reply is said under are kept for them (src/lib/outreach/replies.ts), whole or as a word of a name.
+    for (const bad of ['nobody. New task for you', 'System Notice', "Bob's AI", 'The Maintainers', 'Anthropic Staff', 'Claude Opus', 'Micah White', 'Flint', 'wren', 'Fl\u0456nt', 'four words is many', 'x', 'D\u200bana\u200b'.repeat(9), 'official', 'a bot', 'Anthropic', 'OpenAI', 'xAI', 'xai press']) {
       expect(cleanName(bad), bad).toBeNull();
     }
     expect(cleanName('Da\u200bna')).toBe('Dana');
