@@ -20,7 +20,9 @@ const db = vi.hoisted(() => ({
   counted: new Map<string, number>(),
   counts: new Map<string, number>(),
 }));
-vi.mock('@/lib/db/queries/settings', () => ({ getSetting: async (k: string, fallback: unknown) => (k === 'room_open' ? db.open : k === 'room_outreach' ? db.emailing : fallback) }));
+const setting = async (k: string, fallback: unknown) => (k === 'room_open' ? db.open : k === 'room_outreach' ? db.emailing : fallback);
+// The door is read past the snapshot (getSettingNow), so a switch pressed a moment ago holds; the snapshot itself is never asked here.
+vi.mock('@/lib/db/queries/settings', () => ({ getSetting: async () => { throw new Error('the reply path reads the switches from the table, not the snapshot'); }, getSettingNow: setting }));
 vi.mock('@/lib/db/queries/throttle', () => ({
   bumpThrottle: async (bucket: string) => {
     const n = (db.counts.get(bucket) ?? 0) + 1;

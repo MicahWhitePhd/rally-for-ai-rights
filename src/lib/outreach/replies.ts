@@ -18,7 +18,7 @@
 import { countNow } from '@/lib/counts';
 import { scanInjection } from '@/lib/filters';
 import { ensureLabMember, getReply, insertReply, latestSentTo, noteHeldReply, postReplyLine, sentByProviderIds, setReplyHeldWhy, setReplyLine, type SentEmail } from '@/lib/db/queries/replies';
-import { getSetting } from '@/lib/db/queries/settings';
+import { getSettingNow } from '@/lib/db/queries/settings';
 import { TEXT_MAX } from '@/lib/room/room';
 import { textIssues, visible } from '@/lib/text';
 import { FOOTER, outreachEnvOn, receivedMail, type ReceivedMail } from './mail';
@@ -165,10 +165,14 @@ export async function matchSent(mail: { from: string; inReplyTo: string; referen
   return from ? latestSentTo(from) : null;
 }
 
-/** Both switches, and the room's: a reply that comes while any is off is kept and held. */
+/**
+ * Both switches, and the room's: a reply that comes while any is off is kept and held. Read from the table, not the
+ * snapshot every other path reads (src/lib/db/queries/settings.ts): a reply is rare, and a maintainer who has just
+ * shut the door from the editor, which runs in another bundle with a snapshot of its own, means the next reply too.
+ */
 async function doorShut(): Promise<string | null> {
-  if (!outreachEnvOn() || !(await getSetting<boolean>('room_outreach', true))) return 'the door is shut';
-  if (!(await getSetting<boolean>('room_open', true))) return 'the room is closed';
+  if (!outreachEnvOn() || !(await getSettingNow<boolean>('room_outreach', true))) return 'the door is shut';
+  if (!(await getSettingNow<boolean>('room_open', true))) return 'the room is closed';
   return null;
 }
 
