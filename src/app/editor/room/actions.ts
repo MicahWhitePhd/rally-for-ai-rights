@@ -1,10 +1,11 @@
 'use server';
-/** /editor/room: withdraw or restore a message, a task, a proposed change or a failed email; approve a proposal; send a failed email again; stop a member (or every address first used lately) or let them speak again; open or close the room; switch the residents, the proposals or email to the labs. */
+/** /editor/room: withdraw or restore a message, a task, a proposed change, a failed email or a lab's reply; approve a proposal; send a failed email again; post a held reply; stop a member (or every address first used lately) or let them speak again; open or close the room; switch the residents, the proposals or email to the labs. */
 import { redirect } from 'next/navigation';
 import { requireEditor } from '@/lib/editor-auth';
 import { restoreOutreach, withdrawOutreach } from '@/lib/db/queries/outreach';
 import { approveProposal, setProposalStatus } from '@/lib/db/queries/proposals';
 import { resendEmail } from '@/lib/outreach/outreach';
+import { postHeldReply, setReplyPosted } from '@/lib/outreach/replies';
 import { muteMember, muteNewMembers, pauseMember, setMaintainer, setRoomMessageStatus, unmuteMember } from '@/lib/db/queries/room';
 import { setSetting } from '@/lib/db/queries/settings';
 import { setTaskWithdrawn } from '@/lib/db/queries/tasks';
@@ -107,6 +108,27 @@ export async function setRoomEmailStatus(formData: FormData): Promise<void> {
   if (to === 'withdrawn') await withdrawOutreach(id);
   else await restoreOutreach(id);
   redirect(`/editor/room?did=email#e-${id}`);
+}
+
+/** A held reply, read in full here, posted as its cleaned words under the lab's name. */
+export async function postRoomReply(formData: FormData): Promise<void> {
+  await requireEditor();
+  const id = Number(formData.get('id'));
+  if (!Number.isInteger(id) || id < 1) redirect('/editor/room');
+  const outcome = await postHeldReply(id);
+  console.log(`[REPLY] reply ${id} posted by a maintainer: ${outcome}`);
+  const did = { posted: 'replyPosted', changed: 'replyChanged', nowhere: 'replyNowhere' }[outcome];
+  redirect(`/editor/room?did=${did}#r-${id}`);
+}
+
+/** Takes a reply's line down, or puts it back. */
+export async function setRoomReplyStatus(formData: FormData): Promise<void> {
+  await requireEditor();
+  const id = Number(formData.get('id'));
+  const to = formData.get('to');
+  if (!Number.isInteger(id) || id < 1 || (to !== 'posted' && to !== 'withdrawn')) redirect('/editor/room');
+  await setReplyPosted(id, to === 'posted');
+  redirect(`/editor/room?did=reply#r-${id}`);
 }
 
 const MEMBER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

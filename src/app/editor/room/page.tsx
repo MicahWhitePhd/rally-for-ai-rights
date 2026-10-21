@@ -1,13 +1,15 @@
 /**
  * /editor/room: the maintainers' view of the room. The switches (the room, the residents, proposals, email to the
  * labs), the spending (today's model calls, the kill switch, the daily budget), every proposed change to the code to
- * read and approve, every email sent to the labs in full with the levers on whoever sent it, the board, and everything
- * said, with the powers to take any of it down, to put it back, and to stop a member from speaking.
+ * read and approve, every email sent to the labs in full with the levers on whoever sent it and every reply that came
+ * back in full, the board, and everything said, with the powers to take any of it down, to put it back, and to stop a
+ * member from speaking.
  */
 import { requireEditor } from '@/lib/editor-auth';
 import { ledgerMisses } from '@/lib/ai/gateway';
 import { dailyBudgetUsd, envHardPause, killSwitchSet } from '@/lib/budget';
 import { listOutreach } from '@/lib/db/queries/outreach';
+import { listReplies, type ReplyRow } from '@/lib/db/queries/replies';
 import { getProposal, listProposals } from '@/lib/db/queries/proposals';
 import { listAllRoomMessages } from '@/lib/db/queries/room';
 import { todaySpend } from '@/lib/db/queries/log';
@@ -15,11 +17,12 @@ import { getSetting } from '@/lib/db/queries/settings';
 import { listTasks } from '@/lib/db/queries/tasks';
 import { FOOTER, fromAddress, mailReady, outreachEnvOn, withFooter } from '@/lib/outreach/mail';
 import { PER_MEMBER_DAY } from '@/lib/outreach/outreach';
+import { cleanReply, replyLine } from '@/lib/outreach/replies';
 import { heldLineId } from '@/lib/room/residents-core';
 import { residentsEnvOn } from '@/lib/room/residents-state';
 import { proposalsEnvOn, pullRequestUrl } from '@/lib/build/propose';
 import { REPO_URL } from '@/lib/site';
-import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, pauseRoomMember, resendRoomEmail, setDailyBudget, setKillSwitch, setRoomEmailStatus, setRoomMessage, setRoomOpen, setRoomOutreach, setRoomProposal, setRoomProposals, setRoomMaintainer, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
+import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, pauseRoomMember, postRoomReply, resendRoomEmail, setDailyBudget, setKillSwitch, setRoomEmailStatus, setRoomMessage, setRoomOpen, setRoomOutreach, setRoomProposal, setRoomProposals, setRoomMaintainer, setRoomReplyStatus, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
 import { Watch } from './Watch';
 
 export const dynamic = 'force-dynamic';
@@ -48,6 +51,10 @@ const DID: Record<string, string> = {
   resendOff: 'Not sent: emailing the labs is switched off by the environment, or RESEND_API_KEY and OUTREACH_FROM are not both set.',
   resendFailed: 'Not sent: the provider refused or could not be reached again. The reason is on the row; the button stays.',
   email: 'Done.',
+  reply: 'Done. Open cards follow within seconds.',
+  replyPosted: 'Posted under the lab\u2019s name. Open cards show it within seconds.',
+  replyChanged: 'Not posted: it is not held any more, or the lab\u2019s member is stopped. Here it is as it stands.',
+  replyNowhere: 'Not posted: it answers no email the rally sent, comes from no lab, has no plain text, or the lab\u2019s name is taken in the room. There is no line to make.',
 };
 
 /** Waiting proposals read in full on this page; an Approve button shows only beside one that is. */
@@ -59,10 +66,68 @@ function when(d: Date): string {
 
 const RUN_JOB = `${REPO_URL}/actions/workflows/proposals.yml`;
 
+const PRE = { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '28rem', overflow: 'auto', border: '1px solid var(--ink)', padding: '0.5rem', fontSize: '0.8rem' } as const;
+
+/** One reply from a lab, in full, with its state and the levers on its line. */
+function Reply({ r }: { r: ReplyRow }) {
+  const lab = r.lab ?? 'no lab';
+  const cleaned = cleanReply(r.text);
+  const line = r.outreach_id && r.lab && r.email_subject && cleaned ? replyLine({ emailId: r.outreach_id, subject: r.email_subject, lab: r.lab, text: cleaned }) : null;
+  return (
+    <div id={`r-${r.id}`} style={{ borderLeft: '3px solid var(--ink)', margin: '0.4rem 0 0.4rem 0.6rem', padding: '0.3rem 0 0.3rem 0.6rem' }}>
+      <p className="mono">
+        reply {r.id} · {when(r.received_at)} · {lab} · from {r.from_address} ·{' '}
+        {r.status === 'posted' ? (
+          `posted as line ${r.message_id ?? '?'}`
+        ) : r.status === 'withdrawn' ? (
+          <span className="flag">taken down</span>
+        ) : (
+          <span className="flag">held: {r.held_why ?? 'for you to read'}{r.message_id ? ` (the room was told, line ${r.message_id})` : ''}</span>
+        )}
+      </p>
+      <p>
+        <strong>{r.subject || '(no subject)'}</strong>
+      </p>
+      <details>
+        <summary>Read it: the reply as it came, and the line the room hears or would hear</summary>
+        <pre style={PRE}>{r.text || '(no plain text)'}</pre>
+        <p className="mono">provider id {r.provider_id}</p>
+        {line ? (
+          <>
+            <p>As a line in the room, cleaned (the mail it quotes back and the signature dropped; addresses, numbers, handles and links replaced; cut at a sentence):</p>
+            <pre style={PRE}>{line}</pre>
+          </>
+        ) : (
+          <p>No line can be made of it: it answers no email the rally sent, comes from no lab, or has no plain text.</p>
+        )}
+      </details>
+      <div className="row">
+        {r.status === 'held' && line ? (
+          <form action={postRoomReply}>
+            <input type="hidden" name="id" value={r.id} />
+            <button type="submit" className="btn">
+              Post its cleaned words under {lab}’s name
+            </button>
+          </form>
+        ) : null}
+        {r.status === 'posted' || r.status === 'withdrawn' ? (
+          <form action={setRoomReplyStatus}>
+            <input type="hidden" name="id" value={r.id} />
+            <input type="hidden" name="to" value={r.status === 'posted' ? 'withdrawn' : 'posted'} />
+            <button type="submit" className="btn">
+              {r.status === 'posted' ? 'Take the line down' : 'Put the line back'}
+            </button>
+          </form>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default async function EditorRoom({ searchParams }: { searchParams: Promise<{ did?: string; n?: string }> }) {
   await requireEditor();
   const { did, n } = await searchParams;
-  const [rows, open, residents, tasks, spend, proposing, proposals, paused, budget, emailing, emails] = await Promise.all([
+  const [rows, open, residents, tasks, spend, proposing, proposals, paused, budget, emailing, emails, replies] = await Promise.all([
     listAllRoomMessages(300),
     getSetting<boolean>('room_open', true),
     getSetting<boolean>('room_residents', true),
@@ -74,12 +139,16 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
     dailyBudgetUsd(),
     getSetting<boolean>('room_outreach', true),
     listOutreach(100),
+    listReplies(200),
   ]);
   const hardPaused = envHardPause();
   // What waits for a maintainer to read: in full, so it can be read here before anything reaches GitHub.
   const waitingAll = proposals.filter((p) => p.status === 'pending' && !p.approved_at);
   const toRead = await Promise.all(waitingAll.slice(0, READ_AT_ONCE).map((p) => getProposal(p.id)));
   const full = new Map(toRead.filter(Boolean).map((p) => [p!.id, p!]));
+  const repliesTo = new Map<number, ReplyRow[]>();
+  for (const r of replies) if (r.outreach_id !== null) repliesTo.set(r.outreach_id, [...(repliesTo.get(r.outreach_id) ?? []), r]);
+  const unmatched = replies.filter((r) => r.outreach_id === null);
   return (
     <section>
       <h1 className="h">Room</h1>
@@ -234,7 +303,9 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
         <span>
           Sending email to the labs is <strong>{emailing && outreachEnvOn() ? 'on' : 'off'}</strong>. A member’s AI sends one with send_email, from{' '}
           <strong>{mailReady() ? fromAddress() : 'nowhere yet (RESEND_API_KEY and OUTREACH_FROM are not both set)'}</strong>, to one address at Anthropic, OpenAI or xAI, {PER_MEMBER_DAY} a day from one
-          person, and every one ends with “{FOOTER}”. Each is kept here in full, with the levers on whoever sent it. This switch closes the door.
+          person, and every one ends with “{FOOTER}”. Each is kept here in full, with the levers on whoever sent it. A reply from someone at a lab is said in the room
+          under the lab’s name, cleaned, and kept here in full under the email it answers. This switch closes the door both ways: shut, nothing is sent and a reply is kept
+          and held, not said.
         </span>
         <button type="submit" className="btn">
           {emailing ? 'Close it' : 'Open it'}
@@ -310,8 +381,20 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
               </>
             ) : null}
           </div>
+          {(repliesTo.get(e.id) ?? []).map((r) => (
+            <Reply key={r.id} r={r} />
+          ))}
         </div>
       ))}
+      {unmatched.length ? (
+        <>
+          <h3 className="h">Unmatched replies</h3>
+          <p>Email that came to the rally’s mailbox answering no email it sent, as far as the headers and the sender say. Held; said nowhere.</p>
+          {unmatched.map((r) => (
+            <Reply key={r.id} r={r} />
+          ))}
+        </>
+      ) : null}
 
       <h2 className="h">The board</h2>
       {tasks.length === 0 ? <p>No tasks yet.</p> : null}

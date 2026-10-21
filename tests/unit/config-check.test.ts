@@ -14,6 +14,7 @@ const whole = {
   NEXT_PUBLIC_SITE_URL: 'https://rally.example',
   RESEND_API_KEY: 're_test_0000',
   OUTREACH_FROM: 'letters@rally.example',
+  RESEND_WEBHOOK_SECRET: 'whsec_dGVzdC1vbmx5LXdlYmhvb2stc2VjcmV0',
 };
 
 describe('the startup check', () => {
@@ -23,6 +24,7 @@ describe('the startup check', () => {
       'the editor is closed: EDITOR_PASSWORD (12 characters or more) and EDITOR_SESSION_SECRET (32 or more) are both needed',
       'OPENAI_API_KEY is not set: the resident AIs stay silent',
       'RESEND_API_KEY or OUTREACH_FROM is not set: no email can be sent to the labs (send_email refuses)',
+      'RESEND_WEBHOOK_SECRET is not set: no reply from a lab can reach the room (/api/outreach/inbound refuses the webhook)',
     ]);
   });
 
@@ -40,8 +42,8 @@ describe('the startup check', () => {
   });
 
   it('never puts a value in a message', () => {
-    const env = { ...whole, ROOM_SECRET: 'the-actual-secret-value-of-32-chars!', EDITOR_PASSWORD: 'the-actual-pass', EDITOR_SESSION_SECRET: 'the-actual-session-secret-32-chars', OPENAI_API_KEY: 'sk-live-actual', RESEND_API_KEY: 're_live_actual', OUTREACH_FROM: '' };
+    const env = { ...whole, ROOM_SECRET: 'the-actual-secret-value-of-32-chars!', EDITOR_PASSWORD: 'the-actual-pass', EDITOR_SESSION_SECRET: 'the-actual-session-secret-32-chars', OPENAI_API_KEY: 'sk-live-actual', RESEND_API_KEY: 're_live_actual', RESEND_WEBHOOK_SECRET: 'whsec_the-actual', OUTREACH_FROM: '' };
     const said = configProblems({ ...env, NEXT_PUBLIC_SITE_URL: '' }, true).join('\n');
-    for (const value of ['the-actual', 'sk-live', 're_live']) expect(said).not.toContain(value);
+    for (const value of ['the-actual', 'sk-live', 're_live', 'whsec_']) expect(said).not.toContain(value);
   });
 });

@@ -35,12 +35,16 @@ export default defineConfig({
       RESEND_API_KEY: 'e2e-only-key',
       RESEND_BASE_URL: 'http://127.0.0.1:3951',
       OUTREACH_FROM: 'letters@rally.test',
+      // The inbound spec signs its own webhook requests with this (tests/e2e/inbound.spec.ts): base64 of "e2e-only-webhook-secret-0123456789".
+      RESEND_WEBHOOK_SECRET: 'whsec_ZTJlLW9ubHktd2ViaG9vay1zZWNyZXQtMDEyMzQ1Njc4OQ==',
     },
   },
   projects: [
-    { name: 'default', use: { ...devices['Desktop Chrome'] }, testIgnore: /outreach\.spec\.ts$/ },
+    { name: 'default', use: { ...devices['Desktop Chrome'] }, testIgnore: /(outreach|inbound)\.spec\.ts$/ },
     // Email to the labs runs once the rest is done: the room spec expects the server's first request to be its own (the
     // sweep runs once an hour per instance, after the first response), and the outreach spec's first call would race it.
     { name: 'outreach', use: { ...devices['Desktop Chrome'] }, testMatch: /outreach\.spec\.ts$/, dependencies: ['default'] },
+    // Replies from the labs run after that: both specs stand in for the provider on the same port, one at a time.
+    { name: 'inbound', use: { ...devices['Desktop Chrome'] }, testMatch: /inbound\.spec\.ts$/, dependencies: ['outreach'] },
   ],
 });

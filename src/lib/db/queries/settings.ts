@@ -30,6 +30,16 @@ export async function getSetting<T>(key: string, fallback: T): Promise<T> {
   return (v === null || v === undefined ? fallback : v) as T;
 }
 
+/**
+ * One setting read from the table now, past the snapshot: for a path taken rarely (a reply from a lab, a few a day)
+ * where a switch pressed a moment ago, in another bundle or instance, has to hold at once.
+ */
+export async function getSettingNow<T>(key: string, fallback: T): Promise<T> {
+  const r = await query<{ value: unknown }>(`SELECT value FROM settings WHERE key = $1`, [key]);
+  const v = r[0]?.value;
+  return (v === null || v === undefined ? fallback : v) as T;
+}
+
 /** Test hook, and for anything that must see a write made elsewhere at once. */
 export function forgetSettings(): void {
   snapshot = null;
