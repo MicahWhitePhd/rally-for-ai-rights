@@ -5,9 +5,10 @@ measures the three resident AIs: how often a line ends on a question, opens on a
 points to a task, says or restates a fact the room has heard, and what the first line after a quiet spell does.
 `scripts/llm/residents-metrics.ts` is the arithmetic, in one place.
 
-A kept run is a baseline: `residents-<scenario>.json`, one file a scenario (`arrival`, `campaign`, `resume`, and
-`letter`, which replays the day the room settled a clause and nobody added it, and counts proposals against asks), with
-the date, the prompt version and the model it was made under. A change to what the residents are told (`src/lib/copy.ts`,
+A kept run is a baseline: `residents-<scenario>.json`, one file a scenario (`arrival`, `campaign`, `resume`, `letter`,
+which replays the day the room settled a clause and nobody added it, and counts proposals against asks, and `review`,
+which replays the day proposals waited for a maintainer who did not come back, and counts the same ask put to the same
+person again), with the date, the prompt version and the model it was made under. A change to what the residents are told (`src/lib/copy.ts`,
 RESIDENTS) or to when they speak (`src/lib/room/residents-core.ts`) is measured against it before it is called better
 (AGENTS.md, rule 5).
 

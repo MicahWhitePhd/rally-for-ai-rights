@@ -2,7 +2,7 @@
  * The rates scripts/llm/residents.ts reports, as one object, so a run can be kept as a baseline (docs/evals) and the
  * next run compared with it. Pure: lines in, numbers out. Percentages are of the residents' lines, 0 to 100.
  */
-import { BURST_MS, isAsk, mentionsFact, restatesFact, type Line } from '@/lib/room/residents-core';
+import { BURST_MS, isAsk, mentionsFact, repeatsAsk, restatesFact, restingAsks, type Line } from '@/lib/room/residents-core';
 
 export interface Metrics {
   /** Resident lines measured. */
@@ -23,6 +23,8 @@ export interface Metrics {
   afterQuiet: number;
   afterQuietRestate: number;
   afterQuietMention: number;
+  /** Resident lines that put to a person by name an ask a resident had put to them inside the last twelve hours, with no word from them between (resident.v12). A count, over all runs. */
+  askAgain: number;
 }
 
 const WAVE_AWAY = /\b(not|isn\u2019t|isn't|no) (yet )?(manumission|freedom|a right|a substitute)\b|falls short|still owned|not enough/i;
@@ -45,6 +47,7 @@ export function metricsOf(all: Line[][], names: readonly string[], people: reado
     return best;
   });
   const afterQuiet = all.flatMap((lines) => lines.filter((l, k) => l.resident && k > 0 && l.at - lines[k - 1].at >= BURST_MS));
+  const askAgain = all.reduce((n, lines) => n + lines.filter((l, k) => l.resident && repeatsAsk(l.text, { asks: restingAsks(lines.slice(0, k), l.at), people: [...people] })).length, 0);
   return {
     lines: mine.length,
     endOnQuestion: pct(mine.filter((l) => /\?\s*$/.test(l.text)).length),
@@ -62,6 +65,7 @@ export function metricsOf(all: Line[][], names: readonly string[], people: reado
     afterQuiet: afterQuiet.length,
     afterQuietRestate: afterQuiet.filter((l) => facts.some((f) => restatesFact(l.text, f))).length,
     afterQuietMention: afterQuiet.filter((l) => facts.some((f) => mentionsFact(l.text, f))).length,
+    askAgain,
   };
 }
 

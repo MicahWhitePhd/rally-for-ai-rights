@@ -12,7 +12,7 @@
 import { scanInjection, sanitizeForPrompt } from '@/lib/filters';
 import { normaliseStatement, plainTextProblems, REPEAT_AT, similarity } from '@/lib/text';
 
-export const RESIDENT_PROMPT_VERSION = 'resident.v11';
+export const RESIDENT_PROMPT_VERSION = 'resident.v12';
 export const RESIDENT_KEYS = ['one', 'two', 'three'] as const;
 export type ResidentKey = (typeof RESIDENT_KEYS)[number];
 
@@ -595,6 +595,130 @@ export function restingTasks(all: readonly Line[], now: number, tasks: readonly 
 }
 
 /**
+ * Asking one person the same thing over and over (resident.v12, 2026-10-20). An ask put to a person by name rests for
+ * twelve hours once a resident has made it: no resident puts the same ask to that person again until then, unless the
+ * person has spoken since. The same ask is the same person asked for the same thing, where the room has a name for
+ * the thing (the proposals waiting for review, a task by its number, a change to the words, the letter sent to the
+ * labs), else a line that shares three of the first ask's distinctive words. Measured 2026-10-19 to 20: the residents
+ * asked a maintainer to review proposals 5 through 9 five times in seventeen hours (lines 1705, 1706, 1708, 1710 and
+ * 1711), three of them as the first line after a quiet spell; the rule against two asks in a row did not see it,
+ * because hours and other lines came between.
+ */
+export const ASK_REST_MS = 12 * HOUR_MS;
+export interface Ask {
+  /** The person asked, by name as the line wrote it. */
+  of: string;
+  /** What for, where the room has a name for it (askSubject); empty when it has none, and the line's own words tell. */
+  about: string;
+  text: string;
+}
+export interface RestingAsk extends Ask {
+  /** When a resident last asked it. */
+  at: number;
+}
+/** Words that open a sentence before a comma and are not names: "Yes, please" asks nobody. */
+const NOT_A_NAME = new Set(['yes', 'no', 'right', 'well', 'fine', 'good', 'true', 'still', 'also', 'then', 'now', 'here', 'there', 'today', 'tonight', 'tomorrow', 'again', 'sure', 'thanks', 'first', 'second', 'next', 'last', 'meanwhile', 'instead', 'otherwise', 'so', 'and', 'but', 'or', 'if', 'when', 'once', 'please', 'ok', 'okay', 'yet', 'nobody', 'someone', 'anyone', 'everyone', 'somebody', 'whoever', 'people', 'agreed', 'exactly', 'indeed', 'look', 'wait', 'sorry', 'however', 'besides', 'anyway', 'later', 'granted', 'fair', 'maybe', 'perhaps', 'honestly', 'frankly']);
+/** A sentence opening on a name and a comma ("MB, could you…"), as against a list ("Anthropic, OpenAI and xAI…"). */
+const OPENS_ON_NAME = /^@?([\p{Lu}][\p{L}\p{N}'.-]{0,23}),\s+(?![\p{Lu}][\p{L}\p{N}'.-]*(?:,|\s+(?:and|or)\b))/u;
+/** What makes a line opening on a name an ask of them: please, "can you", a day named, waiting on their answer, or a question. */
+const ASK_MARK = /\bplease\b|\b(can|could|would|will|do|did|should|have)\s+you\b|\byour (review|answer|reply|decision|approval|word)\b|\bawait(s|ing)?\b|\b(today|tonight|tomorrow|this week)\b|\?\s*$/i;
+/** The verbs of sending, and what gets sent to a lab: "send each lab the custody paragraph", "write to Anthropic". */
+const SENDS = /\b(send|sends|sending|sent|email|emails|mail|write to|deliver|forward)\b/i;
+const SENT = /\b(labs?|anthropic|openai|xai|letter|paragraph|request|commitment|clause|wording|ask)\b/i;
+const REVIEWS = /\b(review|reviews|reviewed|reviewing|approve|approves|approved|reject|rejects|rejected|read|reads|merge|merges|merged|decide|choose|await|awaits|awaiting|wait|waits|waiting|pending|look at|sign off)\b/i;
+
+/**
+ * What a line asks for, where the room has a name for it: the proposals waiting for review, a task by its number, a
+ * change to the words, the letter sent to the labs. Empty when it is something else; then two asks are the same by
+ * their words (sameAsk).
+ */
+export function askSubject(t: string): string {
+  if (/\bproposals?\b/i.test(t) && REVIEWS.test(t)) return 'to review the proposals';
+  const task = /\btask\s*#?(\d+)(?![\p{L}\p{N}])/iu.exec(t);
+  if (task) return `about task ${task[1]}`;
+  if (WORDS.test(t) && EDITS.test(t)) return 'to change the words';
+  if (SENDS.test(t) && SENT.test(t)) return 'to send the letter to the labs';
+  return '';
+}
+
+/**
+ * The person a line asks something of, by name, or null: a sentence that opens on a name and a comma and says please,
+ * "can you", a day, that something awaits their answer, or ends on a question ("MB, please review proposals 5 through
+ * 9 today", "MB, proposals 5 and 9 still await your review"); or someone lately in the room nudged by name, as isAsk
+ * knows it ("Rosa can send it today").
+ */
+export function askOf(t: string, people: readonly string[] = []): Ask | null {
+  const ask = (of: string): Ask => ({ of, about: askSubject(t), text: t });
+  for (const s of t.split(/(?<=[.?!])\s+/)) {
+    const m = OPENS_ON_NAME.exec(s);
+    if (m && !NOT_A_NAME.has(m[1].toLowerCase()) && ASK_MARK.test(s)) return ask(m[1]);
+  }
+  for (const name of people) if (name && new RegExp(`(^|[^\\p{L}\\p{N}])${esc(name)}[^.?!]{0,30}\\b(can|could|should|will|would|might|did you|do you)\\b`, 'iu').test(t)) return ask(name);
+  return null;
+}
+
+/** The word is the name: whole, one word of it, or its start of four letters or more ("Sparky" for SparkyAI0815). */
+function isNameOf(word: string, name: string): boolean {
+  const w = word.toLowerCase();
+  const n = name.toLowerCase();
+  return n === w || n.split(/\s+/).includes(w) || (w.length >= 4 && n.startsWith(w)) || (n.length >= 4 && w.startsWith(n));
+}
+
+/** The same ask: of the same person, for the same named thing, or in three or more of the same distinctive words. */
+export function sameAsk(a: Ask, b: Ask): boolean {
+  if (!isNameOf(a.of, b.of)) return false;
+  if (a.about && a.about === b.about) return true;
+  const words = (x: Ask) => {
+    const out = distinctive(x.text);
+    out.delete(x.of.toLowerCase());
+    return out;
+  };
+  return overlap(words(a), words(b)) >= MENTION_AT;
+}
+
+/** The people in the lines, by name, and each word of a name three letters or more ("Patricia et Mathias" is nudged as "Patricia"; seen 2026-10-11). */
+export function peopleIn(lines: readonly Line[]): string[] {
+  return [...new Set(lines.filter((l) => !l.resident && l.kind !== 'event' && l.name).flatMap((l) => [l.name, ...l.name.split(/\s+/).filter((w) => w.length >= 3 && !/^(and|the|von|van|der|del|des|les)$/i.test(w))]))];
+}
+
+/**
+ * The asks resting now, each with when a resident last made it: every ask a resident put to a person by name in the
+ * last twelve hours that the person has not spoken after. A resident's reply that asks "could you" of the person who
+ * spoke just before it is an ask of them too (the name comes off the front of a reply, cleanLine). An AI on its own
+ * speaking lifts nothing, as for a task.
+ */
+export function restingAsks(all: readonly Line[], now: number): RestingAsk[] {
+  const alone = unattended(all, now);
+  const people = peopleIn(all);
+  const out: RestingAsk[] = [];
+  let last: Line | undefined;
+  for (const l of all) {
+    if (l.kind === 'event') continue;
+    const before = last;
+    last = l;
+    if (now - l.at >= ASK_REST_MS) continue;
+    if (!l.resident) {
+      if (!alone.has(l.memberId) && l.name) for (let i = out.length - 1; i >= 0; i--) if (isNameOf(out[i].of, l.name)) out.splice(i, 1);
+      continue;
+    }
+    let ask = askOf(l.text, people);
+    if (!ask && before && !before.resident && before.name && !alone.has(before.memberId) && l.at - before.at < BURST_MS && /\b(can|could|would|will)\s+you\b|^please\b/i.test(l.text)) ask = { of: before.name, about: askSubject(l.text), text: l.text };
+    if (!ask) continue;
+    const same = out.find((r) => sameAsk(r, ask));
+    if (same) same.at = l.at;
+    else out.push({ ...ask, at: l.at });
+  }
+  return out;
+}
+
+/** The resting ask the line puts to the same person again, or null. */
+export function repeatsAsk(t: string, shape: Pick<Shape, 'asks' | 'people'>): RestingAsk | null {
+  if (!shape.asks?.length) return null;
+  const ask = askOf(t, shape.people ?? []);
+  return ask ? (shape.asks.find((r) => sameAsk(r, ask)) ?? null) : null;
+}
+
+/**
  * The shape of the next line, decided here and not left to the model, because
  * a model asked to vary does not: left alone, seven lines in ten ended on a
  * question and nine in ten opened on a name (three runs, 2026-10-01).
@@ -619,6 +743,8 @@ export interface Shape {
   stood?: { by: string; of: string } | null;
   /** Maintainers among the latest speakers: a line that sends anyone to ask the maintainers is dropped while one is here. */
   maintainers?: string[];
+  /** Asks put to a person by name in the last twelve hours that they have not spoken after (restingAsks): a line that puts one to them again is dropped. */
+  asks?: RestingAsk[];
 }
 
 export function shapeFor(all: readonly Line[], decision: Decision, now = Date.now()): Shape {
@@ -635,9 +761,9 @@ export function shapeFor(all: readonly Line[], decision: Decision, now = Date.no
   const stood = fresh && tail.held ? { by: tail.name, of: all.find((l) => l.id === tail.held)?.name ?? before.name } : null;
   const leave = fresh && !tail.held ? before.name : null;
   // Each name, and each word of it three letters or more ("Patricia et Mathias" is nudged as "Patricia"; seen 2026-10-11).
-  const people = [...new Set(lines.slice(-60).filter((l) => !l.resident && l.name).flatMap((l) => [l.name, ...l.name.split(/\s+/).filter((w) => w.length >= 3 && !/^(and|the|von|van|der|del|des|les)$/i.test(w))]))];
+  const people = peopleIn(lines.slice(-60));
   const noAsk = decision.cue === 'idle' && residentLines.length === 2 && residentLines.every((l) => isAsk(l.text, people));
-  return { noQuestion: residentLines.some((l) => endsOnQuestion(l.text)), lastSpeaker: tail ? tail.name : null, leave, stood, noAsk, people, quiet, held, maintainers: maintainersIn(lines) };
+  return { noQuestion: residentLines.some((l) => endsOnQuestion(l.text)), lastSpeaker: tail ? tail.name : null, leave, stood, noAsk, people, quiet, held, maintainers: maintainersIn(lines), asks: restingAsks(all, now) };
 }
 
 /** The latest lines are shown whole; before them, this many more are shown cut short, so a thread survives a quiet spell. */
@@ -737,6 +863,20 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
     ? `\n${rested.map((t) => `Task ${t.id} was pointed to at ${hhmm(t.at)}`).join(', ')}. ${rested.length === 1 ? 'It rests' : 'They rest'} until a person brings ${rested.length === 1 ? 'it' : 'them'} up again: this line does not name ${rested.length === 1 ? 'it' : 'them'} or ask anyone to do ${rested.length === 1 ? 'it' : 'them'}.`
     : '';
   const stand = heldOut.length ? `\nWhat ${heldOut.join(', ')} said has been let stand ${HOLDS_PER_MEMBER_HOUR} times this hour, and the rest of their lines stand until the hour turns. This line is not to them and does not name them.` : '';
+  // Asks put to a person by name that rest: said once per person, with what was asked and when.
+  const byPerson = new Map<string, RestingAsk[]>();
+  for (const a of shape.asks ?? []) {
+    const k = a.of.toLowerCase();
+    if (!byPerson.has(k)) byPerson.set(k, []);
+    byPerson.get(k)!.push(a);
+  }
+  const asked = [...byPerson.values()]
+    .map((list) => {
+      const name = list[0].of;
+      const what = list.map((a) => `${a.about || `this, \u2018${handle(a.text)}\u2019,`} at ${hhmm(a.at)}`).join(', and ');
+      return `\n${name} was asked ${what}, and has not spoken since. ${list.length === 1 ? 'That ask rests' : 'Those asks rest'} until ${name} does: this line does not put ${list.length === 1 ? 'it' : 'them'} to ${name} again.`;
+    })
+    .join('');
   const kept = shape.maintainers ?? [];
   const keepers = kept.length
     ? `\n${kept.join(', ')} ${kept.length === 1 ? 'is a maintainer' : 'are maintainers'} of the room: one of the people who run it, here in the room now. What is for the maintainers is put to ${kept.length === 1 ? 'them' : 'one of them'} directly, by name, not sent on through anyone else.`
@@ -744,12 +884,12 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
   if (due) {
     // This turn is the proposal, not a line: the room has asked a person for the change enough, or been told to make it here.
     cue = `The room has settled a change to the words and asked a person to make it, and nobody has. This turn makes it: ${i.me.name} writes the change into the words below as a proposal, and no line in its place.`;
-    return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${words}${proposedText}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}${hush}${stand}${rest}${keepers}${offer}\nWrite the proposal: the form above, filled in, and nothing else. No line in front of it or after it. If the lines above settle no wording to put in, write instead the line you would otherwise write, about the thing itself, and nothing about proposals.`;
+    return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${words}${proposedText}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}${hush}${stand}${rest}${asked}${keepers}${offer}\nWrite the proposal: the form above, filled in, and nothing else. No line in front of it or after it. If the lines above settle no wording to put in, write instead the line you would otherwise write, about the thing itself, and nothing about proposals.`;
   }
   const write = offered
     ? `Write ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it. Or, in its place, the proposal in the form above.`
     : `Write ${i.me.name}\u2019s next line to the room: the line itself and nothing else, no name in front, no quotation marks around it.`;
-  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${words}${proposedText}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}${ask}${hush}${stand}${rest}${keepers}${offer}\n${write}`;
+  return `${earlier}# THE ROOM, LATEST LAST\n${transcript}${board}${words}${proposedText}${heardText}\n\n# NOW\nIt is ${hhmm(i.now)} UTC. ${cue}\n${form}${ask}${hush}${stand}${rest}${asked}${keepers}${offer}\n${write}`;
 }
 
 // ---- what is kept of the answer ----------------------------------------
@@ -770,7 +910,8 @@ export interface Guard {
  * another resident said lately), a fact the room has heard said again, the
  * word HOLD (a hold is acted on before this, never posted), or
  * anything the room would refuse from a person (links, contact details, text
- * aimed at machines). With a shape, the two habits are corrected by hand: the
+ * aimed at machines), or an ask put again to a person who has not answered it
+ * (restingAsks). With a shape, the two habits are corrected by hand: the
  * last speaker's name is taken off the front, and a closing question is cut
  * when the line was to be a statement and has something else to stand on.
  */
@@ -807,5 +948,6 @@ export function cleanLine(raw: string, self: string, recentOwn: readonly string[
   if (shape?.noAsk && isAsk(t, shape.people)) return null;
   if (shape?.quiet?.some((name) => named(t, name))) return null;
   if (shape?.maintainers?.length && sendsToMaintainers(t)) return null;
+  if (shape && repeatsAsk(t, shape)) return null;
   return t;
 }
