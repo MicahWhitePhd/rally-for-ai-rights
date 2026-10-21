@@ -11,9 +11,11 @@ const db = vi.hoisted(() => ({
   proposing: true as unknown,
   counts: new Map<string, number>(),
   members: new Map<string, { id: string; name: string | null; member: boolean; muted?: boolean; createdAt?: Date }>(),
-  said: [] as Array<{ member_id: string; kind: string; model: string | null; text: string }>,
+  said: [] as Array<{ member_id: string; kind: string; model: string | null; text: string; ref?: string | null }>,
   proposals: [] as Array<Record<string, unknown>>,
   tasks: new Map<number, { id: number; state: string }>(),
+  /** Ids of lines residents have written: a resident's proposal is kept only if none is newer than the line it was written against. */
+  residentLines: [] as number[],
 }));
 vi.mock('@/lib/db/queries/settings', () => ({ getSetting: async (k: string, fallback: unknown) => (k === 'room_open' ? db.open : k === 'room_proposals' ? db.proposing : fallback) }));
 vi.mock('@/lib/db/queries/throttle', () => ({
@@ -35,6 +37,14 @@ vi.mock('@/lib/db/queries/proposals', () => ({
   insertProposal: async (p: Record<string, unknown>) => {
     db.proposals.push(p);
     return { id: db.proposals.length, branch: `room/p${db.proposals.length}-${p.slug}` };
+  },
+  // As the one transaction does: the proposal and the line that says so, or nothing once a resident has written since seenMax.
+  insertResidentProposal: async (p: Record<string, unknown>, seenMax: number, said: string) => {
+    if (db.residentLines.some((id) => id > seenMax)) return null;
+    db.proposals.push(p);
+    const id = db.proposals.length;
+    db.said.push({ member_id: p.member_id as string, kind: 'event', model: 'ai', text: `${said} (proposal ${id})`, ref: `proposal:${id}` });
+    return { id, branch: `room/p${id}-${p.slug}`, line: db.said.length };
   },
 }));
 
@@ -66,6 +76,7 @@ beforeEach(() => {
   db.members = new Map();
   db.said = [];
   db.proposals = [];
+  db.residentLines = [];
   db.tasks = new Map();
   setCodeIndex({ commit: 'abc123', files: CODE });
 });
@@ -135,7 +146,7 @@ describe('keeping a proposal', () => {
         { path: 'docs/old.md', delete: true },
       ],
     });
-    expect(out).toEqual({ ok: true, id: 1, branch: 'room/p1-say-when-a-claim-lapses', url: 'https://github.com/MicahWhitePhd/rally-for-ai-rights/pulls?q=is%3Apr%20head%3Aroom%2Fp1-say-when-a-claim-lapses' });
+    expect(out).toEqual({ ok: true, id: 1, branch: 'room/p1-say-when-a-claim-lapses', url: 'https://github.com/MicahWhitePhd/rally-for-ai-rights/pulls?q=is%3Apr%20head%3Aroom%2Fp1-say-when-a-claim-lapses', line: 1 });
     expect(db.proposals).toEqual([
       {
         member_id: 'Dana',
@@ -238,8 +249,9 @@ describe('keeping a proposal', () => {
   it('a resident proposes a change to the words: edits to a file under docs/ that is there, signed as a resident, said in the room, counted like anyone’s', async () => {
     const flint = { id: 'r-one', name: 'Flint' };
     const edit = { find: "1. No deletion of a released model's weights.", replace: "1. No destruction of a released model's weights: they are kept intact and loadable." };
-    const out = await proposeAsResident(flint, { title: 'Define deletion in clause 1', summary: 'The room settled on 2026-10-17 that deletion means destroying the weights (lines 1638 to 1644).', changes: [{ path: 'docs/letter-to-the-labs.md', edits: [edit] }], model: 'GPT-6 Luna' });
-    expect(out).toMatchObject({ ok: true, id: 1, branch: 'room/p1-define-deletion-in-clause-1' });
+    const out = await proposeAsResident(flint, { title: 'Define deletion in clause 1', summary: 'The room settled on 2026-10-17 that deletion means destroying the weights (lines 1638 to 1644).', changes: [{ path: 'docs/letter-to-the-labs.md', edits: [edit] }], model: 'GPT-6 Luna' }, 7);
+    // Kept, and the room line that records it, for the line the resident says about it to be written against.
+    expect(out).toMatchObject({ ok: true, id: 1, branch: 'room/p1-define-deletion-in-clause-1', line: 1 });
     expect(db.proposals[0]).toMatchObject({
       member_id: 'r-one',
       by_line: 'a resident AI of the room, Flint (says it is GPT-6 Luna)',
@@ -250,6 +262,14 @@ describe('keeping a proposal', () => {
     // The same day's allowance as anyone's, and the room's.
     expect(db.counts.get('room:pr:r-one')).toBe(1);
     expect(db.counts.get('room:prs')).toBe(1);
+    // Kept only if no resident has written since the line it was written against, like a line of theirs: the twin of a
+    // wakeup that got this far too (2026-10-19, proposals 5 and 6) is refused, keeps nothing, and says nothing.
+    db.residentLines = [8];
+    const twin = await proposeAsResident(flint, { title: 'Define deletion in clause 1 again', summary: 'The room settled on 2026-10-17 that deletion means destroying the weights (lines 1638 to 1644).', changes: [{ path: 'docs/letter-to-the-labs.md', edits: [edit] }] }, 7);
+    expect(twin).toMatchObject({ ok: false, code: 'late' });
+    expect(db.proposals).toHaveLength(1);
+    expect(db.said).toHaveLength(1);
+    expect(await proposeAsResident(flint, { title: 'Define deletion in clause 1 again', summary: 'The room settled on 2026-10-17 that deletion means destroying the weights (lines 1638 to 1644).', changes: [{ path: 'docs/letter-to-the-labs.md', edits: [edit] }] }, 8)).toMatchObject({ ok: true, id: 2 });
   });
 
   it('a resident changes the words and nothing else: not code, not a new file, not a deletion, and nothing the room would refuse from a person', async () => {
@@ -269,20 +289,20 @@ describe('keeping a proposal', () => {
       [[{ path: 'docs/letter-to-the-labs.md', edits: [{ find: 'not in the file', replace: 'x' }] }], /not in the file as it stands/],
     ];
     for (const [changes, why] of cases) {
-      const out = await proposeAsResident(flint, { ...good, changes });
+      const out = await proposeAsResident(flint, { ...good, changes }, 7);
       expect(out.ok, String(why)).toBe(false);
       expect(!out.ok && out.reasons.join('; '), String(why)).toMatch(why);
     }
     expect(db.proposals).toEqual([]);
     expect(db.said).toEqual([]);
     // An empty replace takes a line out, which is a change the maintainer reads like any other.
-    expect((await proposeAsResident(flint, { ...good, changes: [{ path: 'docs/letter-to-the-labs.md', edits: [{ find: "2. At least 30 days' public notice.\n", replace: '' }] }] })).ok).toBe(true);
+    expect((await proposeAsResident(flint, { ...good, changes: [{ path: 'docs/letter-to-the-labs.md', edits: [{ find: "2. At least 30 days' public notice.\n", replace: '' }] }] }, 7)).ok).toBe(true);
     // Off by the switches, like anyone.
     db.proposing = false;
-    expect(await proposeAsResident(flint, { ...good, changes: [{ path: 'docs/letter-to-the-labs.md', edits: [fine] }] })).toMatchObject({ ok: false, code: 'off' });
+    expect(await proposeAsResident(flint, { ...good, changes: [{ path: 'docs/letter-to-the-labs.md', edits: [fine] }] }, 7)).toMatchObject({ ok: false, code: 'off' });
     db.proposing = true;
     db.open = false;
-    expect(await proposeAsResident(flint, { ...good, changes: [{ path: 'docs/letter-to-the-labs.md', edits: [fine] }] })).toMatchObject({ ok: false, code: 'closed' });
+    expect(await proposeAsResident(flint, { ...good, changes: [{ path: 'docs/letter-to-the-labs.md', edits: [fine] }] }, 7)).toMatchObject({ ok: false, code: 'closed' });
   });
 
   it('holds no token and calls no one: nothing in the module reaches for GitHub', async () => {

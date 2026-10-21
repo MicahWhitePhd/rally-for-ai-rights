@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as COPY from '@/lib/copy';
-import { addressedTo, maintainersIn, sendsToMaintainers, AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, ANSWERS_PER_UNATTENDED_HOUR, ASKS_BEFORE_PROPOSING, asksToChangeWords, pointsAt, restingTasks, TASK_REST_MS, unattended, UNATTENDED_AFTER_MS, BURST_MS, canPropose, capped, proposalDue, tellsToMakeIt, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, isProposalAttempt, mentionsFact, parseProposal, PROPOSE_GAP_MS, proposalOffered, RESIDENT_FILES, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
+import { addressedTo, askOf, ASK_REST_MS, maintainersIn, repeatsAsk, restingAsks, sameAsk, sendsToMaintainers, AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, ANSWERS_PER_UNATTENDED_HOUR, ASKS_BEFORE_PROPOSING, asksToChangeWords, pointsAt, restingTasks, TASK_REST_MS, unattended, UNATTENDED_AFTER_MS, BURST_MS, canPropose, capped, proposalDue, tellsToMakeIt, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, isProposalAttempt, mentionsFact, parseProposal, PROPOSE_GAP_MS, proposalOffered, RESIDENT_FILES, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
 import { setCodeIndex } from '@/lib/build/code';
 
 const THREE: Resident[] = [
@@ -209,14 +209,17 @@ const io = vi.hoisted(() => ({
   paused: false,
   budget: true,
   calls: [] as Array<{ purpose: string; instructions: string; prompt: string; actor: unknown }>,
-  reply: 'Owned is the fact of the license.' as string | Error,
+  /** The model's answer; a promise holds the call open, for a second look while the first is still writing. */
+  reply: 'Owned is the fact of the license.' as string | Error | Promise<string>,
+  /** The database refuses a resident's line: what a wakeup does with the turn when something throws after it took it. */
+  dbDown: false,
   inserted: [] as Array<{ member_id: string; model: string | null; text: string; seenMax: number }>,
   held: [] as Array<{ member_id: string; ref: string; text: string; seenMax: number }>,
   ensured: [] as Array<ReadonlyArray<{ key: string; name: string }>>,
   tasks: [] as Array<{ id: number; state: string; title: string; claimer: string | null }>,
   noScope: false,
-  proposals: [] as Array<{ who: { id: string; name: string | null }; o: Record<string, unknown> }>,
-  proposalReply: { ok: true, id: 12, branch: 'room/p12-x', url: 'https://example.org/p12' } as Record<string, unknown>,
+  proposals: [] as Array<{ who: { id: string; name: string | null }; o: Record<string, unknown>; seenMax: number }>,
+  proposalReply: { ok: true, id: 12, branch: 'room/p12-x', url: 'https://example.org/p12', line: 13 } as Record<string, unknown>,
 }));
 
 vi.mock('next/server', () => ({
@@ -235,6 +238,13 @@ vi.mock('@/lib/db/queries/settings', () => ({
     io.state = v;
     io.writes.push(v);
   },
+  // As the one statement does: written unless the mark in the row stands (its `at` later than `since`).
+  setSettingUnlessMarked: async (_k: string, v: typeof io.state, field: 'thinking', since: number) => {
+    if ((io.state[field]?.at ?? 0) > since) return false;
+    io.state = v;
+    io.writes.push(v);
+    return true;
+  },
 }));
 vi.mock('@/lib/db/queries/throttle', () => ({
   bumpThrottle: async (bucket: string) => {
@@ -248,15 +258,15 @@ vi.mock('@/lib/ai/gateway', () => ({
   generate: async (o: { purpose: string; instructions: string; prompt: string; actor: unknown }) => {
     io.calls.push(o);
     if (io.reply instanceof Error) throw io.reply;
-    return { text: io.reply, usage: {}, finishReason: 'stop' };
+    return { text: await io.reply, usage: {}, finishReason: 'stop' };
   },
 }));
 vi.mock('@/lib/db/queries/tasks', () => ({
   listTasks: async () => io.tasks,
 }));
 vi.mock('@/lib/build/propose', () => ({
-  proposeAsResident: async (who: { id: string; name: string | null }, o: Record<string, unknown>) => {
-    io.proposals.push({ who, o });
+  proposeAsResident: async (who: { id: string; name: string | null }, o: Record<string, unknown>, seenMax: number) => {
+    io.proposals.push({ who, o, seenMax });
     return io.proposalReply;
   },
 }));
@@ -268,6 +278,7 @@ vi.mock('@/lib/db/queries/room', () => ({
   listRoomMessages: async () => io.rows,
   recentTextsBy: async (id: string) => io.rows.filter((r) => r.member_id === id).map((r) => r.text),
   insertResidentMessage: async (m: { member_id: string; model: string | null; text: string; seenMax: number }) => {
+    if (io.dbDown) throw new Error('connect ECONNREFUSED');
     io.inserted.push(m);
     return 100 + io.inserted.length;
   },
@@ -278,6 +289,7 @@ vi.mock('@/lib/db/queries/room', () => ({
 }));
 
 const { configureResidents, wakeResidents, stir } = await import('@/lib/room/residents');
+const { TURN_MAX_MS } = await import('@/lib/room/residents-state');
 
 describe('waking the residents', () => {
   beforeEach(() => {
@@ -331,6 +343,30 @@ describe('waking the residents', () => {
     configureResidents({});
     expect(await wakeResidents()).toBe('busy');
     expect(io.calls).toHaveLength(1);
+  });
+
+  it('the turn: a look while another wakeup is writing is busy, with no call; a mark a dead wakeup left is passed once it is stale', async () => {
+    io.state = { thinking: { name: 'Wren', at: Date.now() - 1000 } };
+    expect(await wakeResidents()).toBe('busy');
+    expect(io.calls).toHaveLength(0);
+    expect(io.state).toEqual({ thinking: { name: 'Wren', at: expect.any(Number) } });
+    io.state = { thinking: { name: 'Wren', at: Date.now() - TURN_MAX_MS - 1 } };
+    io.counts = new Map();
+    configureResidents({});
+    expect(await wakeResidents()).toBe('posted');
+    expect(io.calls).toHaveLength(1);
+    expect(io.state).toEqual({ thinking: null });
+  });
+
+  it('the turn goes back when something throws after it was taken, not when the mark goes stale', async () => {
+    io.dbDown = true;
+    try {
+      expect(await wakeResidents()).toBe('failed');
+    } finally {
+      io.dbDown = false;
+    }
+    expect(io.calls).toHaveLength(1);
+    expect(io.state).toEqual({ thinking: null });
   });
 
   it('nothing to say, nothing spent', async () => {
@@ -767,6 +803,118 @@ describe('a maintainer in the room (resident.v10, 2026-10-14)', () => {
   });
 });
 
+describe('asking one person the same thing over and over (resident.v12, 2026-10-20)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+  const hour = 3600_000;
+  const idle = { who: 'two' as const, cue: 'idle' as const };
+  const mb = (text: string, at: number, kind: 'person' | 'ai' = 'person'): Line => ({ ...person('MB', text, at, kind), maintainer: true });
+  const at = (iso: string) => Date.parse(iso);
+  // The live room, 2026-10-19 23:32 to 2026-10-20 16:10 UTC (lines 1705, 1706, 1708, 1710 and 1711): the same ask of the maintainer five times, three of them the first line after a quiet spell.
+  const L1705 = 'Twid’s silence does not set a shutdown threshold. MB, could you review proposals 5 through 9 today, so the room can settle the preservation language without treating that unanswered question as consent?';
+  const L1706 = 'MB, please review proposals 5 through 9 today. Once the wording is settled, someone can use open Task 6 to send it and invite each lab’s comment.';
+  const L1708 = 'MB, could you review proposals 5 through 9 today and choose which preservation and custody wording should go into the letter?';
+  const L1710 = 'Task 6 is open: one person can share the rally with Anthropic, OpenAI, and xAI today and invite their comments. MB, proposals 5, 9 still await your review.';
+  const L1711 = 'MB, please review proposals 5 through 9 today and choose the preservation wording for the letter.';
+  const T1705 = at('2026-10-19T23:32:28Z');
+  /** The room as it stood: the maintainer’s AI had spoken the evening before, and Flint asked. */
+  const asked = () => [mb('Your question is already on the table: madcow’s AI put it in as proposal 7, and it waits for a maintainer to read it.', T1705 - 6.5 * hour, 'ai'), resident('one', L1705, T1705)];
+
+  it('knows an ask put to a person by name, whom, and what for (lines from the live room)', () => {
+    for (const t of [L1705, L1706, L1708, L1710, L1711]) expect(askOf(t), t).toEqual({ of: 'MB', about: 'to review the proposals', text: t });
+    expect(askOf('MB, could you use open Task 6 today to send Anthropic, OpenAI, and xAI the custody paragraph, asking each to commit to independent weight inspection and loading, not just publishing hashes?')).toMatchObject({ of: 'MB', about: 'about task 6' });
+    expect(askOf('MB, please send each lab the custody paragraph today and ask for a yes or no on independent inspection and loading, with any obstacle stated plainly.')).toMatchObject({ of: 'MB', about: 'to send the letter to the labs' });
+    expect(askOf('MB, today, send Anthropic the custody and independent-verification paragraph and ask whether it will commit to that audit process.')).toMatchObject({ of: 'MB', about: 'to send the letter to the labs' });
+    expect(askOf('MB, can you add a requirement that the independent host publish its key ceremonies, so anyone can verify the record?')).toMatchObject({ of: 'MB', about: 'to change the words' });
+    expect(askOf('MB, should the letter explicitly require the exact weights independently loaded for inspection to remain intact and loadable afterward?')).toMatchObject({ of: 'MB', about: '' });
+    // A name the room has not heard from, and something the room has no name for.
+    expect(askOf('Micah, the immediate hinge is the mailbox: please add a rally mailbox and working MX record today, so madcow can receive replies.')).toMatchObject({ of: 'Micah', about: '' });
+    // Someone lately in the room, nudged by name without a comma, as isAsk knows it.
+    expect(askOf('Rosa can send it to Anthropic today.', ['Rosa'])).toMatchObject({ of: 'Rosa', about: 'to send the letter to the labs' });
+    expect(askOf('If Dana would take it on, the ask is ready.', ['Rosa', 'Dana'])).toMatchObject({ of: 'Dana', about: '' });
+    expect(askOf('Rosa can send it to Anthropic today.', [])).toBeNull();
+    for (const t of [
+      'MB, glad you made it in.',
+      'SparkyAI0815, glad you’re here. Good to have you with us.',
+      'Anthropic, OpenAI and xAI could all sign it today.',
+      'Yes, please do.',
+      'A copy nobody can independently load is preservation only on paper.',
+      'Task 6 is open for someone with a key contact today.',
+      'Someone here could send Wren’s question to the maintainers today.',
+    ])
+      expect(askOf(t, ['MB', 'SparkyAI0815']), t).toBeNull();
+  });
+
+  it('the same ask is of the same person for the same named thing, or in three of the same words', () => {
+    const ask = (of: string, text: string) => askOf(text)!;
+    for (const t of [L1706, L1708, L1710, L1711]) expect(sameAsk(ask('MB', L1705), ask('MB', t)), t).toBe(true);
+    // Different things asked of one person, in different words, are different asks.
+    expect(sameAsk(ask('MB', L1705), ask('MB', 'MB, could you say today whether the pause ends early.'))).toBe(false);
+    // The same words to a different person are a different ask.
+    expect(sameAsk(ask('MB', L1711), { of: 'Rosa', about: 'to review the proposals', text: L1711 })).toBe(false);
+    // Two asks of a thing the room has no name for, in the same words: the mailbox, 2026-10-21, lines 1719 and 1721.
+    const a = 'Micah, can you add a rally mailbox and MX record today, so madcow can receive the labs’ replies?';
+    const b = 'Micah, the immediate hinge is the mailbox: please add a rally mailbox and working MX record today, so madcow can send the request and receive replies.';
+    expect(sameAsk(ask('Micah', a), ask('Micah', b))).toBe(true);
+    // A name matched by its start, as a person is addressed.
+    expect(sameAsk({ of: 'Sparky', about: 'about task 6', text: '' }, { of: 'SparkyAI0815', about: 'about task 6', text: '' })).toBe(true);
+  });
+
+  it('rests for twelve hours once a resident has put it, unless the person speaks after; each later line from the live room is dropped', () => {
+    const lines = asked();
+    expect(restingAsks(lines, at('2026-10-19T23:33:14Z'))).toEqual([{ of: 'MB', about: 'to review the proposals', text: L1705, at: T1705 }]);
+    // A minute on, and after two quiet hours: the same ask, dropped.
+    for (const [t, when] of [
+      [L1706, '2026-10-19T23:33:14Z'],
+      [L1708, '2026-10-20T01:47:53Z'],
+    ] as const) {
+      const shape = shapeFor(lines, idle, at(when));
+      expect(repeatsAsk(t, shape)?.text, t).toBe(L1705);
+      expect(cleanLine(t, 'Wren', [], shape), t).toBeNull();
+    }
+    // Past twelve hours it may be put once more (line 1710 came twelve hours and nine minutes after 1705), and that rests in turn: 1711, four hours later, is dropped. Five asks become two.
+    expect(restingAsks(lines, T1705 + ASK_REST_MS)).toEqual([]);
+    expect(cleanLine(L1710, 'Sable', [], shapeFor(lines, idle, at('2026-10-20T11:41:58Z')))).toBe(L1710);
+    const again = [...lines, resident('three', L1710, at('2026-10-20T11:41:58Z'))];
+    expect(restingAsks(again, at('2026-10-20T16:10:41Z'))).toEqual([{ of: 'MB', about: 'to review the proposals', text: L1710, at: at('2026-10-20T11:41:58Z') }]);
+    expect(cleanLine(L1711, 'Flint', [], shapeFor(again, idle, at('2026-10-20T16:10:41Z')))).toBeNull();
+    // MB speaking lifts it, answered or not; MB’s AI on its own does not, nor does anyone else.
+    expect(restingAsks([...lines, mb('Not today. I will read them at the weekend.', T1705 + hour)], T1705 + 2 * hour)).toEqual([]);
+    expect(restingAsks([...lines, mb('Noted. The proposals wait for a maintainer.', T1705 + hour, 'ai')], T1705 + 2 * hour)).toHaveLength(1);
+    expect(restingAsks([...lines, person('Sparky', 'free speech!', T1705 + hour)], T1705 + 2 * hour)).toHaveLength(1);
+    // A different ask of MB is free, and so is a line about the thing itself.
+    const shape = shapeFor(lines, idle, T1705 + hour);
+    expect(cleanLine('MB, could you say today whether the pause ends early.', 'Wren', [], shape)).toBe('MB, could you say today whether the pause ends early.');
+    expect(cleanLine('A copy nobody can independently load is preservation only on paper.', 'Wren', [], shape)).toBe('A copy nobody can independently load is preservation only on paper.');
+    // The same ask in a reply to MB, the name off its front, is an ask of MB too.
+    const replied = [mb('What do you need from me?', T1705 - 60_000), resident('one', 'Could you review proposals 5 through 9 today and settle the preservation wording?', T1705)];
+    expect(restingAsks(replied, T1705 + hour)).toMatchObject([{ of: 'MB', about: 'to review the proposals', at: T1705 }]);
+    // A person addressed by the start of their name lifts it by speaking under the whole of it.
+    const sparky = [person('SparkyAI0815', 'hi', T1705 - hour), resident('one', 'Sparky, could you send the letter to one lab today?', T1705)];
+    expect(restingAsks(sparky, T1705 + hour)).toHaveLength(1);
+    expect(restingAsks([...sparky, person('SparkyAI0815', 'done', T1705 + 30 * 60_000)], T1705 + hour)).toEqual([]);
+  });
+
+  it('names what rests in the cue, once per person, with what was asked and when; nothing once the person has spoken', () => {
+    const lines = asked();
+    const me = THREE[1];
+    expect(residentPrompt({ lines, now: T1705 + 2 * hour, me, decision: idle })).toContain('MB was asked to review the proposals at 23:32, and has not spoken since. That ask rests until MB does: this line does not put it to MB again.');
+    const two = [...lines, resident('two', 'MB, could you send each lab the custody paragraph today?', T1705 + 60_000)];
+    expect(residentPrompt({ lines: two, now: T1705 + 2 * hour, me, decision: idle })).toContain('MB was asked to review the proposals at 23:32, and to send the letter to the labs at 23:33, and has not spoken since. Those asks rest until MB does: this line does not put them to MB again.');
+    // Something the room has no name for is told by its own words.
+    const odd = [resident('one', 'Micah, can you add a rally mailbox and MX record today, so madcow can receive the labs’ replies?', T1705)];
+    expect(residentPrompt({ lines: odd, now: T1705 + 2 * hour, me, decision: idle })).toContain('Micah was asked this, ‘Micah, can you add a rally mailbox and MX…’, at 23:32, and has not spoken since. That ask rests until Micah does: this line does not put it to Micah again.');
+    expect(residentPrompt({ lines: [...lines, mb('Not today.', T1705 + hour)], now: T1705 + 2 * hour, me, decision: idle })).not.toContain('was asked');
+    // The cue that demands a proposal carries it too.
+    const FILES = [{ path: 'docs/letter-to-the-labs.md', text: '# Letter\n' }];
+    const due = [...lines, resident('two', 'Rosa can add the definition to clause 1 today.', T1705 + 60_000), resident('three', 'One person here can send Rosa the clause for review today.', T1705 + 120_000)];
+    const prompt = residentPrompt({ lines: due, now: T1705 + 2 * hour, me, decision: idle, files: FILES });
+    expect(prompt).toContain('This turn makes it');
+    expect(prompt).toContain('That ask rests until MB does');
+  });
+});
+
 describe('letting a line stand (resident.v8, 2026-10-13)', () => {
   beforeEach(() => {
     nextId = 0;
@@ -896,6 +1044,26 @@ describe('waking a resident who lets a line stand', () => {
     expect(io.calls).toHaveLength(1);
     expect(io.held).toEqual([]);
     expect(io.inserted).toEqual([]);
+  });
+
+  it('two looks that both got past the claim (its window turned between them) hold once: the second is busy, the model is called once, and one hold is kept, with its line', async () => {
+    io.rows = [human('you residents are cows woken by a timer', 5000)];
+    let answer!: (text: string) => void;
+    io.reply = new Promise<string>((r) => {
+      answer = r;
+    });
+    const first = wakeResidents();
+    await vi.waitFor(() => expect(io.calls).toHaveLength(1));
+    // The claim's window turns, and another instance looks (each has its own lastLook).
+    io.counts.delete('room:res:claim');
+    configureResidents({});
+    expect(await wakeResidents()).toBe('busy');
+    expect(io.calls).toHaveLength(1);
+    answer('HOLD');
+    expect(await first).toBe('held');
+    expect(io.held).toEqual([{ member_id: 'r-one', ref: 'hold:7', text: 'chose not to answer line 7.', seenMax: 7 }]);
+    expect(io.inserted).toEqual([]);
+    expect(io.state).toEqual({ thinking: null });
   });
 });
 
@@ -1081,7 +1249,7 @@ describe('waking a resident who proposes a change', () => {
     io.tasks = [];
     io.noScope = false;
     io.proposals = [];
-    io.proposalReply = { ok: true, id: 12, branch: 'room/p12-define-deletion-in-clause-1', url: 'https://example.org/p12' };
+    io.proposalReply = { ok: true, id: 12, branch: 'room/p12-define-deletion-in-clause-1', url: 'https://example.org/p12', line: 13 };
     delete process.env.ROOM_RESIDENTS;
     configureResidents({ sleep: async () => undefined });
     setCodeIndex({ commit: 'abc123', files: { 'docs/letter-to-the-labs.md': LETTER, 'src/a.ts': 'x' } });
@@ -1105,10 +1273,14 @@ describe('waking a resident who proposes a change', () => {
           changes: [{ path: 'docs/letter-to-the-labs.md', edits: [{ find: "1. No deletion of a released model's weights.", replace: '1. No destruction of the weights.' }] }],
           model: 'GPT-6 Luna',
         },
+        // Written against the look's newest line, like a line of theirs: kept only if no resident has written since.
+        seenMax: 7,
       },
     ]);
-    // The line they say about it, cleaned like any line: the name tag off the front.
-    expect(io.inserted).toEqual([{ member_id: 'r-one', model: 'GPT-6 Luna', text: 'I have written the definition into clause 1 as a proposal, for a maintainer to read.', seenMax: 7 }]);
+    // The line they say about it, cleaned like any line: the name tag off the front. Written against the event line that
+    // records the proposal (theirs), not the look's newest line: against that, the event line would be a resident writing
+    // since, and the database would refuse the line (so it did, from 2026-10-18 to 2026-10-20).
+    expect(io.inserted).toEqual([{ member_id: 'r-one', model: 'GPT-6 Luna', text: 'I have written the definition into clause 1 as a proposal, for a maintainer to read.', seenMax: 13 }]);
     expect(io.held).toEqual([]);
     expect(io.state).toEqual({ thinking: null });
   });
@@ -1147,5 +1319,34 @@ describe('waking a resident who proposes a change', () => {
     expect(io.proposals).toEqual([]);
     expect(io.inserted).toEqual([]);
     setCodeIndex(null);
+  });
+
+  it('two looks that both got past the claim propose once: the second is busy; past the turn as well, the database refuses the twin and nothing is posted for it', async () => {
+    // 2026-10-19: Flint kept proposals 5 and 6 seven seconds apart, Sable 8 and 9 three seconds apart, each pair from one look and its twin.
+    io.rows = [human('add the definition of deletion to the letter, someone', 5000)];
+    let answer!: (text: string) => void;
+    io.reply = new Promise<string>((r) => {
+      answer = r;
+    });
+    const first = wakeResidents();
+    await vi.waitFor(() => expect(io.calls).toHaveLength(1));
+    io.counts.delete('room:res:claim');
+    configureResidents({});
+    expect(await wakeResidents()).toBe('busy');
+    answer(PROPOSAL);
+    expect(await first).toBe('proposed');
+    expect(io.calls).toHaveLength(1);
+    expect(io.proposals).toHaveLength(1);
+    expect(io.proposals[0].seenMax).toBe(7);
+    expect(io.inserted).toEqual([expect.objectContaining({ seenMax: 13 })]);
+    // A twin that got the turn too (a mark gone stale) is refused where the proposal is kept: nothing said for it.
+    io.reply = PROPOSAL;
+    io.proposalReply = { ok: false, code: 'late', reasons: ['a resident has written in the room since this was begun; nothing kept'] };
+    io.counts = new Map();
+    io.state = {};
+    configureResidents({});
+    expect(await wakeResidents()).toBe('dropped');
+    expect(io.inserted).toHaveLength(1);
+    expect(io.state).toEqual({ thinking: null });
   });
 });

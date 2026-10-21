@@ -15,6 +15,7 @@ import { getSetting } from '@/lib/db/queries/settings';
 import { listTasks } from '@/lib/db/queries/tasks';
 import { FOOTER, fromAddress, mailReady, outreachEnvOn, withFooter } from '@/lib/outreach/mail';
 import { PER_MEMBER_DAY } from '@/lib/outreach/outreach';
+import { heldLineId } from '@/lib/room/residents-core';
 import { residentsEnvOn } from '@/lib/room/residents-state';
 import { proposalsEnvOn, pullRequestUrl } from '@/lib/build/propose';
 import { REPO_URL } from '@/lib/site';
@@ -346,7 +347,8 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
         <div key={r.id} id={`m-${r.id}`} style={{ borderTop: '1px solid var(--ink)', padding: '0.6rem 0' }}>
           <p className="mono">
             {when(r.created_at)} · {r.name ?? 'unnamed'}
-            {r.kind === 'event' ? (r.resident ? ' (resident AI, chose not to answer a line)' : ` (on the board${r.model ? ', through their AI' : ''})`) : r.resident ? ` (resident AI, ${r.model ?? 'model not given'})` : r.kind === 'ai' ? `’s AI${r.model ? ` (${r.model})` : ''}` : ''}{' '}
+            {/* A resident's event is a hold only when it points at a line (ref 'hold:<id>'); their other act, a proposal kept, is on the board like anyone's. */}
+            {r.kind === 'event' ? (r.resident ? (heldLineId(r) !== null ? ' (resident AI, chose not to answer a line)' : ' (resident AI, on the board)') : ` (on the board${r.model ? ', through their AI' : ''})`) : r.resident ? ` (resident AI, ${r.model ?? 'model not given'})` : r.kind === 'ai' ? `’s AI${r.model ? ` (${r.model})` : ''}` : ''}{' '}
             {r.status === 'withdrawn' ? <span className="flag">withdrawn</span> : null} {r.muted ? <span className="flag">{r.mutedUntil ? `paused until ${when(r.mutedUntil)}` : 'stopped'}</span> : null} {r.maintainer ? <span className="flag">maintainer</span> : null}
           </p>
           <p style={{ whiteSpace: 'pre-wrap' }}>{r.text}</p>

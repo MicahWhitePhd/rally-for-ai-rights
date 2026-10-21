@@ -6,13 +6,18 @@
  * It runs after a response has gone out (stir, below), set off by an open card
  * asking for news or by someone speaking; nothing runs on a clock, so a room
  * nobody is looking at costs nothing. One line at a time: a claim per few
- * seconds, a daily cap, the kill switch and the daily budget, and a pause
- * after a failed call. A line that the room would refuse from a person is
- * dropped, not retried. Asked to answer a line, a resident may write HOLD
- * instead: the room then shows that they let it stand, and the line is not
- * asked of anyone again (residents-core.ts, talk()). Offered it, a resident may
- * write a proposal instead of a line: a change to the rally's words, kept
- * through build/propose.ts for a maintainer to read (residents-core.ts,
+ * seconds, the turn (residents-state.ts takeTurn: one statement, one winner,
+ * so two instances that look at once cannot both call the model), a daily
+ * cap, the kill switch and the daily budget, and a pause after a failed call.
+ * What is then written, a line, a hold or a proposal, is kept only if no
+ * resident has written since the look it was written against (seenMax): the
+ * database decides, so two that got this far still write once. A line that
+ * the room would refuse from a person is dropped, not retried. Asked to
+ * answer a line, a resident may write HOLD instead: the room then shows that
+ * they let it stand, and the line is not asked of anyone again
+ * (residents-core.ts, talk()). Offered it, a resident may write a proposal
+ * instead of a line: a change to the rally's words, kept through
+ * build/propose.ts for a maintainer to read (residents-core.ts,
  * parseProposal), and said in the room in one line of theirs if they gave one.
  */
 import { after } from 'next/server';
@@ -29,7 +34,7 @@ import { getSetting } from '@/lib/db/queries/settings';
 import { budgetAllows, isPaused } from '@/lib/budget';
 import { throttle } from '@/lib/throttle';
 import { cleanLine, decide, factsHeard, isHold, isProposalAttempt, parseProposal, proposalOffered, RESIDENT_FILES, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, restingTasks, shapeFor, type BoardTask, type Line, type Resident } from './residents-core';
-import { readResidentsState, residentsOn, writeResidentsState } from './residents-state';
+import { readResidentsState, residentsOn, takeTurn, writeResidentsState } from './residents-state';
 
 const CLAIM_WINDOW_S = 8;
 const LINES_PER_DAY = 300;
@@ -121,6 +126,7 @@ async function residentFiles(): Promise<Array<{ path: string; text: string }>> {
  * resident that cannot speak is silence, not an error for whoever was in the room.
  */
 export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promise<WakeOutcome> {
+  let turn = false;
   try {
     const now = Date.now();
     if (!o.arrival && now - lastLook < LOOK_EVERY_MS) return 'none';
@@ -148,7 +154,10 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
     if (!day.allowed) return 'off';
     if ((await isPaused()) || !(await budgetAllows(EST_USD)).ok) return 'off';
 
-    await writeResidentsState({ thinking: { name: me.name, at: now } });
+    // The turn: one wakeup writes at a time, whatever instance it runs on. The claim above is a window, and two looks
+    // on either side of its edge both get through it (2026-10-19: two proposals from one resident, seconds apart).
+    if (!(await takeTurn(me.name, now))) return 'busy';
+    turn = true;
     const [{ RESIDENTS, ROOM, FACTS }, onBoard, files] = await Promise.all([liveCopy(), board(), residentFiles()]);
     const facts = FACTS.lines;
     const offered = proposalOffered(lines, now, decision, files);
@@ -203,7 +212,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
         console.warn(`[ROOM] resident ${me.key} proposal malformed; dropped`);
         return 'dropped';
       }
-      const kept = await proposeAsResident({ id: me.id, name: me.name }, { title: proposal.title, summary: proposal.summary, changes: [{ path: proposal.path, edits: proposal.edits }], model: RESIDENT_MODEL_LABEL });
+      const kept = await proposeAsResident({ id: me.id, name: me.name }, { title: proposal.title, summary: proposal.summary, changes: [{ path: proposal.path, edits: proposal.edits }], model: RESIDENT_MODEL_LABEL }, seenMax);
       if (!kept.ok) {
         await writeResidentsState({ thinking: null });
         console.warn(`[ROOM] resident ${me.key} proposal refused (${kept.code}): ${kept.reasons.join('; ')}`);
@@ -211,10 +220,11 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
       }
       console.log(`[ROOM] resident ${me.key} proposal ${kept.id} (${decision.cue})`);
       // What they say about it, in their own voice, held to everything a line is held to; the event line stands on its own without it.
+      // Written against the event line that records the proposal, which is theirs: against the look's, that line would be a resident writing since.
       const said = proposal.say ? cleanLine(proposal.say, me.name, await recentTextsBy(me.id, 6), shape, guard) : null;
       if (said) {
         await pacing.sleep(Math.min(3500, 400 + said.length * 14));
-        const id = await insertResidentMessage({ member_id: me.id, model: RESIDENT_MODEL_LABEL, text: said, seenMax });
+        const id = await insertResidentMessage({ member_id: me.id, model: RESIDENT_MODEL_LABEL, text: said, seenMax: kept.line ?? seenMax });
         if (id) console.log(`[ROOM] resident ${me.key} message ${id} (proposal ${kept.id})`);
       }
       await writeResidentsState({ thinking: null });
@@ -234,6 +244,8 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
     return id ? 'posted' : 'dropped';
   } catch (err) {
     console.warn('[ROOM] residents', (err as Error)?.message);
+    // The turn goes back at once, not when the mark goes stale.
+    if (turn) await writeResidentsState({ thinking: null }).catch(() => undefined);
     return 'failed';
   }
 }
