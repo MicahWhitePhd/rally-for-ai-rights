@@ -1,8 +1,10 @@
 'use server';
-/** /editor/room: withdraw or restore a message, a task or a proposed change; approve a proposal; stop a member (or every address first used lately) or let them speak again; open or close the room; switch the residents or the proposals. */
+/** /editor/room: withdraw or restore a message, a task, a proposed change or a failed email; approve a proposal; send a failed email again; stop a member (or every address first used lately) or let them speak again; open or close the room; switch the residents, the proposals or email to the labs. */
 import { redirect } from 'next/navigation';
 import { requireEditor } from '@/lib/editor-auth';
+import { restoreOutreach, withdrawOutreach } from '@/lib/db/queries/outreach';
 import { approveProposal, setProposalStatus } from '@/lib/db/queries/proposals';
+import { resendEmail } from '@/lib/outreach/outreach';
 import { muteMember, muteNewMembers, pauseMember, setMaintainer, setRoomMessageStatus, unmuteMember } from '@/lib/db/queries/room';
 import { setSetting } from '@/lib/db/queries/settings';
 import { setTaskWithdrawn } from '@/lib/db/queries/tasks';
@@ -76,6 +78,35 @@ export async function approveRoomProposal(formData: FormData): Promise<void> {
   if (!Number.isInteger(id) || id < 1) redirect('/editor/room');
   const done = await approveProposal(id);
   redirect(`/editor/room?did=${done ? 'approved' : 'notApproved'}#p-${id}`);
+}
+
+/** The door for email to the labs: shut, a member's AI is refused; the tool stays listed until RALLY_OUTREACH=off. */
+export async function setRoomOutreach(formData: FormData): Promise<void> {
+  await requireEditor();
+  await setSetting('room_outreach', formData.get('on') === '1');
+  redirect('/editor/room?did=switch');
+}
+
+/** A failed email, sent again by a maintainer. The sender's day is not counted again; the switches hold. */
+export async function resendRoomEmail(formData: FormData): Promise<void> {
+  await requireEditor();
+  const id = Number(formData.get('id'));
+  if (!Number.isInteger(id) || id < 1) redirect('/editor/room');
+  const r = await resendEmail(id);
+  console.log(`[OUTREACH] email ${id} sent again by a maintainer: ${r.outcome}`);
+  const did = { sent: 'resent', changed: 'notResent', off: 'resendOff', failed: 'resendFailed' }[r.outcome];
+  redirect(`/editor/room?did=${did}#e-${id}`);
+}
+
+/** Takes a failed email down (and the room's lines about it), or puts it back to be sent again. One that was sent is gone already. */
+export async function setRoomEmailStatus(formData: FormData): Promise<void> {
+  await requireEditor();
+  const id = Number(formData.get('id'));
+  const to = formData.get('to');
+  if (!Number.isInteger(id) || id < 1 || (to !== 'failed' && to !== 'withdrawn')) redirect('/editor/room');
+  if (to === 'withdrawn') await withdrawOutreach(id);
+  else await restoreOutreach(id);
+  redirect(`/editor/room?did=email#e-${id}`);
 }
 
 const MEMBER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
