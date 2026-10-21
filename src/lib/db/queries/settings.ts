@@ -44,6 +44,22 @@ export async function setSetting(key: string, value: unknown): Promise<void> {
   forgetSettings();
 }
 
+/**
+ * Writes a row unless a mark stands in it: a mark is `value.<field> = { at: <ms> }`, and it stands while `at` is later
+ * than `since`. One statement, so two instances that write at once get one winner. True when this call wrote.
+ */
+export async function setSettingUnlessMarked(key: string, value: unknown, field: string, since: number): Promise<boolean> {
+  const rows = await query(
+    `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2::jsonb, now())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+     WHERE coalesce((settings.value -> $3::text ->> 'at')::float8, 0) <= $4::float8
+     RETURNING key`,
+    [key, JSON.stringify(value), field, since],
+  );
+  forgetSettings();
+  return rows.length === 1;
+}
+
 export async function listSettings(): Promise<{ key: string; value: unknown; updated_at: Date }[]> {
   return query(`SELECT key, value, updated_at FROM settings ORDER BY key`);
 }

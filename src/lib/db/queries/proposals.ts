@@ -34,8 +34,7 @@ export interface ProposalDetail {
 /** How long an approved proposal stays on the public list for the job that opens pull requests, counted from approval. */
 export const PENDING_DAYS = 14;
 
-/** Keeps a proposal and names its branch after its number, in one statement. */
-export async function insertProposal(p: {
+export interface NewProposal {
   member_id: string;
   task_id: number | null;
   title: string;
@@ -44,16 +43,42 @@ export async function insertProposal(p: {
   base: string | null;
   slug: string;
   changes: Array<{ path: string; content: string | null }>;
-}): Promise<{ id: number; branch: string }> {
-  const r = await queryOne<{ id: number; branch: string }>(
-    `INSERT INTO room_proposals (id, member_id, task_id, title, summary, by_line, base, branch, changes)
+}
+
+/** The one statement that keeps a proposal and names its branch after its number; `where` narrows it, with $9 to use. */
+const keepProposal = (where = '') => `INSERT INTO room_proposals (id, member_id, task_id, title, summary, by_line, base, branch, changes)
      SELECT n, $1, $2, $3, $4, $5, $6, 'room/p' || n || '-' || $7, $8::jsonb
-       FROM nextval(pg_get_serial_sequence('room_proposals', 'id')) AS n
-     RETURNING id::int AS id, branch`,
-    [p.member_id, p.task_id, p.title, p.summary, p.by_line, p.base, p.slug, JSON.stringify(p.changes)],
-  );
+       FROM nextval(pg_get_serial_sequence('room_proposals', 'id')) AS n${where}
+     RETURNING id::int AS id, branch`;
+const proposalParams = (p: NewProposal) => [p.member_id, p.task_id, p.title, p.summary, p.by_line, p.base, p.slug, JSON.stringify(p.changes)];
+
+/** Keeps a proposal and names its branch after its number, in one statement. */
+export async function insertProposal(p: NewProposal): Promise<{ id: number; branch: string }> {
+  const r = await queryOne<{ id: number; branch: string }>(keepProposal(), proposalParams(p));
   if (!r) throw new Error('proposal insert failed');
   return r;
+}
+
+/**
+ * A resident's proposal, kept only if no resident has written since `seenMax` (the newest line it was written
+ * against), under the same lock as a resident's line (room.ts insertResidentMessage), together with the line that
+ * says so in the room (`said`, with the proposal's number added; ref 'proposal:<id>'): that line is what the guard
+ * sees, so two wakeups that both wrote one cannot both keep it (2026-10-19, proposals 5 and 6, then 8 and 9, each pair
+ * seconds apart from one resident). Null when a resident has written since.
+ */
+export async function insertResidentProposal(p: NewProposal, seenMax: number, said: string): Promise<{ id: number; branch: string; line: number } | null> {
+  return withTx(async (c) => {
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext('rally-room-resident'))`);
+    const r = await c.query<{ id: number; branch: string }>(
+      keepProposal(`
+        WHERE NOT EXISTS (SELECT 1 FROM room_messages x JOIN room_members xm ON xm.id = x.member_id WHERE xm.resident IS NOT NULL AND x.id > $9)`),
+      [...proposalParams(p), seenMax],
+    );
+    const kept = r.rows[0];
+    if (!kept) return null;
+    const line = await c.query<{ id: number }>(`INSERT INTO room_messages (member_id, kind, model, text, ref) VALUES ($1, 'event', 'ai', $2, $3) RETURNING id::int AS id`, [p.member_id, `${said} (proposal ${kept.id})`, `proposal:${kept.id}`]);
+    return { ...kept, line: line.rows[0].id };
+  });
 }
 
 /** For /tasks and /editor/room: the latest proposals, without their contents. */

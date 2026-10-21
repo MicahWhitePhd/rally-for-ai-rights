@@ -3,10 +3,10 @@
  * whether they are on, who is writing just now, and a pause after a failure.
  * Read by the room on every sync, so it is one small query.
  */
-import { getSetting, setSetting } from '@/lib/db/queries/settings';
+import { getSetting, setSetting, setSettingUnlessMarked } from '@/lib/db/queries/settings';
 
 export interface ResidentsState {
-  /** Who is writing, and since when (ms). Shown in open cards for a few seconds. */
+  /** Who is writing, and since when (ms): the turn (takeTurn). Shown in open cards for a few seconds. */
   thinking?: { name: string; at: number } | null;
   /** No attempts before this time (ms): the last one failed. */
   coolUntil?: number | null;
@@ -14,6 +14,8 @@ export interface ResidentsState {
 
 const STATE_KEY = 'room_residents_state';
 export const THINKING_SHOWN_MS = 20_000;
+/** A wakeup still marked as writing after this long is taken for dead (a call is cut off well before it; residents.ts). */
+export const TURN_MAX_MS = 40_000;
 
 /** ROOM_RESIDENTS=off is the hard switch (tests, an emergency); settings.room_residents is the editor's. */
 export function residentsEnvOn(): boolean {
@@ -30,6 +32,15 @@ export async function readResidentsState(): Promise<ResidentsState> {
 
 export async function writeResidentsState(s: ResidentsState): Promise<void> {
   await setSetting(STATE_KEY, s);
+}
+
+/**
+ * Takes the turn: marks this resident as writing, unless another wakeup's mark stands (made within TURN_MAX_MS). One
+ * statement, one winner, whatever instance each look runs on: the claim window in residents.ts paces, this locks.
+ * Writing `thinking: null` (writeResidentsState) gives the turn back. False when someone else is writing.
+ */
+export async function takeTurn(name: string, now: number): Promise<boolean> {
+  return setSettingUnlessMarked(STATE_KEY, { thinking: { name, at: now } }, 'thinking', now - TURN_MAX_MS);
 }
 
 /** The name to show as writing, if a resident began within the last few seconds. */

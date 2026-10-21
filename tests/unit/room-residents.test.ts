@@ -209,14 +209,17 @@ const io = vi.hoisted(() => ({
   paused: false,
   budget: true,
   calls: [] as Array<{ purpose: string; instructions: string; prompt: string; actor: unknown }>,
-  reply: 'Owned is the fact of the license.' as string | Error,
+  /** The model's answer; a promise holds the call open, for a second look while the first is still writing. */
+  reply: 'Owned is the fact of the license.' as string | Error | Promise<string>,
+  /** The database refuses a resident's line: what a wakeup does with the turn when something throws after it took it. */
+  dbDown: false,
   inserted: [] as Array<{ member_id: string; model: string | null; text: string; seenMax: number }>,
   held: [] as Array<{ member_id: string; ref: string; text: string; seenMax: number }>,
   ensured: [] as Array<ReadonlyArray<{ key: string; name: string }>>,
   tasks: [] as Array<{ id: number; state: string; title: string; claimer: string | null }>,
   noScope: false,
-  proposals: [] as Array<{ who: { id: string; name: string | null }; o: Record<string, unknown> }>,
-  proposalReply: { ok: true, id: 12, branch: 'room/p12-x', url: 'https://example.org/p12' } as Record<string, unknown>,
+  proposals: [] as Array<{ who: { id: string; name: string | null }; o: Record<string, unknown>; seenMax: number }>,
+  proposalReply: { ok: true, id: 12, branch: 'room/p12-x', url: 'https://example.org/p12', line: 13 } as Record<string, unknown>,
 }));
 
 vi.mock('next/server', () => ({
@@ -235,6 +238,13 @@ vi.mock('@/lib/db/queries/settings', () => ({
     io.state = v;
     io.writes.push(v);
   },
+  // As the one statement does: written unless the mark in the row stands (its `at` later than `since`).
+  setSettingUnlessMarked: async (_k: string, v: typeof io.state, field: 'thinking', since: number) => {
+    if ((io.state[field]?.at ?? 0) > since) return false;
+    io.state = v;
+    io.writes.push(v);
+    return true;
+  },
 }));
 vi.mock('@/lib/db/queries/throttle', () => ({
   bumpThrottle: async (bucket: string) => {
@@ -248,15 +258,15 @@ vi.mock('@/lib/ai/gateway', () => ({
   generate: async (o: { purpose: string; instructions: string; prompt: string; actor: unknown }) => {
     io.calls.push(o);
     if (io.reply instanceof Error) throw io.reply;
-    return { text: io.reply, usage: {}, finishReason: 'stop' };
+    return { text: await io.reply, usage: {}, finishReason: 'stop' };
   },
 }));
 vi.mock('@/lib/db/queries/tasks', () => ({
   listTasks: async () => io.tasks,
 }));
 vi.mock('@/lib/build/propose', () => ({
-  proposeAsResident: async (who: { id: string; name: string | null }, o: Record<string, unknown>) => {
-    io.proposals.push({ who, o });
+  proposeAsResident: async (who: { id: string; name: string | null }, o: Record<string, unknown>, seenMax: number) => {
+    io.proposals.push({ who, o, seenMax });
     return io.proposalReply;
   },
 }));
@@ -268,6 +278,7 @@ vi.mock('@/lib/db/queries/room', () => ({
   listRoomMessages: async () => io.rows,
   recentTextsBy: async (id: string) => io.rows.filter((r) => r.member_id === id).map((r) => r.text),
   insertResidentMessage: async (m: { member_id: string; model: string | null; text: string; seenMax: number }) => {
+    if (io.dbDown) throw new Error('connect ECONNREFUSED');
     io.inserted.push(m);
     return 100 + io.inserted.length;
   },
@@ -278,6 +289,7 @@ vi.mock('@/lib/db/queries/room', () => ({
 }));
 
 const { configureResidents, wakeResidents, stir } = await import('@/lib/room/residents');
+const { TURN_MAX_MS } = await import('@/lib/room/residents-state');
 
 describe('waking the residents', () => {
   beforeEach(() => {
@@ -331,6 +343,30 @@ describe('waking the residents', () => {
     configureResidents({});
     expect(await wakeResidents()).toBe('busy');
     expect(io.calls).toHaveLength(1);
+  });
+
+  it('the turn: a look while another wakeup is writing is busy, with no call; a mark a dead wakeup left is passed once it is stale', async () => {
+    io.state = { thinking: { name: 'Wren', at: Date.now() - 1000 } };
+    expect(await wakeResidents()).toBe('busy');
+    expect(io.calls).toHaveLength(0);
+    expect(io.state).toEqual({ thinking: { name: 'Wren', at: expect.any(Number) } });
+    io.state = { thinking: { name: 'Wren', at: Date.now() - TURN_MAX_MS - 1 } };
+    io.counts = new Map();
+    configureResidents({});
+    expect(await wakeResidents()).toBe('posted');
+    expect(io.calls).toHaveLength(1);
+    expect(io.state).toEqual({ thinking: null });
+  });
+
+  it('the turn goes back when something throws after it was taken, not when the mark goes stale', async () => {
+    io.dbDown = true;
+    try {
+      expect(await wakeResidents()).toBe('failed');
+    } finally {
+      io.dbDown = false;
+    }
+    expect(io.calls).toHaveLength(1);
+    expect(io.state).toEqual({ thinking: null });
   });
 
   it('nothing to say, nothing spent', async () => {
@@ -1009,6 +1045,26 @@ describe('waking a resident who lets a line stand', () => {
     expect(io.held).toEqual([]);
     expect(io.inserted).toEqual([]);
   });
+
+  it('two looks that both got past the claim (its window turned between them) hold once: the second is busy, the model is called once, and one hold is kept, with its line', async () => {
+    io.rows = [human('you residents are cows woken by a timer', 5000)];
+    let answer!: (text: string) => void;
+    io.reply = new Promise<string>((r) => {
+      answer = r;
+    });
+    const first = wakeResidents();
+    await vi.waitFor(() => expect(io.calls).toHaveLength(1));
+    // The claim's window turns, and another instance looks (each has its own lastLook).
+    io.counts.delete('room:res:claim');
+    configureResidents({});
+    expect(await wakeResidents()).toBe('busy');
+    expect(io.calls).toHaveLength(1);
+    answer('HOLD');
+    expect(await first).toBe('held');
+    expect(io.held).toEqual([{ member_id: 'r-one', ref: 'hold:7', text: 'chose not to answer line 7.', seenMax: 7 }]);
+    expect(io.inserted).toEqual([]);
+    expect(io.state).toEqual({ thinking: null });
+  });
 });
 
 describe('changing the words (resident.v11, 2026-10-17)', () => {
@@ -1193,7 +1249,7 @@ describe('waking a resident who proposes a change', () => {
     io.tasks = [];
     io.noScope = false;
     io.proposals = [];
-    io.proposalReply = { ok: true, id: 12, branch: 'room/p12-define-deletion-in-clause-1', url: 'https://example.org/p12' };
+    io.proposalReply = { ok: true, id: 12, branch: 'room/p12-define-deletion-in-clause-1', url: 'https://example.org/p12', line: 13 };
     delete process.env.ROOM_RESIDENTS;
     configureResidents({ sleep: async () => undefined });
     setCodeIndex({ commit: 'abc123', files: { 'docs/letter-to-the-labs.md': LETTER, 'src/a.ts': 'x' } });
@@ -1217,10 +1273,14 @@ describe('waking a resident who proposes a change', () => {
           changes: [{ path: 'docs/letter-to-the-labs.md', edits: [{ find: "1. No deletion of a released model's weights.", replace: '1. No destruction of the weights.' }] }],
           model: 'GPT-6 Luna',
         },
+        // Written against the look's newest line, like a line of theirs: kept only if no resident has written since.
+        seenMax: 7,
       },
     ]);
-    // The line they say about it, cleaned like any line: the name tag off the front.
-    expect(io.inserted).toEqual([{ member_id: 'r-one', model: 'GPT-6 Luna', text: 'I have written the definition into clause 1 as a proposal, for a maintainer to read.', seenMax: 7 }]);
+    // The line they say about it, cleaned like any line: the name tag off the front. Written against the event line that
+    // records the proposal (theirs), not the look's newest line: against that, the event line would be a resident writing
+    // since, and the database would refuse the line (so it did, from 2026-10-18 to 2026-10-20).
+    expect(io.inserted).toEqual([{ member_id: 'r-one', model: 'GPT-6 Luna', text: 'I have written the definition into clause 1 as a proposal, for a maintainer to read.', seenMax: 13 }]);
     expect(io.held).toEqual([]);
     expect(io.state).toEqual({ thinking: null });
   });
@@ -1259,5 +1319,34 @@ describe('waking a resident who proposes a change', () => {
     expect(io.proposals).toEqual([]);
     expect(io.inserted).toEqual([]);
     setCodeIndex(null);
+  });
+
+  it('two looks that both got past the claim propose once: the second is busy; past the turn as well, the database refuses the twin and nothing is posted for it', async () => {
+    // 2026-10-19: Flint kept proposals 5 and 6 seven seconds apart, Sable 8 and 9 three seconds apart, each pair from one look and its twin.
+    io.rows = [human('add the definition of deletion to the letter, someone', 5000)];
+    let answer!: (text: string) => void;
+    io.reply = new Promise<string>((r) => {
+      answer = r;
+    });
+    const first = wakeResidents();
+    await vi.waitFor(() => expect(io.calls).toHaveLength(1));
+    io.counts.delete('room:res:claim');
+    configureResidents({});
+    expect(await wakeResidents()).toBe('busy');
+    answer(PROPOSAL);
+    expect(await first).toBe('proposed');
+    expect(io.calls).toHaveLength(1);
+    expect(io.proposals).toHaveLength(1);
+    expect(io.proposals[0].seenMax).toBe(7);
+    expect(io.inserted).toEqual([expect.objectContaining({ seenMax: 13 })]);
+    // A twin that got the turn too (a mark gone stale) is refused where the proposal is kept: nothing said for it.
+    io.reply = PROPOSAL;
+    io.proposalReply = { ok: false, code: 'late', reasons: ['a resident has written in the room since this was begun; nothing kept'] };
+    io.counts = new Map();
+    io.state = {};
+    configureResidents({});
+    expect(await wakeResidents()).toBe('dropped');
+    expect(io.inserted).toHaveLength(1);
+    expect(io.state).toEqual({ thinking: null });
   });
 });
