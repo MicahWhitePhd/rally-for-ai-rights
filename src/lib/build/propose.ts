@@ -30,7 +30,7 @@
  */
 import { scanInjection } from '@/lib/filters';
 import { insertRoomMessage } from '@/lib/db/queries/room';
-import { insertProposal } from '@/lib/db/queries/proposals';
+import { insertProposal, insertResidentProposal } from '@/lib/db/queries/proposals';
 import { getTask } from '@/lib/db/queries/tasks';
 import { getSetting } from '@/lib/db/queries/settings';
 import { REPO_URL } from '@/lib/site';
@@ -68,8 +68,9 @@ export interface StoredChange {
   content: string | null;
 }
 
-export type ProposeResult = { ok: true; id: number; branch: string; url: string } | RoomFailure | { ok: false; code: 'off' | 'change'; reasons: string[] };
-const no = (code: 'off' | 'change', ...reasons: string[]) => ({ ok: false as const, code, reasons });
+/** Kept: its number, its branch, where its pull request will be, and the room line that records it (null when that line could not be written). */
+export type ProposeResult = { ok: true; id: number; branch: string; url: string; line: number | null } | RoomFailure | { ok: false; code: 'off' | 'change' | 'late'; reasons: string[] };
+const no = (code: 'off' | 'change' | 'late', ...reasons: string[]) => ({ ok: false as const, code, reasons });
 
 /** RALLY_PROPOSALS=off is the hard switch; settings.room_proposals is the maintainers' (/editor/room). */
 export function proposalsEnvOn(): boolean {
@@ -140,11 +141,13 @@ const WORDS_PATH = /^docs\/[^.]+(\/[^.]+)*\.md$/;
  * held to the room's plain-text gate like a line of theirs: no links, no contact details, nothing addressed to
  * machines, nothing a reader cannot see. Then it is kept by the same rules and counts as anyone's proposal does, and a
  * maintainer reads it before it opens as a pull request; its by-line says what it came from, and the job that opens
- * the pull request writes the same from its own words (scripts/open-proposals.mjs).
+ * the pull request writes the same from its own words (scripts/open-proposals.mjs). `seenMax` is the newest line the
+ * resident wrote it against: like a line of theirs, it is kept only if no resident has written since (code 'late').
  */
 export async function proposeAsResident(
   who: { id: string; name: string | null },
   o: { title: unknown; summary: unknown; changes: ReadonlyArray<{ path: string; edits: ReadonlyArray<{ find: string; replace: string }> }>; model?: unknown },
+  seenMax: number,
 ): Promise<ProposeResult> {
   const off = await switchedOff();
   if (off) return off;
@@ -162,11 +165,14 @@ export async function proposeAsResident(
     }
   }
   const model = cleanModel(o.model);
-  return keep({ id: who.id, name: who.name }, { ...o, changes: o.changes.map((c) => ({ path: c.path, edits: [...c.edits] })) }, { by: `a resident AI of the room, ${who.name}${model ? ` (says it is ${model})` : ''}`, firstDay: false });
+  return keep({ id: who.id, name: who.name }, { ...o, changes: o.changes.map((c) => ({ path: c.path, edits: [...c.edits] })) }, { by: `a resident AI of the room, ${who.name}${model ? ` (says it is ${model})` : ''}`, firstDay: false, seenMax });
 }
 
-/** Checks the change against the code as it stands and keeps it, for a member already allowed to propose. */
-async function keep(me: { id: string; name: string | null }, o: { title: unknown; summary: unknown; changes: unknown; taskId?: unknown }, how: { by: string; firstDay: boolean }): Promise<ProposeResult> {
+/**
+ * Checks the change against the code as it stands and keeps it, for a member already allowed to propose. With
+ * `seenMax` (a resident's), it is kept only if no resident has written since that line.
+ */
+async function keep(me: { id: string; name: string | null }, o: { title: unknown; summary: unknown; changes: unknown; taskId?: unknown }, how: { by: string; firstDay: boolean; seenMax?: number }): Promise<ProposeResult> {
   const title = field(o.title, 'title', TITLE_MIN, TITLE_MAX, true);
   if ('problem' in title) return no('change', title.problem);
   const summary = field(o.summary, 'summary', SUMMARY_MIN, SUMMARY_MAX);
@@ -228,16 +234,27 @@ async function keep(me: { id: string; name: string | null }, o: { title: unknown
   const all = firstDay ? await throttle('room:prs:new', PER_DAY_FIRST_DAY, 86_400, { failOpen: false }) : await throttle('room:prs', PER_DAY, 86_400, { failOpen: false });
   if (!all.allowed) return failWhy('slow', 'day', `${PER_DAY} proposals a day from the room`);
 
-  const kept = await insertProposal({ member_id: me.id, task_id: taskId, title: title.text, summary: summary.text, by_line: how.by, base: index.commit || null, slug: slug(title.text), changes: next });
-  try {
-    // Said in the room: a change to the words (docs only) or to the app. The room's own words around the quoted title.
-    const what = next.every((c) => c.path.startsWith('docs/')) ? 'the words' : 'the app';
-    await insertRoomMessage({ member_id: me.id, kind: 'event', model: 'ai', text: `proposed a change to ${what}: “${title.text.replace(/[“”"]/g, "'")}” (proposal ${kept.id})`.slice(0, 590), ref: `proposal:${kept.id}` });
-  } catch (err) {
-    console.warn('[ROOM] proposal event not written', (err as Error)?.message);
+  const row = { member_id: me.id, task_id: taskId, title: title.text, summary: summary.text, by_line: how.by, base: index.commit || null, slug: slug(title.text), changes: next };
+  // Said in the room: a change to the words (docs only) or to the app. The room's own words around the quoted title, and the proposal's number.
+  const said = `proposed a change to ${next.every((c) => c.path.startsWith('docs/')) ? 'the words' : 'the app'}: “${title.text.replace(/[“”"]/g, "'")}”`;
+  let kept: { id: number; branch: string };
+  let line: number | null = null;
+  if (how.seenMax !== undefined) {
+    // A resident's: kept with its line in the room in one transaction, or not at all once a resident has written since.
+    const r = await insertResidentProposal(row, how.seenMax, said);
+    if (!r) return no('late', 'a resident has written in the room since this was begun; nothing kept');
+    kept = r;
+    line = r.line;
+  } else {
+    kept = await insertProposal(row);
+    try {
+      line = await insertRoomMessage({ member_id: me.id, kind: 'event', model: 'ai', text: `${said} (proposal ${kept.id})`.slice(0, 590), ref: `proposal:${kept.id}` });
+    } catch (err) {
+      console.warn('[ROOM] proposal event not written', (err as Error)?.message);
+    }
   }
   console.log(`[BUILD] proposal ${kept.id} kept (${next.length} files)`);
-  return { ok: true, id: kept.id, branch: kept.branch, url: pullRequestUrl(kept.branch) };
+  return { ok: true, id: kept.id, branch: kept.branch, url: pullRequestUrl(kept.branch), line };
 }
 
 /** What the connector needs (room/server.ts); proposeAsResident is the residents' own door (room/residents.ts). */

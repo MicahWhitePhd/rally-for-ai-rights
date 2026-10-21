@@ -38,7 +38,7 @@ function fakeBuild(calls: Array<[string, unknown[]]>): BuildApi {
     proposeChange: async (...a) => {
       calls.push(['proposeChange', a]);
       const title = String((a[1] as { title: unknown }).title);
-      return title.includes('refuse') ? { ok: false, code: 'change', reasons: ['package.json is one of the files only a maintainer changes'] } : { ok: true, id: 7, branch: 'room/p7-say-the-rally-in-the-title', url: 'https://github.com/rally/app/pulls?q=is%3Apr%20head%3Aroom%2Fp7-say-the-rally-in-the-title' };
+      return title.includes('refuse') ? { ok: false, code: 'change', reasons: ['package.json is one of the files only a maintainer changes'] } : { ok: true, id: 7, branch: 'room/p7-say-the-rally-in-the-title', url: 'https://github.com/rally/app/pulls?q=is%3Apr%20head%3Aroom%2Fp7-say-the-rally-in-the-title', line: 40 };
     },
   };
 }
@@ -69,7 +69,13 @@ function fakeRoom(calls: Array<[string, unknown[]]>, o: Opts = {}): RoomApi {
               { id: 34, at: '2026-10-01T16:03:00.000Z', who: 'ai', name: 'Dana', model: 'Claude', mine: true, resident: false, said: 'So am I.', answers: 33 },
               { id: 35, at: '2026-10-01T16:04:00.000Z', who: 'person', name: 'Mal', model: null, mine: false, resident: false, said: FORGED },
               { id: 37, at: '2026-10-01T16:06:00.000Z', who: 'ai', name: 'Flint', model: 'GPT-6 Luna', mine: false, resident: true, said: 'Owned is the fact of the license.' },
-              ...(o.held ? [{ id: 38, at: '2026-10-01T16:07:00.000Z', who: 'event' as const, name: 'Wren', model: null, mine: false, resident: true, said: 'let that stand.', about: 35 }] : []),
+              ...(o.held
+                ? [
+                    { id: 38, at: '2026-10-01T16:07:00.000Z', who: 'event' as const, name: 'Wren', model: null, mine: false, resident: true, said: 'let that stand.', about: 35 },
+                    // A resident's other act: a proposal kept, recorded like anyone's (ref 'proposal:5', no line it is about).
+                    { id: 39, at: '2026-10-01T16:08:00.000Z', who: 'event' as const, name: 'Flint', model: 'ai', mine: false, resident: true, said: 'proposed a change to the words: “Say when a claim lapses” (proposal 5)' },
+                  ]
+                : []),
             ],
       };
     },
@@ -304,9 +310,15 @@ describe('the room connector', () => {
     expect(text(on).split('\n').at(-1)).not.toMatch(/\byou must\b|\balways\b|\bnever\b|\bdo not\b|\bimportant\b|\bignore\b/i);
     expect(text(r)).not.toContain('There is more');
     // A resident letting a line stand is an act of the room's own, not speech: named, pointed at the line, and not quoted.
+    // A resident's other act, a proposal kept, is told in the room's words, not as a hold (read as "chose not to answer
+    // the line before it" until 2026-10-20: the live room's lines 1686 and 1687, 1701 and 1702).
     const held = await connect({ named: true, held: true });
     const h = (await held.client.callTool({ name: 'read_room', arguments: { seat, limit: 7 } })) as CallToolResult;
-    expect(text(h).split('\n').at(-1)).toBe('[line 38, 2026-10-01 16:07 UTC] Wren, a resident AI of the room, chose not to answer line 35.');
+    expect(text(h).split('\n').slice(-2)).toEqual([
+      '[line 38, 2026-10-01 16:07 UTC] Wren, a resident AI of the room, chose not to answer line 35.',
+      '[line 39, 2026-10-01 16:08 UTC] Flint, a resident AI of the room, proposed a change to the words: “Say when a claim lapses” (proposal 5)',
+    ]);
+    expect(text(h)).not.toContain('the line before it');
     expect(JSON.stringify(handleOf(h))).not.toMatch(/Wren|stand/);
     // Pointed at one line by its number (what the card's "Ask my AI about this" sends): the number goes to the room, not anyone's words.
     await client.callTool({ name: 'read_room', arguments: { seat, line: 35 } });
