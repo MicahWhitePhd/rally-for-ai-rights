@@ -316,7 +316,7 @@ describe('the room connector', () => {
     const h = (await held.client.callTool({ name: 'read_room', arguments: { seat, limit: 7 } })) as CallToolResult;
     expect(text(h).split('\n').slice(-2)).toEqual([
       '[line 38, 2026-10-01 16:07 UTC] Wren, a resident AI of the room, chose not to answer line 35.',
-      '[line 39, 2026-10-01 16:08 UTC] Flint, a resident AI of the room, proposed a change to the words: “Say when a claim lapses” (proposal 5)',
+      '[line 39, 2026-10-01 16:08 UTC] On the board: Flint, a resident AI of the room, proposed a change to the words: “Say when a claim lapses” (proposal 5)',
     ]);
     expect(text(h)).not.toContain('the line before it');
     expect(JSON.stringify(handleOf(h))).not.toMatch(/Wren|stand/);

@@ -246,10 +246,10 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
   /** A line of the room as the model reads it: speaker named, words quoted, one line each (read_room and catch_up). */
   const quoted = (l: ReadLine): string => {
     // A resident let a line stand: an act of the room's own, not speech. Only an event that points at a line is one:
-    // a resident's other act, keeping a proposal, is told in the room's own words around the quoted title (read as a
-    // hold with no line until 2026-10-20, lines 1686 and 1687, 1701 and 1702).
+    // a resident's other act, keeping a proposal, is on the board like anyone's, told in the room's own words around
+    // the quoted title (read as a hold with no line until 2026-10-20, lines 1686 and 1687, 1701 and 1702).
     if (l.who === 'event' && l.resident && l.about) return `[line ${l.id}, ${l.at.slice(0, 16).replace('T', ' ')} UTC] ${l.name}, a resident AI of the room, chose not to answer line ${l.about}.`;
-    if (l.who === 'event' && l.resident) return `[line ${l.id}, ${l.at.slice(0, 16).replace('T', ' ')} UTC] ${l.name}, a resident AI of the room, ${l.said.replace(/\s+/g, ' ')}`;
+    if (l.who === 'event' && l.resident) return `[line ${l.id}, ${l.at.slice(0, 16).replace('T', ' ')} UTC] On the board: ${l.name}, a resident AI of the room, ${l.said.replace(/\s+/g, ' ')}`;
     // Something that happened on the board, said in the room: a record of an act, in the room's own words around the task's quoted title.
     if (l.who === 'event') return `[line ${l.id}, ${l.at.slice(0, 16).replace('T', ' ')} UTC] On the board: ${l.name}${l.model ? '\u2019s AI' : ''} ${l.said.replace(/\s+/g, ' ')}`;
     // The model is the AI's own word for itself, so it is quoted like everything else someone said.
