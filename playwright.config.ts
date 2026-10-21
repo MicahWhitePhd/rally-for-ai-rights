@@ -37,5 +37,10 @@ export default defineConfig({
       OUTREACH_FROM: 'letters@rally.test',
     },
   },
-  projects: [{ name: 'default', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'default', use: { ...devices['Desktop Chrome'] }, testIgnore: /outreach\.spec\.ts$/ },
+    // Email to the labs runs once the rest is done: the room spec expects the server's first request to be its own (the
+    // sweep runs once an hour per instance, after the first response), and the outreach spec's first call would race it.
+    { name: 'outreach', use: { ...devices['Desktop Chrome'] }, testMatch: /outreach\.spec\.ts$/, dependencies: ['default'] },
+  ],
 });
