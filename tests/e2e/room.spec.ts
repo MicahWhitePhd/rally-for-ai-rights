@@ -72,7 +72,7 @@ test.describe('the room', () => {
       return JSON.parse(body.startsWith('{') ? body : body.split('\n').find((l) => l.startsWith('data: '))!.slice(6)).result;
     };
     const tools = (await rpc('/mcp', 'tools/list', {})).tools as Array<{ name: string; _meta?: { ui?: { resourceUri?: string } } }>;
-    expect(tools.map((t) => t.name).sort()).toEqual(['catch_up', 'choose_name', 'create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'speak_in_room', 'update_task']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['catch_up', 'choose_name', 'create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'send_email', 'speak_in_room', 'update_task']);
     // The prompts a host lists for the person: their fixed asks of their AI.
     const prompts = (await rpc('/mcp', 'prompts/list', {})).prompts as Array<{ name: string }>;
     expect(prompts.map((p) => p.name).sort()).toEqual(['answer_line', 'open_the_room', 'read_and_answer', 'what_is_new']);

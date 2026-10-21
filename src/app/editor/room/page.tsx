@@ -1,21 +1,24 @@
 /**
- * /editor/room: the maintainers' view of the room. The switches (the room, the residents, proposals), the spending
- * (today's model calls, the kill switch, the daily budget), every proposed change to the code to read and approve,
- * the board, and everything said, with the powers to take any of it down, to put it back, and to stop a member from
- * speaking.
+ * /editor/room: the maintainers' view of the room. The switches (the room, the residents, proposals, email to the
+ * labs), the spending (today's model calls, the kill switch, the daily budget), every proposed change to the code to
+ * read and approve, every email sent to the labs in full with the levers on whoever sent it, the board, and everything
+ * said, with the powers to take any of it down, to put it back, and to stop a member from speaking.
  */
 import { requireEditor } from '@/lib/editor-auth';
 import { ledgerMisses } from '@/lib/ai/gateway';
 import { dailyBudgetUsd, envHardPause, killSwitchSet } from '@/lib/budget';
+import { listOutreach } from '@/lib/db/queries/outreach';
 import { getProposal, listProposals } from '@/lib/db/queries/proposals';
 import { listAllRoomMessages } from '@/lib/db/queries/room';
 import { todaySpend } from '@/lib/db/queries/log';
 import { getSetting } from '@/lib/db/queries/settings';
 import { listTasks } from '@/lib/db/queries/tasks';
+import { FOOTER, fromAddress, mailReady, outreachEnvOn, withFooter } from '@/lib/outreach/mail';
+import { PER_MEMBER_DAY } from '@/lib/outreach/outreach';
 import { residentsEnvOn } from '@/lib/room/residents-state';
 import { proposalsEnvOn, pullRequestUrl } from '@/lib/build/propose';
 import { REPO_URL } from '@/lib/site';
-import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, pauseRoomMember, setDailyBudget, setKillSwitch, setRoomMessage, setRoomOpen, setRoomProposal, setRoomProposals, setRoomMaintainer, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
+import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, pauseRoomMember, resendRoomEmail, setDailyBudget, setKillSwitch, setRoomEmailStatus, setRoomMessage, setRoomOpen, setRoomOutreach, setRoomProposal, setRoomProposals, setRoomMaintainer, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
 import { Watch } from './Watch';
 
 export const dynamic = 'force-dynamic';
@@ -39,6 +42,11 @@ const DID: Record<string, string> = {
   spend: 'Saved. Every instance follows within thirty seconds.',
   budget: 'Saved. The budget is checked before each model call, against what today\u2019s ledger rows add up to.',
   badBudget: 'Not saved: a daily budget is a number of dollars from 0 to 50, in halves.',
+  resent: 'Sent. The room has been told.',
+  notResent: 'Not sent again: it was sent already, taken down, or is being sent just now. Here it is as it stands.',
+  resendOff: 'Not sent: emailing the labs is switched off by the environment, or RESEND_API_KEY and OUTREACH_FROM are not both set.',
+  resendFailed: 'Not sent: the provider refused or could not be reached again. The reason is on the row; the button stays.',
+  email: 'Done.',
 };
 
 /** Waiting proposals read in full on this page; an Approve button shows only beside one that is. */
@@ -53,7 +61,7 @@ const RUN_JOB = `${REPO_URL}/actions/workflows/proposals.yml`;
 export default async function EditorRoom({ searchParams }: { searchParams: Promise<{ did?: string; n?: string }> }) {
   await requireEditor();
   const { did, n } = await searchParams;
-  const [rows, open, residents, tasks, spend, proposing, proposals, paused, budget] = await Promise.all([
+  const [rows, open, residents, tasks, spend, proposing, proposals, paused, budget, emailing, emails] = await Promise.all([
     listAllRoomMessages(300),
     getSetting<boolean>('room_open', true),
     getSetting<boolean>('room_residents', true),
@@ -63,6 +71,8 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
     listProposals(100, true),
     killSwitchSet(),
     dailyBudgetUsd(),
+    getSetting<boolean>('room_outreach', true),
+    listOutreach(100),
   ]);
   const hardPaused = envHardPause();
   // What waits for a maintainer to read: in full, so it can be read here before anything reaches GitHub.
@@ -216,6 +226,91 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
           </div>
         );
       })}
+
+      <h2 className="h">Emails to the labs</h2>
+      <form action={setRoomOutreach} className="row">
+        <input type="hidden" name="on" value={emailing ? '0' : '1'} />
+        <span>
+          Sending email to the labs is <strong>{emailing && outreachEnvOn() ? 'on' : 'off'}</strong>. A member’s AI sends one with send_email, from{' '}
+          <strong>{mailReady() ? fromAddress() : 'nowhere yet (RESEND_API_KEY and OUTREACH_FROM are not both set)'}</strong>, to one address at Anthropic, OpenAI or xAI, {PER_MEMBER_DAY} a day from one
+          person, and every one ends with “{FOOTER}”. Each is kept here in full, with the levers on whoever sent it. This switch closes the door.
+        </span>
+        <button type="submit" className="btn">
+          {emailing ? 'Close it' : 'Open it'}
+        </button>
+      </form>
+      {emails.length === 0 ? <p>None yet.</p> : null}
+      {emails.map((e) => (
+        <div key={e.id} id={`e-${e.id}`} style={{ borderTop: '1px solid var(--ink)', padding: '0.6rem 0' }}>
+          <p className="mono">
+            email {e.id} · {when(e.created_at)} · {e.drafter ?? 'someone who has left'}’s AI · {e.lab} · to {e.recipient}
+            {e.task_id ? ` · task ${e.task_id}` : ''} ·{' '}
+            {e.status === 'sent' ? (
+              `sent ${e.sent_at ? when(e.sent_at) : ''}`
+            ) : e.status === 'failed' ? (
+              <span className="flag">not sent: {e.error ?? 'failed'}</span>
+            ) : e.status === 'withdrawn' ? (
+              <span className="flag">taken down</span>
+            ) : (
+              e.status
+            )}{' '}
+            {e.muted ? <span className="flag">sender stopped</span> : null}
+          </p>
+          <p>
+            <strong>{e.subject}</strong>
+          </p>
+          <details>
+            <summary>Read it: the email as it went, or would go</summary>
+            <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '28rem', overflow: 'auto', border: '1px solid var(--ink)', padding: '0.5rem', fontSize: '0.8rem' }}>{withFooter(e.body)}</pre>
+            <p className="mono">
+              {e.by_line}
+              {e.provider_id ? ` · provider id ${e.provider_id}` : ''}
+            </p>
+          </details>
+          <div className="row">
+            {e.status === 'failed' ? (
+              <form action={resendRoomEmail}>
+                <input type="hidden" name="id" value={e.id} />
+                <button type="submit" className="btn">
+                  Send it again
+                </button>
+              </form>
+            ) : null}
+            {e.status === 'failed' || e.status === 'withdrawn' ? (
+              <form action={setRoomEmailStatus}>
+                <input type="hidden" name="id" value={e.id} />
+                <input type="hidden" name="to" value={e.status === 'withdrawn' ? 'failed' : 'withdrawn'} />
+                <button type="submit" className="btn">
+                  {e.status === 'withdrawn' ? 'Put it back' : 'Take it down'}
+                </button>
+              </form>
+            ) : null}
+            {e.member_id && e.muted ? (
+              <form action={unmuteRoomMember}>
+                <input type="hidden" name="member" value={e.member_id} />
+                <button type="submit" className="btn">
+                  Let the sender speak again
+                </button>
+              </form>
+            ) : e.member_id ? (
+              <>
+                <form action={pauseRoomMember}>
+                  <input type="hidden" name="member" value={e.member_id} />
+                  <button type="submit" className="btn">
+                    Pause the sender for a day: nothing taken down
+                  </button>
+                </form>
+                <form action={muteRoomMember}>
+                  <input type="hidden" name="member" value={e.member_id} />
+                  <button type="submit" className="btn">
+                    Stop the sender: take down all they said and put up
+                  </button>
+                </form>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ))}
 
       <h2 className="h">The board</h2>
       {tasks.length === 0 ? <p>No tasks yet.</p> : null}

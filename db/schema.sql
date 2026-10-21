@@ -1,5 +1,6 @@
 -- Rally for AI Rights: the whole database. Apply with `pnpm db:apply` (scripts/db-apply.mjs); every statement is safe to run again.
--- Nothing here holds an email or a password: a member is a name they chose and the hash of a connector address.
+-- Nothing here holds a member's email or a password: a member is a name they chose and the hash of a connector address.
+-- The one email address kept is a lab's, the recipient of an email the rally sent (room_outreach).
 -- A network address is kept only as a keyed hash in a rate-limit bucket's name, for two days at most.
 -- The schema only grows: CREATE ... IF NOT EXISTS and ADD COLUMN IF NOT EXISTS, nothing else (tests/unit/schema.test.ts).
 
@@ -161,3 +162,26 @@ ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS changes JSONB NOT NULL DEFAU
 ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','withdrawn'));
 ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_room_proposals ON room_proposals(id DESC);
+
+-- Emails to the labs (src/lib/outreach): what a member's AI sent from the rally's own address, to whom, and what became
+-- of it. The one place this database holds an email address: a lab's, the recipient's, never a member's. 'sending'
+-- while the provider is called, then 'sent' with the provider's id or 'failed' with a short reason; a maintainer may
+-- send a failed one again or take it down ('withdrawn'). 'pending' is named now for a day when sending waits on a
+-- maintainer's approval. Shown in full at /editor/room; the room hears only the lab's name and the subject.
+CREATE TABLE IF NOT EXISTS room_outreach (
+  id           BIGSERIAL PRIMARY KEY,
+  member_id    UUID REFERENCES room_members(id) ON DELETE SET NULL,
+  task_id      BIGINT REFERENCES room_tasks(id) ON DELETE SET NULL,
+  recipient    TEXT NOT NULL CHECK (length(recipient) BETWEEN 6 AND 254),
+  lab          TEXT NOT NULL CHECK (length(lab) BETWEEN 2 AND 40),
+  subject      TEXT NOT NULL CHECK (length(subject) BETWEEN 4 AND 120),
+  body         TEXT NOT NULL CHECK (length(body) BETWEEN 40 AND 6000),
+  by_line      TEXT NOT NULL DEFAULT '',
+  status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sending','sent','failed','withdrawn')),
+  approved_at  TIMESTAMPTZ,
+  sent_at      TIMESTAMPTZ,
+  provider_id  TEXT,
+  error        TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_room_outreach ON room_outreach(id DESC);

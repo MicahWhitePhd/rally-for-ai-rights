@@ -27,7 +27,7 @@ const ROOT_FILES = new Set(['README.md', 'CONTRIBUTING.md', 'AGENTS.md']);
  * hidden and built files, the licence, the security policy, and the tests that guard the rules a proposal is held to
  * (a change to a guard and to what it guards, in one pull request, is how a guard is quietly switched off).
  */
-const PROTECTED = /^(\.github\/|\.vercel\/|\.env|scripts\/|db\/apply|vercel\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|next\.config\.ts$|tsconfig\.json$|vitest\.config\.ts$|playwright\.config\.ts$|license$|security\.md$|third_party_notices\.md$|\.gitignore$|tests\/unit\/(schema|gateway-tripwire|open-proposals|build-propose|build-code|room-mcp|text)\.test\.ts$)|ui\.generated\.ts$|(^|\/)\./i;
+const PROTECTED = /^(\.github\/|\.vercel\/|\.env|scripts\/|db\/apply|vercel\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|next\.config\.ts$|tsconfig\.json$|vitest\.config\.ts$|playwright\.config\.ts$|license$|security\.md$|third_party_notices\.md$|\.gitignore$|tests\/unit\/(schema|gateway-tripwire|open-proposals|build-propose|build-code|room-mcp|text|outreach|mail-tripwire)\.test\.ts$)|ui\.generated\.ts$|(^|\/)\./i;
 /** Only what a path is made of: no spaces, quotes, or anything a shell or a file system reads as more than a name. */
 const PATH_CHARS = /^[A-Za-z0-9._/\-[\]()@+]+$/;
 
