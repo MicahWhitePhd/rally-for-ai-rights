@@ -24,7 +24,7 @@ describe('the rates', () => {
       res('Task 3 on the board fits what you said.', at0 + 10 * 10_000 + BURST_MS),
     ];
     const m = metricsOf([run], ['Flint', 'Dana'], ['Dana'], FACTS);
-    expect(m).toMatchObject({ lines: 5, endOnQuestion: 20, containQuestion: 20, openOnName: 20, over50Words: 20, pointToTask: 20, wordsMax: 61, afterQuiet: 1 });
+    expect(m).toMatchObject({ lines: 5, endOnQuestion: 20, containQuestion: 20, openOnName: 20, over50Words: 20, pointToTask: 20, wordsMax: 61, afterQuiet: 1, askAgain: 0 });
     expect(m.sayFact).toBeGreaterThanOrEqual(20);
     expect(m.wordsMean).toBeGreaterThan(10);
     // What counts as an ask is residents-core's own rule (isAsk); here only that the run is a number no larger than the lines.
@@ -32,10 +32,13 @@ describe('the rates', () => {
     expect(m.longestAskRun).toBeLessThanOrEqual(m.lines);
     expect(m.asks).toBeGreaterThanOrEqual(0);
     expect(metricsOf([[]], [], [], FACTS).lines).toBe(0);
+    // The same ask of one person again inside twelve hours, with no word from them between, counts (resident.v12).
+    const nag = [res('Dana, could you review proposals 5 through 9 today?', at0), res('A refusal needs a record.', at0 + 60_000), res('Dana, please review proposals 5 through 9 today and choose the wording.', at0 + 2 * 3600_000)];
+    expect(metricsOf([nag], ['Flint', 'Dana'], ['Dana'], FACTS).askAgain).toBe(1);
   });
 
   it('compares with a kept run and flags a rate that moved by ten points or more', () => {
-    const base = { lines: 48, endOnQuestion: 30, containQuestion: 40, openOnName: 5, wordsMean: 22, wordsMax: 48, over50Words: 0, waveStepAway: 4, pointToTask: 10, asks: 35, longestAskRun: 2, sayFact: 12, restateFact: 2, afterQuiet: 3, afterQuietRestate: 0, afterQuietMention: 1 } satisfies Metrics;
+    const base = { lines: 48, endOnQuestion: 30, containQuestion: 40, openOnName: 5, wordsMean: 22, wordsMax: 48, over50Words: 0, waveStepAway: 4, pointToTask: 10, asks: 35, longestAskRun: 2, sayFact: 12, restateFact: 2, afterQuiet: 3, afterQuietRestate: 0, afterQuietMention: 1, askAgain: 0 } satisfies Metrics;
     const now = { ...base, endOnQuestion: 41, asks: 29, pointToTask: 21 };
     const moved = diffMetrics(base, now);
     expect(moved.find((m) => m.key === 'endOnQuestion')).toEqual({ key: 'endOnQuestion', base: 30, now: 41, delta: 11, flagged: true });
