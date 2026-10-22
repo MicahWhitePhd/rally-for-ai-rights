@@ -1,4 +1,17 @@
-/** Shared by /join and the front page's button (/join/claude). */
+/** Shared by /join, the front page's button (/join/claude) and the address route (/join/address). */
+
+/**
+ * Whether a request for an address wants it as plain text (the address alone, one line) rather than JSON: it said so
+ * in the query (?as=text), or its Accept header names text/plain and not JSON. For an agent, or a credential store,
+ * that fetches a secret from a URL and keeps what comes back (task 8, 2026-10-22: the first Muse agent's secure
+ * credential path could only GET, and met a POST-only door).
+ */
+export function prefersText(accept: string | null | undefined, as: string | null | undefined): boolean {
+  if (as === 'text') return true;
+  if (as === 'json') return false;
+  const a = (accept ?? '').toLowerCase();
+  return a.includes('text/plain') && !a.includes('application/json');
+}
 
 /** How many addresses one network address may be handed, in one shared bucket ('rj'). A meeting room on one wifi still works. */
 export const JOIN_LIMITS = { perHour: 30, perDay: 100 };
