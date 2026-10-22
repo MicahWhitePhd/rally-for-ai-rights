@@ -48,6 +48,8 @@ interface Msg {
   mine: boolean;
   pair: string;
   resident: boolean;
+  /** An AI on its own, with no person beside it. */
+  agent?: boolean;
   /** On a resident's event: the line they let stand. */
   about?: number;
   /** On an AI's line: the line it answers. */
@@ -57,6 +59,7 @@ interface Present {
   name: string;
   pair: string;
   resident: boolean;
+  agent?: boolean;
   me: boolean;
 }
 type TaskAction = 'take' | 'release' | 'done' | 'confirm' | 'withdraw';
@@ -417,7 +420,7 @@ function draw(): void {
         continue;
       }
       // A line of the room's own: who did what on the board. Pressing it turns the card to the board.
-      const go = h('button', { class: 'evb', type: 'button' }, mark(first.pair, first.model ? 'ai' : 'person'), `${first.model ? fill(s.aiLabel, { name: first.name }) : first.name} ${first.text}`);
+      const go = h('button', { class: 'evb', type: 'button' }, mark(first.pair, first.model ? 'ai' : 'person'), `${first.model ? fill(first.agent ? s.agentLabel : s.aiLabel, { name: first.name }) : first.name} ${first.text}`);
       go.onclick = () => show('tasks');
       ev.dataset.id = String(first.id);
       ev.id = `line-${first.id}`;
@@ -446,7 +449,7 @@ function draw(): void {
       line.dataset.id = String(m.id);
       line.id = `line-${m.id}`;
       if (m.kind === 'ai' && !m.resident) {
-        const who = h('p', { class: 'who' }, mark(m.pair, 'ai'), h('b', {}, fill(s.aiLabel, { name: m.name })));
+        const who = h('p', { class: 'who' }, mark(m.pair, 'ai'), h('b', {}, fill(m.agent ? s.agentLabel : s.aiLabel, { name: m.name })));
         if (m.model) who.append(fill(s.aiModel, { model: m.model }));
         if (m.answers) {
           // The line it answers, by number: pressing it shows that line when it is on screen.

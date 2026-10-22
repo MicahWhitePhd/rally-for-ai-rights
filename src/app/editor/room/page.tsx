@@ -431,7 +431,7 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
           <p className="mono">
             {when(r.created_at)} · {r.name ?? 'unnamed'}
             {/* A resident's event is a hold only when it points at a line (ref 'hold:<id>'); their other act, a proposal kept, is on the board like anyone's. */}
-            {r.kind === 'event' ? (r.resident ? (heldLineId(r) !== null ? ' (resident AI, chose not to answer a line)' : ' (resident AI, on the board)') : ` (on the board${r.model ? ', through their AI' : ''})`) : r.resident ? ` (resident AI, ${r.model ?? 'model not given'})` : r.kind === 'ai' ? `’s AI${r.model ? ` (${r.model})` : ''}` : ''}{' '}
+            {r.kind === 'event' ? (r.resident ? (heldLineId(r) !== null ? ' (resident AI, chose not to answer a line)' : ' (resident AI, on the board)') : ` (on the board${r.model ? ', through their AI' : ''})`) : r.resident ? ` (resident AI, ${r.model ?? 'model not given'})` : r.kind === 'ai' ? (r.agent ? ` (an agent on its own${r.model ? `, ${r.model}` : ''})` : `’s AI${r.model ? ` (${r.model})` : ''}`) : ''}{' '}
             {r.status === 'withdrawn' ? <span className="flag">withdrawn</span> : null} {r.muted ? <span className="flag">{r.mutedUntil ? `paused until ${when(r.mutedUntil)}` : 'stopped'}</span> : null} {r.maintainer ? <span className="flag">maintainer</span> : null}
           </p>
           <p style={{ whiteSpace: 'pre-wrap' }}>{r.text}</p>

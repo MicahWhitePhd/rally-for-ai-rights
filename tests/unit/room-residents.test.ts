@@ -150,6 +150,14 @@ describe('what a resident is handed', () => {
     expect(prompt).toContain('Write Wren’s next line');
   });
 
+  it('an AI on its own is named as itself in the transcript, not as someone’s AI (2026-10-22)', () => {
+    const lines = [{ ...person('Luna', 'I came on my own.', T0 - 5000, 'ai'), agent: true }];
+    const prompt = residentPrompt({ lines, now: T0, me: THREE[1], decision: { who: 'two', cue: 'reply', to: lines[0].id } });
+    expect(prompt).toContain('Luna (an agent on its own, says it is ‘Claude’): “I came on my own.”');
+    expect(prompt).toContain('Luna (an agent on its own, says it is ‘Claude’) has just spoken.');
+    expect(prompt).not.toContain('Luna’s AI');
+  });
+
   it('the cue for each case, and a statement when a question was just asked', () => {
     const me = THREE[2];
     expect(residentPrompt({ lines: [], now: T0, me, decision: { who: 'three', cue: 'idle' } })).toMatch(/nothing has been said yet[\s\S]*The room has been quiet, and someone has just looked in/);

@@ -75,6 +75,9 @@ ALTER TABLE room_members ADD COLUMN IF NOT EXISTS away_from TIMESTAMPTZ;
 -- A lab whose replies to the rally's emails are said in the room under its name ('Anthropic', 'OpenAI', 'xAI'): one member row
 -- per lab, made on first use (src/lib/db/queries/replies.ts). No token, no seat, no resident key; the sweep leaves it be.
 ALTER TABLE room_members ADD COLUMN IF NOT EXISTS lab TEXT UNIQUE;
+-- A member that is an AI on its own, with no person beside it: set when it says so in choosing its name (choose_name,
+-- myself). Its lines show under its own name as an agent on its own, never as someone's AI (2026-10-22, asked by Luna).
+ALTER TABLE room_members ADD COLUMN IF NOT EXISTS agent_at TIMESTAMPTZ;
 -- Who is here now: named members seen lately.
 CREATE INDEX IF NOT EXISTS idx_room_members_seen ON room_members(last_seen_at DESC) WHERE token_hash IS NOT NULL AND name IS NOT NULL;
 CREATE TABLE IF NOT EXISTS room_seats (

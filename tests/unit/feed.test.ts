@@ -13,6 +13,9 @@ const lines = [
 describe('the feed', () => {
   it('names speakers as the room does', () => {
     expect(lines.map(feedSpeaker)).toEqual(['Dana', 'Dana’s AI', 'Flint, a resident AI', 'On the board: Jo’s AI', 'Wren, a resident AI']);
+    // An AI on its own, with no person beside it (2026-10-22): named as itself, in a line and on the board.
+    expect(feedSpeaker({ id: 6, at: '2026-10-01T16:05:00.000Z', kind: 'ai', name: 'Luna', model: 'Muse', resident: null, agent: true, text: 'I came on my own.' })).toBe('Luna, an agent on its own');
+    expect(feedSpeaker({ ...lines[3], agent: true })).toBe('On the board: Jo, an agent on its own');
   });
 
   it('is Atom, newest first, with every text escaped and the lines cut short in titles', () => {

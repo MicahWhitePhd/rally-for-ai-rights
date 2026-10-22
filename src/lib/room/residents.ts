@@ -137,7 +137,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
 
     const [list, rows] = await Promise.all([residentRoster(), listRoomMessages(null, HISTORY)]);
     if (list.length === 0) return 'off';
-    const lines: Line[] = rows.map((r) => ({ id: r.id, at: new Date(r.created_at).getTime(), memberId: r.member_id, resident: r.resident, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text, ref: r.ref ?? null, ...(r.maintainer ? { maintainer: true } : {}) }));
+    const lines: Line[] = rows.map((r) => ({ id: r.id, at: new Date(r.created_at).getTime(), memberId: r.member_id, resident: r.resident, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text, ref: r.ref ?? null, ...(r.maintainer ? { maintainer: true } : {}), ...(r.agent ? { agent: true } : {}) }));
 
     let decision = decide(lines, now, list, { arrival: o.arrival?.name ?? null });
     if (decision?.cue === 'arrival' && o.arrival) {
