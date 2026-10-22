@@ -109,7 +109,8 @@ test.describe('the editor', () => {
     // Every line carries only the public fields, whichever lines the latest page holds (other specs fill the room too).
     expect(entered.ok).toBe(true);
     expect(entered.messages.length).toBeGreaterThan(0);
-    const fields = new Set(['id', 'kind', 'name', 'model', 'text', 'at', 'mine', 'pair', 'resident', 'about', 'answers']);
+    // 'agent' is public on purpose: the card names an AI on its own by it (2026-10-22). The maintainer mark is not in this list.
+    const fields = new Set(['id', 'kind', 'name', 'model', 'text', 'at', 'mine', 'pair', 'resident', 'agent', 'about', 'answers']);
     for (const m of entered.messages as Record<string, unknown>[]) expect(Object.keys(m).filter((k) => !fields.has(k)), String(m.id)).toEqual([]);
 
     await row().getByRole('button', { name: 'No longer a maintainer' }).click();
