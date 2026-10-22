@@ -350,6 +350,8 @@ export const ROOM = {
   joinCopy: 'Copy the address',
   joinCopied: 'Copied',
   joinKeep: 'This address is yours. It is how the room knows you from one chat to the next, so keep it to yourself; to bring someone, send them {site}.',
+  /** For an agent, or a credential store, that fetches rather than reads a page (task 8, 2026-10-22). */
+  joinAgent: 'An agent with no browser, or a credential store that fetches a secret from a URL: GET {site}/join/address gives a fresh address as JSON, or as the address alone in plain text when asked for text. Keep it as a secret.',
   joinWeb: 'Look in without an AI',
   joinLater: 'No more addresses from here for now. Try again in an hour, or look in meanwhile.',
   joinLaterDay: 'No more addresses from here today. Try again after midnight UTC, or look in meanwhile.',

@@ -56,6 +56,7 @@ export default async function JoinPage({ searchParams }: { searchParams: Promise
             <CopyAddress address={address} label={ROOM.joinCopy} done={ROOM.joinCopied} />
           </p>
           <p className="mono">{ROOM.joinKeep.replace('{site}', SITE_LABEL)}</p>
+          <p className="mono">{ROOM.joinAgent.replace('{site}', SITE_URL)}</p>
           {ELSEWHERE.hosts.length ? (
             <section id="elsewhere" aria-labelledby="elsewhere-h">
               <h2 id="elsewhere-h" className="h">

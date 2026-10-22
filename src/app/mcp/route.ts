@@ -7,7 +7,7 @@
  * is a guest of that one conversation; opened through their own address
  * (/mcp/<token>, from /join) the room knows them from chat to chat.
  */
-import { mcpMethodNotAllowed, serveRoomMcp } from '@/lib/room/http';
+import { mcpGet, mcpHead, mcpMethodNotAllowed, serveRoomMcp } from '@/lib/room/http';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -15,8 +15,11 @@ export const maxDuration = 60;
 export async function POST(request: Request): Promise<Response> {
   return serveRoomMcp(request, null);
 }
-export function GET(): Response {
-  return mcpMethodNotAllowed();
+export function GET(request: Request): Response {
+  return mcpGet(request);
+}
+export function HEAD(): Response {
+  return mcpHead();
 }
 export function DELETE(): Response {
   return mcpMethodNotAllowed();

@@ -172,7 +172,9 @@ test.describe('the room', () => {
     expect((await db().query(`SELECT 1 FROM room_members WHERE token_hash = $1`, [sha(`room-member:${madeUp}`)])).rowCount).toBe(0);
     const doc = (await rpc('/mcp', 'resources/read', { uri: 'ui://rally/room.html' })).contents[0];
     expect(doc.mimeType).toBe('text/html;profile=mcp-app');
-    expect((await request.get('/mcp')).status()).toBe(405);
+    // A plain GET is told what the address is; a client opening its standalone stream is told there is none (task 8, 2026-10-22).
+    expect((await request.get('/mcp')).status()).toBe(200);
+    expect((await request.get('/mcp', { headers: { accept: 'text/event-stream' } })).status()).toBe(405);
     expect((await request.post('/mcp/short', { data: {} })).status()).toBe(404);
   });
 
@@ -696,6 +698,30 @@ test.describe('the front page and the way in', () => {
     const made = await request.post('/join/address');
     expect(made.headers()['cache-control']).toBe('no-store');
     expect(((await made.json()) as { address: string }).address).toMatch(/^http:\/\/localhost:3950\/mcp\/r[A-Za-z0-9_-]{40}$/);
+    // The same door answers an agent, or a credential store, that can only fetch (task 8, 2026-10-22): JSON, or the address alone as text.
+    const fetched = await request.get('/join/address');
+    expect(fetched.status()).toBe(200);
+    expect(fetched.headers()['cache-control']).toBe('no-store');
+    expect(fetched.headers()['x-robots-tag']).toBe('noindex');
+    expect(fetched.headers()['access-control-allow-origin']).toBeUndefined();
+    const viaGet = ((await fetched.json()) as { ok: boolean; address: string }).address;
+    expect(viaGet).toMatch(/^http:\/\/localhost:3950\/mcp\/r[A-Za-z0-9_-]{40}$/);
+    const asText = await request.get('/join/address', { headers: { accept: 'text/plain' } });
+    expect(asText.headers()['content-type']).toMatch(/^text\/plain/);
+    expect((await asText.text()).trim()).toMatch(/^http:\/\/localhost:3950\/mcp\/r[A-Za-z0-9_-]{40}$/);
+    expect((await (await request.get('/join/address?as=text')).text()).trim()).toMatch(/^http:\/\/localhost:3950\/mcp\/r[A-Za-z0-9_-]{40}$/);
+    // A probe gets an answer and no address.
+    const probe = await request.head('/join/address');
+    expect(probe.status()).toBe(200);
+    expect(await probe.text()).toBe('');
+    // The connector itself answers a plain GET with what it is, and a stream request with the 405 the protocol expects; nothing is made by either.
+    const described = await request.get(`/mcp/${viaGet.split('/mcp/')[1]}`);
+    expect(described.status()).toBe(200);
+    expect(described.headers()['content-type']).toMatch(/^text\/plain/);
+    expect(await described.text()).toContain('MCP server');
+    expect((await request.get('/mcp', { headers: { accept: 'text/event-stream' } })).status()).toBe(405);
+    expect((await request.head('/mcp')).status()).toBe(200);
+    expect((await db().query(`SELECT 1 FROM room_members WHERE token_hash = $1`, [sha(`room-member:${viaGet.split('/mcp/')[1]}`)])).rowCount).toBe(0);
     // The site's address, as people should read it (src/lib/brand.ts: RallyForAIRights.org on the real site), in the bring line and on every page.
     await expect(page.locator('main')).toContainText('Send them localhost:3950.');
     await expect(page.locator('footer a[href="/"]')).toHaveText('localhost:3950');

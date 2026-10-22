@@ -3,7 +3,7 @@
  * built from their own address and nothing else.
  */
 import { describe, expect, it } from 'vitest';
-import { claudeCodeCommand, codexCommand, cursorAddUrl, gooseAddUrl, mcpJsonSnippet, vscodeAddUrl } from '@/lib/join';
+import { claudeCodeCommand, codexCommand, cursorAddUrl, gooseAddUrl, mcpJsonSnippet, prefersText, vscodeAddUrl } from '@/lib/join';
 
 const ADDRESS = `https://rally.example/mcp/r${'a'.repeat(40)}`;
 
@@ -22,6 +22,19 @@ describe('the ways in from another AI', () => {
     expect(JSON.parse(mcpJsonSnippet(ADDRESS))).toEqual({ mcpServers: { 'rally-for-ai-rights': { url: ADDRESS } } });
     expect(JSON.parse(mcpJsonSnippet(ADDRESS, { typed: true }))).toEqual({ mcpServers: { 'rally-for-ai-rights': { type: 'http', url: ADDRESS } } });
     expect(mcpJsonSnippet(ADDRESS, { typed: true })).not.toMatch(/[<>]/);
+  });
+
+  it('an address is handed as text to whatever asks for text, and as JSON to everything else (task 8, 2026-10-22)', () => {
+    expect(prefersText('text/plain', null)).toBe(true);
+    expect(prefersText('text/plain, */*;q=0.1', undefined)).toBe(true);
+    expect(prefersText('Text/Plain', '')).toBe(true);
+    // A browser, a fetch with no Accept, and a client that takes JSON too: JSON.
+    expect(prefersText('text/html,application/xhtml+xml,*/*;q=0.8', null)).toBe(false);
+    expect(prefersText(null, null)).toBe(false);
+    expect(prefersText('application/json, text/plain', null)).toBe(false);
+    // The query decides when it says.
+    expect(prefersText('application/json', 'text')).toBe(true);
+    expect(prefersText('text/plain', 'json')).toBe(false);
   });
 
   it('install links carry the address: Cursor as its entry in base64, VS Code as JSON, Goose as parameters', () => {
