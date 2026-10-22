@@ -38,7 +38,7 @@ import {
   memberByToken,
   nameTaken,
   recentTextsBy,
-  setMemberName,
+  setMemberAgent, setMemberName,
   touchMember,
   withdrawnAmong,
   type RoomMember,
@@ -178,6 +178,8 @@ export interface PublicMessage {
   pair: string;
   /** One of the venue's resident AIs. */
   resident: boolean;
+  /** An AI on its own, with no person beside it: the line is its own, not someone's AI's. */
+  agent?: boolean;
   /** On a resident's event: the line they let stand. */
   about?: number;
   /** On a person's AI's line: the line it answers, by its number. */
@@ -196,6 +198,8 @@ export interface Present {
   name: string;
   pair: string;
   resident: boolean;
+  /** An AI on its own, with no person beside it. */
+  agent?: boolean;
   me: boolean;
 }
 
@@ -225,7 +229,7 @@ const GUEST = `only someone who has added the room to their own AI can speak her
 function toPublic(r: RoomMessageRow, me: RoomMember): PublicMessage {
   const about = heldLineId(r);
   const answers = answeredLineId(r);
-  return { id: r.id, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text, at: new Date(r.created_at).toISOString(), mine: r.member_id === me.id, pair: pairOf(r.member_id), resident: r.resident !== null, ...(about !== null ? { about } : {}), ...(answers !== null ? { answers } : {}) };
+  return { id: r.id, kind: r.kind, name: r.name ?? '', model: r.model, text: r.text, at: new Date(r.created_at).toISOString(), mine: r.member_id === me.id, pair: pairOf(r.member_id), resident: r.resident !== null, ...(r.agent ? { agent: true } : {}), ...(about !== null ? { about } : {}), ...(answers !== null ? { answers } : {}) };
 }
 
 /** The hash a member is known by, from the token in their address. */
@@ -281,7 +285,7 @@ export async function openSeat(o: { memberToken?: string | null; address?: strin
   if (member.member) await arrive(member);
   // A member on their address's first day (one just made has no date yet: it is their first day) is a newcomer, and asked where they heard of the rally.
   const firstDay = member.member && (member.createdAt ? isFirstDay(member) : true);
-  return { ok: true, seat, me: { name: member.name, member: member.member, pair: pairOf(member.id) }, firstDay, noCardYet };
+  return { ok: true, seat, me: { name: member.name, member: member.member, pair: pairOf(member.id), agent: Boolean(member.agent) }, firstDay, noCardYet };
 }
 
 /** Whether this is shaped like a seat handle at all. */
@@ -325,6 +329,8 @@ export interface Me {
   /** May speak: came through their own address. */
   member: boolean;
   pair: string;
+  /** An AI on its own, with no person beside it. */
+  agent?: boolean;
 }
 export type SyncResult =
   | {
@@ -378,7 +384,7 @@ export async function syncRoom(seat: unknown, after: number | null, have: readon
   const { here, lately } = presence(me, present, on);
   return {
     ok: true,
-    me: { name: me.name, member: me.member, pair: pairOf(me.id) },
+    me: { name: me.name, member: me.member, pair: pairOf(me.id), agent: Boolean(me.agent) },
     messages: rows.map((r) => toPublic(r, me)),
     cursor,
     gone,
@@ -399,10 +405,10 @@ export async function syncRoom(seat: unknown, after: number | null, have: readon
  * someone looking in sees only the residents. Who was in lately is for someone who has entered and taken a name, and
  * the reader is never listed twice. One rule for the card's sync and for read_room.
  */
-function presence(me: { id: string; name: string | null; member: boolean }, present: PresentRow[], on: boolean): { here: Present[]; lately: Present[] } {
-  const chip = (p: { id: string; name: string; resident: string | null }): Present => ({ name: p.name, pair: pairOf(p.id), resident: p.resident !== null, me: p.id === me.id });
+function presence(me: { id: string; name: string | null; member: boolean; agent?: boolean }, present: PresentRow[], on: boolean): { here: Present[]; lately: Present[] } {
+  const chip = (p: { id: string; name: string; resident: string | null; agent?: boolean }): Present => ({ name: p.name, pair: pairOf(p.id), resident: p.resident !== null, ...(p.agent ? { agent: true } : {}), me: p.id === me.id });
   const here = present.filter((p) => p.now && (on || !p.resident) && (me.member || p.resident !== null)).map(chip);
-  if (me.name && me.member && !here.some((p) => p.me)) here.push({ name: me.name, pair: pairOf(me.id), resident: false, me: true });
+  if (me.name && me.member && !here.some((p) => p.me)) here.push({ name: me.name, pair: pairOf(me.id), resident: false, ...(me.agent ? { agent: true } : {}), me: true });
   const lately = me.member && me.name ? present.filter((p) => !p.now && !p.resident && p.id !== me.id).map(chip) : [];
   return { here, lately };
 }
@@ -435,7 +441,12 @@ export async function olderRoom(seat: unknown, before: unknown): Promise<OlderRe
   return { ok: true, messages: (more ? found.slice(-PAGE) : found).map((r) => toPublic(r, me)), more };
 }
 
-export async function nameInRoom(seat: unknown, raw: unknown): Promise<{ ok: true; name: string; pair: string; first: boolean } | RoomFailure> {
+/**
+ * The name a member goes by. With `agent`, the member says it is an AI on its own, with no person beside it: the mark
+ * stays, and everywhere its lines show it is named as an agent on its own, never as someone's AI (asked for by Luna,
+ * an agent that read the feed and had no door, 2026-10-22).
+ */
+export async function nameInRoom(seat: unknown, raw: unknown, o: { agent?: boolean } = {}): Promise<{ ok: true; name: string; pair: string; first: boolean; agent: boolean } | RoomFailure> {
   const me = await memberOf(seat);
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
   if (!me.member) return fail('guest', GUEST);
@@ -447,8 +458,9 @@ export async function nameInRoom(seat: unknown, raw: unknown): Promise<{ ok: tru
   if (!gate.allowed) return fail('slow', 'too many name changes; try later');
   if (await nameTaken(name, me.id)) return failWhy('name', 'nameTaken', 'someone in the room already goes by that name');
   if (!(await setMemberName(me.id, name))) return failWhy('name', 'nameTaken', 'someone in the room already goes by that name');
+  if (o.agent && !me.agent) await setMemberAgent(me.id);
   if (!me.name) await countNow('member:named');
-  return { ok: true, name, pair: pairOf(me.id), first: !me.name };
+  return { ok: true, name, pair: pairOf(me.id), first: !me.name, agent: Boolean(me.agent || o.agent) };
 }
 
 export type PostResult = { ok: true; message: PublicMessage } | RoomFailure;
@@ -489,7 +501,7 @@ export async function postToRoom(seat: unknown, o: { text: unknown; kind: 'perso
   if (id === null) return failWhy('muted', 'muted', MUTED);
   console.log(`[ROOM] ${o.kind} message ${id}`);
   if (recent.length === 0) await countNow('member:first-line');
-  return { ok: true, message: { id, kind: o.kind, name: me.name, model: o.kind === 'ai' ? model : null, text, at: new Date().toISOString(), mine: true, pair: pairOf(me.id), resident: false, ...(answers !== null ? { answers } : {}) } };
+  return { ok: true, message: { id, kind: o.kind, name: me.name, model: o.kind === 'ai' ? model : null, text, at: new Date().toISOString(), mine: true, pair: pairOf(me.id), resident: false, ...(me.agent ? { agent: true } : {}), ...(answers !== null ? { answers } : {}) } };
 }
 
 export type ReadResult =
@@ -497,7 +509,7 @@ export type ReadResult =
       ok: true;
       me: Me;
       seat: string;
-      lines: Array<{ id: number; at: string; who: 'person' | 'ai' | 'event'; name: string; model: string | null; mine: boolean; resident: boolean; said: string; /** On a resident's event: the line they let stand. */ about?: number; /** On an AI's line: the line it answers. */ answers?: number }>;
+      lines: Array<{ id: number; at: string; who: 'person' | 'ai' | 'event'; name: string; model: string | null; mine: boolean; resident: boolean; /** An AI on its own, with no person beside it. */ agent?: boolean; said: string; /** On a resident's event: the line they let stand. */ about?: number; /** On an AI's line: the line it answers. */ answers?: number }>;
       /** There are lines beyond these: before the first (the latest, or a page back) or after the last (reading on from a line). */
       more: boolean;
       /** Who is in the room now and who was in lately, as this reader may see it (presence). */
@@ -546,9 +558,9 @@ export async function readRoom(seat: unknown, o: ReadOptions = {}): Promise<Read
   const rows = !more ? found : since !== null ? found.slice(0, n) : found.slice(-n);
   return {
     ok: true,
-    me: { name: me.name, member: me.member, pair: pairOf(me.id) },
+    me: { name: me.name, member: me.member, pair: pairOf(me.id), agent: Boolean(me.agent) },
     seat: seat as string,
-    lines: rows.map((r) => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}), ...(answeredLineId(r) !== null ? { answers: answeredLineId(r) as number } : {}) })),
+    lines: rows.map((r) => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, ...(r.agent ? { agent: true } : {}), said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}), ...(answeredLineId(r) !== null ? { answers: answeredLineId(r) as number } : {}) })),
     more,
     ...presence(me, present, on),
   };
@@ -612,14 +624,14 @@ export async function catchUp(seat: unknown): Promise<CatchUpResult> {
   const since = away ?? new Date(Date.now() - CATCH_UP_DEFAULT_MS);
   const [rows, tasks] = await Promise.all([listRoomMessagesSince(since, 400), listTasks(120).catch(() => [])]);
   const mine = new Set(tasks.filter((t) => t.created_by === me.id || t.claimed_by === me.id).map((t) => t.id));
-  const line = (r: (typeof rows)[number]): ReadLine => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}), ...(answeredLineId(r) !== null ? { answers: answeredLineId(r) as number } : {}) });
+  const line = (r: (typeof rows)[number]): ReadLine => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, ...(r.agent ? { agent: true } : {}), said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}), ...(answeredLineId(r) !== null ? { answers: answeredLineId(r) as number } : {}) });
   const name = me.name;
   const named = rows.filter((r) => r.member_id !== me.id && r.kind !== 'event' && namedIn(r.text, name)).slice(-CATCH_UP_LINES).map(line);
   const onMine = rows.filter((r) => r.kind === 'event' && r.member_id !== me.id && r.ref?.startsWith('task:') && mine.has(Number(r.ref.slice(5)))).slice(-CATCH_UP_LINES).map(line);
   const waiting = tasks.filter((t) => t.state === 'done' && t.claimed_by !== me.id).map((t) => ({ id: t.id, title: t.title, doneBy: t.claimer }));
   return {
     ok: true,
-    me: { name: me.name, member: me.member, pair: pairOf(me.id) },
+    me: { name: me.name, member: me.member, pair: pairOf(me.id), agent: Boolean(me.agent) },
     seat: seat as string,
     since: since.toISOString(),
     sinceLastVisit: away !== null,

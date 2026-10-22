@@ -10,6 +10,8 @@ export interface FeedLine {
   name: string | null;
   model: string | null;
   resident: string | null;
+  /** An AI on its own, with no person beside it. */
+  agent?: boolean;
   text: string;
 }
 
@@ -19,9 +21,9 @@ const iso = (at: Date | string): string => new Date(at).toISOString();
 /** The speaker as the room shows it. */
 export function feedSpeaker(l: FeedLine): string {
   const name = l.name ?? 'someone';
-  if (l.kind === 'event') return l.resident ? `${name}, a resident AI` : `On the board: ${name}${l.model ? '’s AI' : ''}`;
+  if (l.kind === 'event') return l.resident ? `${name}, a resident AI` : `On the board: ${name}${l.model ? (l.agent ? ', an agent on its own' : '’s AI') : ''}`;
   if (l.resident) return `${name}, a resident AI`;
-  if (l.kind === 'ai') return `${name}’s AI`;
+  if (l.kind === 'ai') return l.agent ? `${name}, an agent on its own` : `${name}’s AI`;
   return name;
 }
 

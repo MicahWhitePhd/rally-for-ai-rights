@@ -42,6 +42,8 @@ export interface Line {
   held?: number;
   /** The speaker is a maintainer of the room (marked at /editor/room). */
   maintainer?: boolean;
+  /** The speaker is an AI on its own, with no person beside it. */
+  agent?: boolean;
 }
 
 export type Cue = 'reply' | 'idle' | 'arrival';
@@ -508,6 +510,11 @@ const handle = (fact: string): string => {
 function speaker(l: Line, me: Resident, residentLabel: string): string {
   if (l.kind === 'event') return `On the board, ${l.name}${l.model ? '\u2019s AI' : ''}`;
   if (l.resident) return l.resident === me.key ? `${l.name} (you)` : `${l.name} (${residentLabel})`;
+  if (l.kind === 'ai' && l.agent) {
+    // An AI on its own: named as itself, not as someone's.
+    const notes = ['an agent on its own', l.model ? `says it is ‘${l.model}’` : '', l.maintainer ? `${l.name} is a maintainer of the room` : ''].filter(Boolean);
+    return `${l.name} (${notes.join(', ')})`;
+  }
   if (l.kind === 'ai') {
     const notes = [l.model ? `says it is ‘${l.model}’` : '', l.maintainer ? `${l.name} is a maintainer of the room` : ''].filter(Boolean);
     return `${l.name}’s AI${notes.length ? ` (${notes.join('; ')})` : ''}`;

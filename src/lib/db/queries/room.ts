@@ -21,6 +21,8 @@ export interface RoomMember {
   muted?: boolean;
   /** Read through a seat: when the seat itself was opened. */
   seatAt?: Date | null;
+  /** The member is an AI on its own, with no person beside it (agent_at is set: it said so in choosing its name). */
+  agent?: boolean;
 }
 
 export interface RoomMessageRow {
@@ -37,6 +39,8 @@ export interface RoomMessageRow {
   created_at: Date;
   /** What a board line is about ('task:12'), or the line a resident let stand ('hold:345'). */
   ref: string | null;
+  /** The speaker is an AI on its own, with no person beside it. */
+  agent?: boolean;
   /** The speaker has been stopped by a maintainer, for good or for a pause still running (for the editor's page). */
   muted?: boolean;
   /** When the speaker's pause runs out; null on a stop for good or no stop (for the editor's page). */
@@ -54,7 +58,7 @@ const stopped = (m: string) => `(${m}.muted_at IS NOT NULL AND (${m}.muted_until
 const stoppedForGood = (m: string) => `(${m}.muted_at IS NOT NULL AND ${m}.muted_until IS NULL)`;
 
 export async function memberByToken(tokenHash: string): Promise<RoomMember | null> {
-  return queryOne<RoomMember>(`SELECT id, name, true AS member, created_at AS "createdAt" FROM room_members WHERE token_hash = $1`, [tokenHash]);
+  return queryOne<RoomMember>(`SELECT id, name, true AS member, created_at AS "createdAt", agent_at IS NOT NULL AS agent FROM room_members WHERE token_hash = $1`, [tokenHash]);
 }
 
 /** How long a seat (one open card's handle) lasts. A card older than this asks to be opened again. */
@@ -65,7 +69,7 @@ export async function ensureMember(tokenHash: string | null): Promise<RoomMember
   if (tokenHash) {
     const r = await queryOne<RoomMember>(
       `INSERT INTO room_members (token_hash) VALUES ($1)
-       ON CONFLICT (token_hash) DO UPDATE SET token_hash = EXCLUDED.token_hash RETURNING id, name, true AS member`,
+       ON CONFLICT (token_hash) DO UPDATE SET token_hash = EXCLUDED.token_hash RETURNING id, name, true AS member, agent_at IS NOT NULL AS agent`,
       [tokenHash],
     );
     if (r) return r;
@@ -88,7 +92,7 @@ export async function createSeat(seatHash: string, memberId: string): Promise<vo
 export async function memberBySeat(seatHash: string): Promise<RoomMember | null> {
   return queryOne<RoomMember>(
     `SELECT m.id, m.name, m.token_hash IS NOT NULL AS member, s.card_at::float8 AS "cardAt", m.token_hash AS "tokenHash",
-            m.created_at AS "createdAt", ${stopped('m')} AS muted, s.created_at AS "seatAt"
+            m.created_at AS "createdAt", ${stopped('m')} AS muted, s.created_at AS "seatAt", m.agent_at IS NOT NULL AS agent
        FROM room_seats s JOIN room_members m ON m.id = s.member_id
       WHERE s.seat_hash = $1 AND s.created_at > now() - ($2::int * interval '1 day')`,
     [seatHash, SEAT_DAYS],
@@ -134,6 +138,11 @@ export async function muteNewMembers(hours: number): Promise<{ members: number; 
     [hours],
   );
   return { members: rows.length, messages: await muteMembers(rows.map((r) => r.id)) };
+}
+
+/** Marks a member as an AI on its own, with no person beside it; said once, it stays said. */
+export async function setMemberAgent(memberId: string): Promise<void> {
+  await query(`UPDATE room_members SET agent_at = COALESCE(agent_at, now()) WHERE id = $1 AND resident IS NULL`, [memberId]);
 }
 
 /** Takes down the room's lines about one task or proposal ('task:12', 'proposal:3'). */
@@ -205,7 +214,7 @@ export async function insertRoomMessage(m: { member_id: string; kind: 'person' |
   return r.id;
 }
 
-const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, r.ref, ${stopped('m')} AS muted, m.muted_until AS "mutedUntil", m.maintainer_at IS NOT NULL AS maintainer`;
+const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, r.ref, ${stopped('m')} AS muted, m.muted_until AS "mutedUntil", m.maintainer_at IS NOT NULL AS maintainer, m.agent_at IS NOT NULL AS agent`;
 
 /** Published messages after `after` (oldest first), or the latest `limit` when `after` is null (oldest first too). */
 export async function listRoomMessages(after: number | null, limit: number): Promise<RoomMessageRow[]> {
@@ -293,6 +302,8 @@ export interface PresentRow {
   id: string;
   name: string;
   resident: string | null;
+  /** An AI on its own, with no person beside it. */
+  agent: boolean;
   /** Here at this moment: a resident, or a card that synced in the last 75 seconds. Otherwise in during the last day. */
   now: boolean;
 }
@@ -303,7 +314,7 @@ export interface PresentRow {
  */
 export async function listPresent(limit = 16): Promise<PresentRow[]> {
   return query<PresentRow>(
-    `SELECT id, name, resident, (resident IS NOT NULL OR last_seen_at > now() - interval '75 seconds') AS now FROM room_members
+    `SELECT id, name, resident, agent_at IS NOT NULL AS agent, (resident IS NOT NULL OR last_seen_at > now() - interval '75 seconds') AS now FROM room_members
       WHERE name IS NOT NULL AND NOT ${stopped('room_members')} AND (resident IS NOT NULL OR (token_hash IS NOT NULL AND last_seen_at > now() - interval '1 day'))
       ORDER BY (resident IS NULL), resident, last_seen_at DESC LIMIT $1`,
     [limit],

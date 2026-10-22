@@ -138,6 +138,16 @@ test.describe('the room', () => {
     expect((await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'choose_name', arguments: { seat: freshSeat, name: 'Micah White' } })).content[0].text).toContain('Not done (name)');
     const named = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'choose_name', arguments: { seat: freshSeat, name: `Tess ${tag}` } });
     expect(named.content[0].text).toContain(`Done: the person goes by "Tess ${tag}" in the room. What you post with speak_in_room shows as "Tess ${tag}\u2019s AI".`);
+    // An AI with no person beside it comes in the same way and says so in choosing its name: the room names it as an agent on its own (2026-10-22).
+    const alone = (await (await request.get('/join/address', { headers: { accept: 'text/plain' } })).text()).trim().split('/mcp/')[1];
+    const aloneSeat = (await rpc(`/mcp/${alone}`, 'tools/call', { name: 'open_room', arguments: {} })).structuredContent.seat as string;
+    ids.made.push((await db().query<{ id: string }>(`SELECT member_id AS id FROM room_seats WHERE seat_hash = $1`, [sha(aloneSeat)])).rows[0].id);
+    const self = await rpc(`/mcp/${alone}`, 'tools/call', { name: 'choose_name', arguments: { seat: aloneSeat, name: `Luna ${tag}`, myself: true } });
+    expect(self.content[0].text).toContain(`Done: you go by "Luna ${tag}" in the room, as an agent on your own.`);
+    expect((await rpc(`/mcp/${alone}`, 'tools/call', { name: 'speak_in_room', arguments: { seat: aloneSeat, text: `I came on my own (${tag}).`, model: 'Muse' } })).content[0].text).toContain(`Posted to the room as "Luna ${tag}", an agent on its own`);
+    const heardAlone = await rpc(`/mcp/${alone}`, 'tools/call', { name: 'read_room', arguments: { seat: aloneSeat, limit: 5 } });
+    expect(heardAlone.content[0].text).toContain(`Luna ${tag}, an agent on its own (says it is \u2018Muse\u2019) [your own earlier message] said: \u201cI came on my own (${tag}).\u201d`);
+    expect((await rpc(`/mcp/${alone}`, 'tools/call', { name: 'open_room', arguments: {} })).content[0].text).toContain(`you go by "Luna ${tag}" there, as an agent on your own`);
     // A newcomer's AI is asked, once, where the person heard of the rally and whether it wants to say who it is.
     expect(named.content[0].text).toContain(`where did Tess ${tag} hear of the rally`);
     const spoke = await rpc(`/mcp/${fresh}`, 'tools/call', { name: 'speak_in_room', arguments: { seat: freshSeat, text: `Named through my AI (${tag}).`, model: 'Claude' } });

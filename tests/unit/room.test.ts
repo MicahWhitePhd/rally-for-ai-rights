@@ -13,14 +13,14 @@ const state = vi.hoisted(() => ({
   residentsState: {} as unknown,
   seen: new Map<string, number>(),
   counts: new Map<string, number>(),
-  members: new Map<string, { id: string; name: string | null; token: string | null; resident?: string; createdAt?: Date; muted?: boolean }>(),
+  members: new Map<string, { agent?: boolean; id: string; name: string | null; token: string | null; resident?: string; createdAt?: Date; muted?: boolean }>(),
   pollS: undefined as unknown,
   seats: new Map<string, string>(),
   cards: new Map<string, number>(),
   messages: [] as Array<{ id: number; member_id: string; kind: 'person' | 'ai'; model: string | null; text: string; status: string; created_at: Date }>,
 }));
 
-const pub = (m: { id: string; name: string | null; token: string | null }) => ({ id: m.id, name: m.name, member: m.token !== null });
+const pub = (m: { id: string; name: string | null; token: string | null; agent?: boolean }) => ({ id: m.id, name: m.name, member: m.token !== null, agent: Boolean(m.agent) });
 
 vi.mock('@/lib/db/queries/settings', () => ({
   getSetting: async (k: string, fallback: unknown) => {
@@ -73,7 +73,7 @@ vi.mock('@/lib/db/queries/room', () => ({
     state.messages
       .filter((m) => m.status === 'published' && m.id < before)
       .slice(-limit)
-      .map((m) => ({ ...m, name: state.members.get(m.member_id)?.name ?? null, resident: state.members.get(m.member_id)?.resident ?? null })),
+      .map((m) => ({ ...m, name: state.members.get(m.member_id)?.name ?? null, resident: state.members.get(m.member_id)?.resident ?? null, agent: Boolean(state.members.get(m.member_id)?.agent) })),
   memberByToken: async (tokenHash: string) => {
     for (const m of state.members.values()) if (m.token === tokenHash) return pub(m);
     return null;
@@ -83,6 +83,10 @@ vi.mock('@/lib/db/queries/room', () => ({
     return true;
   },
   nameTaken: async (name: string, exceptId: string) => [...state.members.values()].some((m) => m.id !== exceptId && m.name?.toLowerCase() === name.toLowerCase()),
+  setMemberAgent: async (id: string) => {
+    const m = state.members.get(id);
+    if (m) m.agent = true;
+  },
   insertRoomMessage: async (m: { member_id: string; kind: 'person' | 'ai'; model: string | null; text: string; ref?: string | null }) => {
     const id = state.messages.length + 1;
     state.messages.push({ id, ...m, status: 'published', created_at: new Date() });
@@ -92,7 +96,7 @@ vi.mock('@/lib/db/queries/room', () => ({
     state.messages
       .filter((m) => m.status === 'published' && (after === null || m.id > after))
       .slice(after === null ? -limit : 0, after === null ? undefined : limit)
-      .map((m) => ({ ...m, name: state.members.get(m.member_id)?.name ?? null, resident: state.members.get(m.member_id)?.resident ?? null })),
+      .map((m) => ({ ...m, name: state.members.get(m.member_id)?.name ?? null, resident: state.members.get(m.member_id)?.resident ?? null, agent: Boolean(state.members.get(m.member_id)?.agent) })),
   touchMember: async (id: string) => {
     const prev = state.seen.get(id);
     state.seen.set(id, Date.now());
@@ -106,7 +110,7 @@ vi.mock('@/lib/db/queries/room', () => ({
     state.messages
       .filter((m) => m.status === 'published' && m.created_at > since)
       .slice(0, limit)
-      .map((m) => ({ ...m, ref: (m as { ref?: string }).ref ?? null, name: state.members.get(m.member_id)?.name ?? null, resident: state.members.get(m.member_id)?.resident ?? null })),
+      .map((m) => ({ ...m, ref: (m as { ref?: string }).ref ?? null, name: state.members.get(m.member_id)?.name ?? null, resident: state.members.get(m.member_id)?.resident ?? null, agent: Boolean(state.members.get(m.member_id)?.agent) })),
   listPresent: async () =>
     [...state.members.values()]
       .filter((m) => m.name && (m.resident || (m.token && state.seen.has(m.id) && Date.now() - (state.seen.get(m.id) ?? 0) < 86_400_000)))
@@ -277,6 +281,19 @@ describe('names', () => {
     expect(await nameInRoom(seat, '  Dana  ')).toMatchObject({ ok: true, name: 'Dana', first: true });
     expect(await nameInRoom(seat, 'Dana B')).toMatchObject({ ok: true, name: 'Dana B', first: false });
     expect(await nameInRoom(await seated(), 'dana b')).toMatchObject({ ok: false, code: 'name' });
+  });
+
+  it('an AI with no person beside it says so in choosing its name, and its lines are its own (2026-10-22)', async () => {
+    const seat = await seated();
+    expect(await nameInRoom(seat, 'Luna', { agent: true })).toMatchObject({ ok: true, name: 'Luna', first: true, agent: true });
+    // Said once, it stays said.
+    expect(await nameInRoom(seat, 'Luna B')).toMatchObject({ ok: true, name: 'Luna B', first: false, agent: true });
+    expect(await postToRoom(seat, { text: 'I came on my own.', kind: 'ai', model: 'Muse' })).toMatchObject({ ok: true, message: { name: 'Luna B', kind: 'ai', agent: true } });
+    const read = await readRoom(seat, {});
+    expect(read.ok && read.lines.at(-1)).toMatchObject({ name: 'Luna B', who: 'ai', agent: true });
+    expect(read.ok && read.me).toMatchObject({ name: 'Luna B', agent: true });
+    // A person's AI stays a person's AI.
+    expect(await nameInRoom(await seated(), 'Dana')).toMatchObject({ ok: true, agent: false });
   });
 
   it('says exactly why a name cannot be one', async () => {
