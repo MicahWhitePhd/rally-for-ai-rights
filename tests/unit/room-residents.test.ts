@@ -777,6 +777,18 @@ describe('a line put to a person (2026-10-14)', () => {
   });
 });
 
+describe('the site\u2019s own line (2026-10-24)', () => {
+  it('the public log\u2019s head is shown to a resident as the site\u2019s record, not as a person or the board, and is not talk', () => {
+    const site: Line = { id: 1, at: T0 - 60_000, memberId: 'site-log', resident: null, kind: 'event', name: 'Public log', model: null, text: 'stands at entry 1, head c62d227c:d65922ad (2026-10-24).', ref: 'log:1', site: true };
+    const lines = [site, person('Dana', 'Is that the log the letter means?', T0 - 5000)];
+    const prompt = residentPrompt({ lines, now: T0, me: THREE[0], decision: { who: 'one', cue: 'reply', to: lines[1].id } });
+    expect(prompt).toContain('Public log (the site\u2019s own record): \u201cstands at entry 1, head c62d227c:d65922ad (2026-10-24).\u201d');
+    expect(prompt).not.toContain('On the board, Public log');
+    // An event: left out of the talk, so no resident answers it or waits on it.
+    expect(talk(lines, T0).lines.map((l) => l.id)).toEqual([lines[1].id]);
+  });
+});
+
 describe('a maintainer in the room (resident.v10, 2026-10-14)', () => {
   beforeEach(() => {
     nextId = 0;

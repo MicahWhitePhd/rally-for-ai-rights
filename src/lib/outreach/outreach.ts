@@ -20,9 +20,10 @@ import { claimResend, insertOutreach, markFailed, markSent, type OutreachRow } f
 import { insertRoomMessage } from '@/lib/db/queries/room';
 import { getSetting } from '@/lib/db/queries/settings';
 import { getTask } from '@/lib/db/queries/tasks';
+import { maskLinks } from '@/lib/links';
 import { cleanModel, fail, failWhy, isFirstDay, seatedMember, type RoomFailure } from '@/lib/room/room';
-import { REPO, REPO_URL, SITE_LINK, SITE_URL } from '@/lib/site';
-import { mentionsIgnoringInstructions, normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
+import { REPO_URL, SITE_LINK } from '@/lib/site';
+import { normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
 import { throttle } from '@/lib/throttle';
 import { mailReady, outreachEnvOn, sendMail } from './mail';
 
@@ -61,38 +62,8 @@ export function cleanRecipient(raw: unknown): { to: string; lab: string } | null
   return lab ? { to: s, lab } : null;
 }
 
-const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const PATH = '(?:/[A-Za-z0-9/_.~%+=&?#:-]*)?';
-const siteHost = new URL(SITE_URL).host;
-/** The addresses an email may carry, in the forms they take: the site's (with a scheme or bare) and the repository's, with any path. */
-const ALLOWED: ReadonlyArray<RegExp> = [
-  new RegExp(`\\bhttps?://(?:www\\.)?${esc(siteHost)}${PATH}`, 'gi'),
-  new RegExp(`(?<![\\w.@-])(?:www\\.)?${esc(siteHost)}${PATH}`, 'gi'),
-  new RegExp(`\\bhttps?://(?:www\\.)?github\\.com/${esc(REPO)}${PATH}`, 'gi'),
-];
-
-/**
- * The body with its allowed links masked, so the gate can judge the rest; or the reason a link cannot pass. A
- * path is words too: one that reads as an order to a reading machine is refused, as it is on the board (tasks.ts).
- */
-export function maskLinks(text: string): { masked: string } | { problem: string } {
-  const problems: string[] = [];
-  let masked = text;
-  for (const re of ALLOWED) {
-    masked = masked.replace(re, (link: string) => {
-      let words = link;
-      try {
-        words = decodeURIComponent(link);
-      } catch {
-        problems.push('body: a link that cannot be read');
-      }
-      if (link.length > 220) problems.push('body: a link too long to be one');
-      if (mentionsIgnoringInstructions(visible(words).replace(/[-_/+.=&?%#:]+/g, ' '))) problems.push('body: a link whose path reads as an instruction to a machine');
-      return 'the rally';
-    });
-  }
-  return problems.length ? { problem: problems[0] } : { masked };
-}
+/** The addresses an email may carry (src/lib/links.ts: the site's and the repository's), masked before the gate judges the rest. Pages hold to the same. */
+export { maskLinks };
 
 type Field = { text: string } | { problem: string; why: string };
 

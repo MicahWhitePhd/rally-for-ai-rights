@@ -15,6 +15,7 @@ import { budgetAllows, envHardPause, isPaused } from '@/lib/budget';
 import { query } from '@/lib/db';
 import { lastPersonLine, proposalsJobSeenAt, residentsLastLine } from '@/lib/db/queries/stats';
 import { proposalsEnvOn } from '@/lib/build/propose';
+import { logHead } from '@/lib/publiclog/head';
 import { residentsOn } from '@/lib/room/residents-state';
 
 export const runtime = 'nodejs';
@@ -29,15 +30,16 @@ export async function GET(request: Request): Promise<Response> {
   const headers = { 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' };
   try {
     // The newest columns: if db/schema.sql was not applied after they were added, this fails. Add new ones here too.
-    await query('SELECT m.muted_at, m.muted_until, m.maintainer_at, m.away_from, m.lab, r.ref, p.approved_at, g.estimated, c.n, o.provider_id, rr.provider_id FROM room_members m, room_messages r, room_proposals p, generation_log g, room_counts c, room_outreach o, room_outreach_replies rr LIMIT 0');
+    await query('SELECT m.muted_at, m.muted_until, m.maintainer_at, m.away_from, m.lab, m.site, r.ref, p.approved_at, g.estimated, c.n, o.provider_id, rr.provider_id, lh.hash FROM room_members m, room_messages r, room_proposals p, generation_log g, room_counts c, room_outreach o, room_outreach_replies rr, room_log_heads lh LIMIT 0');
   } catch (err) {
     console.error('[HEALTH] database', (err as Error)?.message);
     return new Response('database unreachable\n', { status: 503, headers });
   }
   if (new URL(request.url).searchParams.get('deep') !== '1') return new Response('ok\n', { headers });
   const now = Date.now();
-  const [index, paused, budget, on, residents, person, jobSeen] = await Promise.all([codeIndex(), isPaused(), budgetAllows(0), residentsOn(), residentsLastLine(), lastPersonLine(), proposalsJobSeenAt()]);
+  const [index, paused, budget, on, residents, person, jobSeen, log] = await Promise.all([codeIndex(), isPaused(), budgetAllows(0), residentsOn(), residentsLastLine(), lastPersonLine(), proposalsJobSeenAt(), logHead()]);
   const warn: string[] = [];
+  if (!log.ok) warn.push('public log does not verify on this deployment');
   const files = Object.keys(index.files).length;
   if (files === 0) warn.push('code index missing: read_code shows nothing');
   const budgetState = envHardPause() ? 'hard-paused' : paused ? 'paused' : budget.ok ? 'ok' : 'over';
@@ -52,6 +54,8 @@ export async function GET(request: Request): Promise<Response> {
     budget: budgetState,
     residents: { on, lastLine: Object.fromEntries(residents.map((r) => [r.resident, r.at ? new Date(r.at).toISOString() : null])), oldestAgeMin: lastResident === null ? null : Math.round((now - lastResident) / 60_000) },
     proposalsJob: { seenAt: jobSeen ? jobSeen.toISOString() : null, ageHours: jobSeen ? Math.round((now - jobSeen.getTime()) / 360_000) / 10 : null },
+    // The public log as deployed: how many entries and the head's short form (docs/log/RULES.md); no words from it.
+    publicLog: { verified: log.ok, entries: log.entries, head: log.head?.short ?? null },
     warn,
   };
   return Response.json(body, { headers: { 'Cache-Control': 'no-store' } });
