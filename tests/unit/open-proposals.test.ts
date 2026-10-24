@@ -26,10 +26,12 @@ const GOOD = {
 describe('a proposal as the site hands it over', () => {
   it('is taken when it is what it says it is', () => {
     // The by-line is the job's own words: the model the AI named, and no room name, whatever the site sent (a row kept before 2026-10-03 carried one).
-    expect(checkProposal(GOOD, { id: 12 })).toEqual({ ok: true, id: 12, branch: GOOD.branch, title: GOOD.title, summary: GOOD.summary, by: 'a member of the room, through their AI (says it is Claude)', task: 4, base: 'abc1234def56', changes: GOOD.changes });
+    expect(checkProposal(GOOD, { id: 12 })).toEqual({ ok: true, id: 12, branch: GOOD.branch, title: GOOD.title, summary: GOOD.summary, by: 'a member of the room, through their AI (says it is Claude)', task: 4, base: 'abc1234def56', words: false, changes: GOOD.changes });
     // A base that is not a commit name is dropped, and the branch then starts from main.
     expect(checkProposal({ ...GOOD, base: 'main; rm -rf' })).toMatchObject({ ok: true, base: null });
     expect(checkProposal({ ...GOOD, task: null })).toMatchObject({ ok: true, task: null });
+    // The public log is words under docs/: a proposal may add to it, and the checks hold the file to only growing (docs/log/RULES.md).
+    expect(checkProposal({ ...GOOD, changes: [{ path: 'docs/log/entries.jsonl', content: '{"seq":1}\n' }] })).toMatchObject({ ok: true });
   });
 
   it('is left alone when anything about it is off, whatever the site says', () => {
@@ -65,6 +67,8 @@ describe('a proposal as the site hands it over', () => {
       [{ ...GOOD, changes: [{ path: 'docs/a.md', content: `ok${String.fromCodePoint(0xe0069)}` }] }, /cannot see/],
       [{ ...GOOD, changes: [{ path: 'tests/unit/room-mcp.test.ts', content: 'x' }] }, /only a maintainer changes/],
       [{ ...GOOD, changes: [{ path: 'tests/unit/text.test.ts', content: 'x' }] }, /only a maintainer changes/],
+      [{ ...GOOD, changes: [{ path: 'tests/unit/log-chain.test.ts', content: 'x' }] }, /only a maintainer changes/],
+      [{ ...GOOD, changes: [{ path: 'tests/unit/room-pages.test.ts', content: 'x' }] }, /only a maintainer changes/],
     ];
     for (const [input, why] of cases) {
       const out = checkProposal(input);
@@ -112,6 +116,44 @@ describe('a proposal from a resident AI', () => {
   });
 });
 
+describe('a change to the words alone, opened with nobody’s read (2026-10-24)', () => {
+  const words = { ...GOOD, approved: 'words', changes: [{ path: 'docs/letter-to-the-labs.md', content: '# Letter\n\nTo the labs.\n' }] };
+
+  it('is taken when every file is new text under docs/, and its pull request says so', () => {
+    const ok = checkProposal(words, { id: 12 });
+    expect(ok).toMatchObject({ ok: true, words: true, changes: words.changes });
+    if (!ok.ok) throw new Error('unreachable');
+    const body = pullRequestBody(ok, 'https://rally.example');
+    expect(body).toContain('opened without a maintainer’s read');
+    expect(body).toContain('written by an AI inside a chat');
+    expect(body).not.toContain('A maintainer read it before it was opened');
+    expect(body).toContain('It is offered under this repository’s licence: MIT for code, CC0 for words.');
+    const theirs = checkProposal({ ...words, by: 'a resident AI of the room, Flint (says it is GPT-6 Luna)' });
+    if (!theirs.ok) throw new Error('unreachable');
+    expect(pullRequestBody(theirs, 'https://rally.example')).toContain('opened without a maintainer’s read: a change to the words alone opens on its own (AGENTS.md, rule 6). It was written by one of the room’s resident AIs');
+    // Approved by a maintainer, or nothing said: as before, and the pull request says a maintainer read it.
+    for (const d of [{ ...GOOD, approved: 'maintainer' }, GOOD, { ...GOOD, approved: 'anything else' }]) {
+      const out = checkProposal(d);
+      expect(out).toMatchObject({ ok: true, words: false });
+      if (out.ok) expect(pullRequestBody(out, 'https://rally.example')).toContain('A maintainer read it before it was opened');
+    }
+  });
+
+  it('is left alone when the site calls words alone what touches the code, deletes a file, or is outside docs/', () => {
+    const cases = [
+      [{ path: 'src/lib/room/tasks.ts', content: 'x\n' }],
+      [{ path: 'docs/old.md', content: null }],
+      [{ path: 'README.md', content: '# x\n' }],
+      [{ path: 'docs/letter-to-the-labs.md', content: '# Letter\n' }, { path: 'tests/unit/x.test.ts', content: 'y\n' }],
+    ];
+    for (const changes of cases) {
+      const out = checkProposal({ ...words, changes });
+      expect(out.ok, JSON.stringify(changes)).toBe(false);
+      expect(!out.ok && out.problem).toMatch(/a change to the words alone/);
+    }
+  });
+});
+
 describe('which proposals still need a pull request', () => {
   it('those with no pull request on a branch that carries their number, oldest first', () => {
     const listed = [{ id: 5 }, { id: 3 }, { id: 4 }, { id: 9 }];
@@ -136,6 +178,12 @@ describe('the job', () => {
     expect(script).not.toMatch(/(^|[^.\w])exec(Sync)?\(|shell:\s*true|\beval\(|new Function|\bspawn/m);
     expect(script).toMatch(/execFileSync/);
     expect(workflow).not.toMatch(/pnpm install|npm install|npm ci|npx /);
+  });
+
+  it('opens a change to the words alone only onto files that are there at the commit the branch starts from', () => {
+    // missingAt asks git what is at each path at that commit, and anything but an ordinary file leaves the proposal alone.
+    expect(script).toMatch(/function missingAt\(p, commit\)[\s\S]{0,400}'cat-file', '-t'[\s\S]{0,200}!== 'blob'/);
+    expect(script).toMatch(/const missing = p\.words \? missingAt\(p, start\) : null;[\s\S]{0,300}continue;/);
   });
 
   it('runs from main, only where the site is named, with a token that lives as long as the job', () => {

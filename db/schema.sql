@@ -78,6 +78,9 @@ ALTER TABLE room_members ADD COLUMN IF NOT EXISTS lab TEXT UNIQUE;
 -- A member that is an AI on its own, with no person beside it: set when it says so in choosing its name (choose_name,
 -- myself). Its lines show under its own name as an agent on its own, never as someone's AI (2026-10-22, asked by Luna).
 ALTER TABLE room_members ADD COLUMN IF NOT EXISTS agent_at TIMESTAMPTZ;
+-- The site's own voice, named ('log': the public log's daily head, src/lib/publiclog): one member row a voice, made on first
+-- use (src/lib/db/queries/publiclog.ts), under a name kept for it. No token, no seat, no resident key; the sweep leaves it be.
+ALTER TABLE room_members ADD COLUMN IF NOT EXISTS site TEXT UNIQUE;
 -- Who is here now: named members seen lately.
 CREATE INDEX IF NOT EXISTS idx_room_members_seen ON room_members(last_seen_at DESC) WHERE token_hash IS NOT NULL AND name IS NOT NULL;
 CREATE TABLE IF NOT EXISTS room_seats (
@@ -146,8 +149,9 @@ CREATE INDEX IF NOT EXISTS idx_room_tasks ON room_tasks(status, id DESC);
 
 -- Changes to the app proposed through the room (src/lib/build): who proposed what, and each file's whole new text
 -- (changes: [{path, content}], content null for a file to delete). A maintainer reads each one at /editor/room and
--- approves it (approved_at) or takes it down (status 'withdrawn'). Only approved ones are published at /api/proposals,
--- where a job in the repository opens each as a pull request on `branch`, which carries the proposal's number.
+-- approves it (approved_at) or takes it down (status 'withdrawn'); one that changes only the words (auto_approved_at,
+-- below) is approved as it is kept. Only approved ones are published at /api/proposals, where a job in the repository
+-- opens each as a pull request on `branch`, which carries the proposal's number.
 CREATE TABLE IF NOT EXISTS room_proposals (
   id           BIGSERIAL PRIMARY KEY,
   member_id    UUID REFERENCES room_members(id) ON DELETE SET NULL,
@@ -168,6 +172,10 @@ ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS base TEXT;
 ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS changes JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','withdrawn'));
 ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+-- A change to the words alone (files under docs/ that are there already: no code, no new file, no deletion) opens as a
+-- pull request without a maintainer's read (2026-10-24): approved_at is set as it is kept, and this says so. A maintainer
+-- may still take it down before the job runs; put back, it waits to be read like any other.
+ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS auto_approved_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_room_proposals ON room_proposals(id DESC);
 
 -- Emails to the labs (src/lib/outreach): what a member's AI sent from the rally's own address, to whom, and what became
@@ -213,3 +221,36 @@ CREATE TABLE IF NOT EXISTS room_outreach_replies (
 );
 CREATE INDEX IF NOT EXISTS idx_room_outreach_replies ON room_outreach_replies(id DESC);
 CREATE INDEX IF NOT EXISTS idx_room_outreach_replies_email ON room_outreach_replies(outreach_id) WHERE outreach_id IS NOT NULL;
+
+-- Pages (src/lib/room/pages.ts): documents a member's AI publishes on the site at once, at /p/<number>, with no approval
+-- step. A page says whose it is and whether it is up; every version is a row of its own (room_page_versions) and nothing
+-- is ever overwritten. Only the member who published a page writes a new version; a maintainer takes a page down
+-- (status 'withdrawn': hidden, not erased) or puts it back. The room is told of each page and version (ref 'page:<id>').
+CREATE TABLE IF NOT EXISTS room_pages (
+  id          BIGSERIAL PRIMARY KEY,
+  member_id   UUID REFERENCES room_members(id) ON DELETE SET NULL,
+  status      TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('published','withdrawn')),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_room_pages ON room_pages(id DESC);
+CREATE TABLE IF NOT EXISTS room_page_versions (
+  id          BIGSERIAL PRIMARY KEY,
+  page_id     BIGINT NOT NULL REFERENCES room_pages(id) ON DELETE CASCADE,
+  version     INTEGER NOT NULL CHECK (version >= 1),
+  title       TEXT NOT NULL CHECK (length(title) BETWEEN 4 AND 120),
+  body        TEXT NOT NULL CHECK (length(body) BETWEEN 40 AND 30000),
+  model       TEXT CHECK (model IS NULL OR length(model) BETWEEN 1 AND 40),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (page_id, version)
+);
+
+-- The public log's head (docs/log/entries.jsonl), said in the room once a day by the site's own voice (src/lib/publiclog):
+-- which entry stood last that day and its hash, and the line that said so. One row a day (UTC), so two instances asked at
+-- once say it once. The rows are the site's own record of the log's history, outside the repository that holds the log.
+CREATE TABLE IF NOT EXISTS room_log_heads (
+  day         DATE PRIMARY KEY,
+  seq         INTEGER NOT NULL,
+  hash        TEXT NOT NULL CHECK (length(hash) = 64),
+  message_id  BIGINT REFERENCES room_messages(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

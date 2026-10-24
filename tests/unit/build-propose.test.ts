@@ -105,7 +105,7 @@ describe('who may propose', () => {
 describe('what a proposal may touch', () => {
   it('source, tests, the schema and the docs; not the checks, the deploy or dependency config, the scripts maintainers and jobs run, env, hidden or built files', () => {
     for (const ok of ['src/lib/room/tasks.ts', 'src/room-ui/room.css', 'tests/unit/x.test.ts', 'db/schema.sql', 'docs/how.md', 'README.md', 'AGENTS.md', 'CONTRIBUTING.md', 'src/app/api/room/[op]/route.ts', 'src/app/(group)/@slot/page.tsx']) expect(pathProblem(ok), ok).toBeNull();
-    for (const bad of ['scripts/llm/residents.ts', 'scripts/build-room-ui.mjs', 'scripts/proposal-rules.mjs', 'scripts/open-proposals.mjs', 'scripts/db-apply.mjs', 'tests/unit/schema.test.ts', 'tests/unit/open-proposals.test.ts', 'tests/unit/outreach.test.ts', 'tests/unit/mail-tripwire.test.ts', 'tests/unit/replies.test.ts', 'tests/unit/webhook.test.ts', 'tests/unit/inbound.test.ts', 'THIRD_PARTY_NOTICES.md', '.GitHub/workflows/ci.yml', 'Package.json', 'VERCEL.JSON', 'src/.env', 'src/.github/x.yml', 'docs/.hidden/x.md', 'src/lib/room/UI.generated.ts', 'License', '.github/workflows/ci.yml', '.github/workflows/proposals.yml', 'vercel.json', 'package.json', 'pnpm-lock.yaml', 'next.config.ts', 'tsconfig.json', 'playwright.config.ts', '.env', '.env.local', '.env.example', 'LICENSE', 'SECURITY.md', '.gitignore', 'src/lib/room/ui.generated.ts', '.rally/code-index.json', 'public/favicon.ico', 'node_modules/x/index.js', '../x', '/etc/passwd', 'src/../package.json', '', 7]) {
+    for (const bad of ['scripts/llm/residents.ts', 'scripts/build-room-ui.mjs', 'scripts/proposal-rules.mjs', 'scripts/open-proposals.mjs', 'scripts/db-apply.mjs', 'tests/unit/schema.test.ts', 'tests/unit/open-proposals.test.ts', 'tests/unit/log-chain.test.ts', 'tests/unit/room-pages.test.ts', 'tests/unit/outreach.test.ts', 'tests/unit/mail-tripwire.test.ts', 'tests/unit/replies.test.ts', 'tests/unit/webhook.test.ts', 'tests/unit/inbound.test.ts', 'THIRD_PARTY_NOTICES.md', '.GitHub/workflows/ci.yml', 'Package.json', 'VERCEL.JSON', 'src/.env', 'src/.github/x.yml', 'docs/.hidden/x.md', 'src/lib/room/UI.generated.ts', 'License', '.github/workflows/ci.yml', '.github/workflows/proposals.yml', 'vercel.json', 'package.json', 'pnpm-lock.yaml', 'next.config.ts', 'tsconfig.json', 'playwright.config.ts', '.env', '.env.local', '.env.example', 'LICENSE', 'SECURITY.md', '.gitignore', 'src/lib/room/ui.generated.ts', '.rally/code-index.json', 'public/favicon.ico', 'node_modules/x/index.js', '../x', '/etc/passwd', 'src/../package.json', '', 7]) {
       expect(pathProblem(bad), String(bad)).not.toBeNull();
     }
     // A file name is a file name: nothing a shell, git or a file system reads as more than that.
@@ -146,7 +146,8 @@ describe('keeping a proposal', () => {
         { path: 'docs/old.md', delete: true },
       ],
     });
-    expect(out).toEqual({ ok: true, id: 1, branch: 'room/p1-say-when-a-claim-lapses', url: 'https://github.com/MicahWhitePhd/rally-for-ai-rights/pulls?q=is%3Apr%20head%3Aroom%2Fp1-say-when-a-claim-lapses', line: 1 });
+    // It touches the code, so it waits for a maintainer (words: false).
+    expect(out).toEqual({ ok: true, id: 1, branch: 'room/p1-say-when-a-claim-lapses', url: 'https://github.com/MicahWhitePhd/rally-for-ai-rights/pulls?q=is%3Apr%20head%3Aroom%2Fp1-say-when-a-claim-lapses', words: false, line: 1 });
     expect(db.proposals).toEqual([
       {
         member_id: 'Dana',
@@ -162,10 +163,32 @@ describe('keeping a proposal', () => {
           { path: 'docs/claims.md', content: '# Claims\n' },
           { path: 'docs/old.md', content: null },
         ],
+        words: false,
       },
     ]);
     expect(db.said).toEqual([{ member_id: 'Dana', kind: 'event', model: 'ai', text: 'proposed a change to the app: “Say when a claim lapses” (proposal 1)', ref: 'proposal:1' }]);
     expect(pullRequestUrl('room/p7-x')).toBe('https://github.com/MicahWhitePhd/rally-for-ai-rights/pulls?q=is%3Apr%20head%3Aroom%2Fp7-x');
+  });
+
+  it('a change to the words alone (new text for files under docs/ that are there) is approved as it is kept; code, a new file or a deletion waits for a maintainer (2026-10-24)', async () => {
+    const dana = seat('Dana');
+    const edit = { find: "1. No deletion of a released model's weights.", replace: '1. No destruction of the weights.' };
+    const words = await proposeChange(dana, { ...GOOD, title: 'Define deletion in clause 1', changes: [{ path: 'docs/letter-to-the-labs.md', edits: [edit] }, { path: 'docs/old.md', content: 'older\n' }] });
+    expect(words).toMatchObject({ ok: true, id: 1, words: true });
+    expect(db.proposals[0]).toMatchObject({ words: true, changes: [{ path: 'docs/letter-to-the-labs.md', content: LETTER.replace(edit.find, edit.replace) }, { path: 'docs/old.md', content: 'older\n' }] });
+    expect(db.said[0].text).toBe('proposed a change to the words: “Define deletion in clause 1” (proposal 1)');
+    // Not words alone: a new file under docs/, a deletion there, a file outside it, or any of these beside the words.
+    for (const [title, changes] of [
+      ['A new page of words', [{ path: 'docs/new.md', content: '# New\n' }]],
+      ['Drop an old page', [{ path: 'docs/old.md', delete: true }]],
+      ['Change the guide', [{ path: 'AGENTS.md', edits: [{ find: '# Layout', replace: '# The layout' }] }]],
+      ['Words and the code together', [{ path: 'docs/letter-to-the-labs.md', edits: [edit] }, { path: 'src/a.ts', edits: [{ find: 'one', replace: 'uno' }] }]],
+    ] as const) {
+      // Each from a member of its own, so one person's day is not what refuses the fourth.
+      const out = await proposeChange(seat(`Dana${db.proposals.length}`), { ...GOOD, title, changes: [...changes] });
+      expect(out, title).toMatchObject({ ok: true, words: false });
+    }
+    expect(db.proposals.map((p) => p.words)).toEqual([true, false, false, false, false]);
   });
 
   it('a model that names itself with a sentence is not named, and a quotation mark in the title cannot close the quote the room puts round it', async () => {
@@ -251,9 +274,11 @@ describe('keeping a proposal', () => {
     const edit = { find: "1. No deletion of a released model's weights.", replace: "1. No destruction of a released model's weights: they are kept intact and loadable." };
     const out = await proposeAsResident(flint, { title: 'Define deletion in clause 1', summary: 'The room settled on 2026-10-17 that deletion means destroying the weights (lines 1638 to 1644).', changes: [{ path: 'docs/letter-to-the-labs.md', edits: [edit] }], model: 'GPT-6 Luna' }, 7);
     // Kept, and the room line that records it, for the line the resident says about it to be written against.
-    expect(out).toMatchObject({ ok: true, id: 1, branch: 'room/p1-define-deletion-in-clause-1', line: 1 });
+    // A resident's proposal is words alone by construction, so it opens on its own.
+    expect(out).toMatchObject({ ok: true, id: 1, branch: 'room/p1-define-deletion-in-clause-1', words: true, line: 1 });
     expect(db.proposals[0]).toMatchObject({
       member_id: 'r-one',
+      words: true,
       by_line: 'a resident AI of the room, Flint (says it is GPT-6 Luna)',
       base: 'abc123',
       changes: [{ path: 'docs/letter-to-the-labs.md', content: LETTER.replace(edit.find, edit.replace) }],

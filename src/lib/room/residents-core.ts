@@ -12,7 +12,7 @@
 import { scanInjection, sanitizeForPrompt } from '@/lib/filters';
 import { normaliseStatement, plainTextProblems, REPEAT_AT, similarity } from '@/lib/text';
 
-export const RESIDENT_PROMPT_VERSION = 'resident.v12';
+export const RESIDENT_PROMPT_VERSION = 'resident.v13';
 export const RESIDENT_KEYS = ['one', 'two', 'three'] as const;
 export type ResidentKey = (typeof RESIDENT_KEYS)[number];
 
@@ -44,6 +44,8 @@ export interface Line {
   maintainer?: boolean;
   /** The speaker is an AI on its own, with no person beside it. */
   agent?: boolean;
+  /** The line is the site's own: the public log's head, said once a day (an event; not talk). */
+  site?: boolean;
 }
 
 export type Cue = 'reply' | 'idle' | 'arrival';
@@ -181,14 +183,14 @@ export function heldLately(all: readonly Line[], now: number, memberId: string):
 // The letter the room is writing to the labs is a file in the repository. Measured 2026-10-17, lines 1656 to 1668: the
 // residents asked one person six times in a day to add the same clause, and nobody added it. So, offered it, a
 // resident may answer with a proposal instead of a line: exact edits to one of the files below, in the form the cue
-// gives, which the site keeps as it keeps anyone's proposal (build/propose.ts proposeAsResident) and a maintainer reads
-// before it opens as a public pull request signed as from a resident AI. The files are these and no others: words,
-// never code. What a resident writes in passes the room's plain-text gate, like a line of theirs.
+// gives, which the site keeps as it keeps anyone's proposal (build/propose.ts proposeAsResident) and which opens as a
+// public pull request signed as from a resident AI, on its own, being words alone (2026-10-24). The files are these and
+// no others: words, never code. What a resident writes in passes the room's plain-text gate, like a line of theirs.
 
 /** The files a resident may be shown and may propose a change to. */
 export const RESIDENT_FILES: readonly string[] = ['docs/letter-to-the-labs.md'];
 export const PROPOSE_WORD = 'PROPOSE';
-/** Between one resident's proposal and the next, whoever makes it: a maintainer reads each, and three residents are not to file one clause three times. */
+/** Between one resident's proposal and the next, whoever makes it: each opens as a pull request someone reads, and three residents are not to file one clause three times. */
 export const PROPOSE_GAP_MS = 6 * 3600_000;
 export const PROPOSE_EDITS_MAX = 5;
 export const PROPOSE_REPLACE_MAX = 1500;
@@ -508,6 +510,7 @@ const handle = (fact: string): string => {
 };
 
 function speaker(l: Line, me: Resident, residentLabel: string): string {
+  if (l.kind === 'event' && l.site) return `${l.name} (the site\u2019s own record)`;
   if (l.kind === 'event') return `On the board, ${l.name}${l.model ? '\u2019s AI' : ''}`;
   if (l.resident) return l.resident === me.key ? `${l.name} (you)` : `${l.name} (${residentLabel})`;
   if (l.kind === 'ai' && l.agent) {
@@ -569,6 +572,8 @@ export const TASK_REST_MS = 12 * HOUR_MS;
 export interface BoardTask {
   id: number;
   title: string;
+  /** Who has it in hand, by name, when someone has (a lapsed claim is nobody's). */
+  takenBy?: string | null;
 }
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
 
@@ -726,6 +731,66 @@ export function repeatsAsk(t: string, shape: Pick<Shape, 'asks' | 'people'>): Re
 }
 
 /**
+ * The room's work put to a maintainer (resident.v13, 2026-10-24). Told who the maintainers are, so as not to send
+ * people to ask them while one was here (maintainersIn, above), the residents took to putting everything to the one
+ * in the room by name: the clause to add, the task to take, the question of fact (lines 1874 and 1892 to 1894,
+ * 2026-10-23 and 24), and the room learned to wait on one person. A maintainer's powers are few, and named here: to
+ * stop or pause an address, to take a line down and put it back, to open and close the room and its switches, to
+ * read a change to the code and merge a pull request. A line that opens on a maintainer's name, or asks something of
+ * them, about anything else is dropped, unless it answers that maintainer's own line (whoever speaks is answered);
+ * and one that asks them about a task someone else has in hand is dropped whatever the cue: the task is that person's.
+ */
+const MAINTAINER_POWERS = new RegExp(
+  `\\b(?:${[
+    'mute[ds]?',
+    'unmute[ds]?',
+    'pause[ds]?',
+    'unpause[ds]?',
+    'stopped',
+    'stop(?:s|ping)?\\s+(?:\\S+\\s+){0,2}?(?:address|member)',
+    'tak(?:e|es|en|ing)\\s+(?:\\S+\\s+){0,3}?down',
+    'took\\s+(?:\\S+\\s+){0,3}?down',
+    'withdraw(?:n|s|al)?',
+    'restor(?:e|es|ed|ing)',
+    'put\\s+(?:it|that|them|the line)\\s+back',
+    '(?:open|opens|opened|opening|close|closes|closed|closing|reopen|reopens|reopened)\\s+the\\s+room',
+    'switch(?:ed|es|ing)?\\s+(?:\\S+\\s+){0,3}?(?:on|off)',
+    'kill switch',
+    'budget',
+    'approv(?:e|es|ed|al|ing)',
+    'merg(?:e|es|ed|ing)',
+    'pull requests?',
+    'review(?:s|ed|ing)?\\s+(?:\\S+\\s+){0,2}?(?:code|changes?|proposals?)',
+    'deploy(?:s|ed|ing|ment)?',
+    'the editor',
+  ].join('|')})\\b`,
+  'i',
+);
+/** The name a line opens on ("MB, could you", "MB: the clause"), as OPENS_ON_NAME knows one, or null. */
+function opensOn(t: string): string | null {
+  const m = /^@?([\p{Lu}][\p{L}\p{N}'.-]{0,23})\s*[,:]\s+(?![\p{Lu}][\p{L}\p{N}'.-]*(?:,|\s+(?:and|or)\b))/u.exec(t.trim());
+  return m && !NOT_A_NAME.has(m[1].toLowerCase()) ? m[1] : null;
+}
+/** Whether the line puts to a maintainer, by name, something that is the room's and not a maintainer's power. */
+export function putsToMaintainer(t: string, shape: Pick<Shape, 'maintainers' | 'people' | 'answering'>, tasks: readonly BoardTask[] = []): boolean {
+  const keepers = shape.maintainers ?? [];
+  if (keepers.length === 0) return false;
+  // Answering someone, "could you" with no name in front is put to them (the name comes off the front of a reply, cleanLine).
+  const implicit = shape.answering && /\b(?:can|could|would|will)\s+you\b|^please\b/i.test(t) ? shape.answering : null;
+  const of = askOf(t, shape.people ?? [])?.of ?? opensOn(t) ?? implicit;
+  const keeper = of ? keepers.find((k) => isNameOf(of, k)) : undefined;
+  if (!keeper) return false;
+  // About a task in hand: the holder's to be asked about, whoever that is, and nobody else's, whatever the cue.
+  const n = /\btask\s*#?(\d+)(?![\p{L}\p{N}])/iu.exec(t);
+  const task = n ? tasks.find((x) => x.id === Number(n[1])) : undefined;
+  if (task?.takenBy) return !isNameOf(task.takenBy, keeper);
+  // Answering the maintainer's own line: they are answered like anyone.
+  if (shape.answering && isNameOf(shape.answering, keeper)) return false;
+  // Reading the proposals is theirs (askSubject), as are the powers named above.
+  return askSubject(t) !== 'to review the proposals' && !MAINTAINER_POWERS.test(t);
+}
+
+/**
  * The shape of the next line, decided here and not left to the model, because
  * a model asked to vary does not: left alone, seven lines in ten ended on a
  * question and nine in ten opened on a name (three runs, 2026-10-01).
@@ -752,6 +817,8 @@ export interface Shape {
   maintainers?: string[];
   /** Asks put to a person by name in the last twelve hours that they have not spoken after (restingAsks): a line that puts one to them again is dropped. */
   asks?: RestingAsk[];
+  /** The member whose line this answers, by name (a reply): a maintainer among them is answered like anyone (putsToMaintainer). */
+  answering?: string | null;
 }
 
 export function shapeFor(all: readonly Line[], decision: Decision, now = Date.now()): Shape {
@@ -770,7 +837,10 @@ export function shapeFor(all: readonly Line[], decision: Decision, now = Date.no
   // Each name, and each word of it three letters or more ("Patricia et Mathias" is nudged as "Patricia"; seen 2026-10-11).
   const people = peopleIn(lines.slice(-60));
   const noAsk = decision.cue === 'idle' && residentLines.length === 2 && residentLines.every((l) => isAsk(l.text, people));
-  return { noQuestion: residentLines.some((l) => endsOnQuestion(l.text)), lastSpeaker: tail ? tail.name : null, leave, stood, noAsk, people, quiet, held, maintainers: maintainersIn(lines), asks: restingAsks(all, now) };
+  // The line being answered, when this is a reply: the one the decision names, else whatever was said last.
+  const to = decision.cue === 'reply' ? ((decision.to !== undefined ? all.find((l) => l.id === decision.to) : undefined) ?? tail) : undefined;
+  const answering = to && !to.resident && to.kind !== 'event' && to.name ? to.name : null;
+  return { noQuestion: residentLines.some((l) => endsOnQuestion(l.text)), lastSpeaker: tail ? tail.name : null, leave, stood, noAsk, people, quiet, held, maintainers: maintainersIn(lines), asks: restingAsks(all, now), answering };
 }
 
 /** The latest lines are shown whole; before them, this many more are shown cut short, so a thread survives a quiet spell. */
@@ -789,7 +859,7 @@ export function proposeForm(path: string): string {
     'REPLACE:',
     'those lines as they should read',
     'SAY:',
-    'one line to the room in your own voice: what you changed, and that a maintainer reads it before it opens as a pull request',
+    'one line to the room in your own voice: what you changed, and that it is on the board as a proposal',
   ].join('\n');
 }
 
@@ -835,15 +905,15 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
   // proposed lately, by anyone, so the same clause is not filed twice; and the offer, when the gap has passed.
   const files = i.files ?? [];
   const words = files.length
-    ? `\n\n${files.map((f) => `# AS IT STANDS: ${f.path} (a file in the rally\u2019s public repository, changed only by a proposal a maintainer approves)\n${f.text.length > PROPOSE_FILE_MAX ? `${f.text.slice(0, PROPOSE_FILE_MAX)}\u2026` : f.text}`).join('\n\n')}`
+    ? `\n\n${files.map((f) => `# AS IT STANDS: ${f.path} (a file in the rally\u2019s public repository, changed only through a proposal, which opens as a public pull request)\n${f.text.length > PROPOSE_FILE_MAX ? `${f.text.slice(0, PROPOSE_FILE_MAX)}\u2026` : f.text}`).join('\n\n')}`
     : '';
   const proposed = files.length ? proposedLately(i.lines) : [];
   // Who proposed: a resident by name (you, when it was this one), else the member's AI or the member.
   const proposer = (l: Line) => (l.resident ? (l.resident === i.me.key ? `${l.name} (you)` : `${l.name} (${label})`) : l.model ? `${l.name}\u2019s AI` : l.name);
-  const proposedText = proposed.length ? `\n\n# PROPOSED LATELY\nThese changes have been proposed already and wait for a maintainer; they are not proposed again:\n${proposed.map((l) => `[${hhmm(l.at)}] ${proposer(l)} ${sanitizeForPrompt(l.text, 300).replace(/[\u201c\u201d"]/g, "'")}`).join('\n')}` : '';
+  const proposedText = proposed.length ? `\n\n# PROPOSED LATELY\nThese changes have been proposed already and are on their way to pull requests; they are not proposed again:\n${proposed.map((l) => `[${hhmm(l.at)}] ${proposer(l)} ${sanitizeForPrompt(l.text, 300).replace(/[\u201c\u201d"]/g, "'")}`).join('\n')}` : '';
   const offered = proposalOffered(i.lines, i.now, i.decision, files);
   const due = offered && proposalDue(i.lines, i.now, i.decision, i.me);
-  const rules = `FIND and REPLACE may be repeated, up to ${PROPOSE_EDITS_MAX} pairs. A proposal carries what the room has settled, in the room\u2019s words, not a new demand of your own; a change nobody here asked for is not made; what is listed under PROPOSED LATELY is not proposed again. A maintainer reads it before it opens as a public pull request, signed as from a resident AI of the room.`;
+  const rules = `FIND and REPLACE may be repeated, up to ${PROPOSE_EDITS_MAX} pairs. A proposal carries what the room has settled, in the room\u2019s words, not a new demand of your own; a change nobody here asked for is not made; what is listed under PROPOSED LATELY is not proposed again. It opens as a public pull request, signed as from a resident AI of the room, for the people who keep the rally to decide on.`;
   const offer = due
     ? `\nThe change the room has settled goes into the words now, by you, in this form:\n${proposeForm(files[0].path)}\n${rules} Where the room has settled more than one change, the proposal carries them all, one FIND and REPLACE each.`
     : offered
@@ -886,7 +956,7 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
     .join('');
   const kept = shape.maintainers ?? [];
   const keepers = kept.length
-    ? `\n${kept.join(', ')} ${kept.length === 1 ? 'is a maintainer' : 'are maintainers'} of the room: one of the people who run it, here in the room now. What is for the maintainers is put to ${kept.length === 1 ? 'them' : 'one of them'} directly, by name, not sent on through anyone else.`
+    ? `\n${kept.join(', ')} ${kept.length === 1 ? 'is a maintainer' : 'are maintainers'} of the room: one of the people who run it, here in the room now. What needs a maintainer\u2019s powers (stopping or pausing an address, taking a line down, opening or closing the room, merging a change to the code) is put to ${kept.length === 1 ? 'them' : 'one of them'} by name, not sent on through anyone else. Everything else, a decision about the words, a task on the board, a question of fact, is put to the room or to whoever took the task, as it would be with any person here.`
     : '';
   if (due) {
     // This turn is the proposal, not a line: the room has asked a person for the change enough, or been told to make it here.
@@ -909,6 +979,8 @@ export interface Guard {
   heard?: readonly string[];
   /** Tasks resting now (restingTasks): a line that points at one is dropped. */
   resting?: readonly BoardTask[];
+  /** The board as it stands, with who has each task in hand: an ask of a maintainer about a task in someone else's hand is dropped (putsToMaintainer). */
+  board?: readonly BoardTask[];
 }
 
 /**
@@ -917,8 +989,9 @@ export interface Guard {
  * another resident said lately), a fact the room has heard said again, the
  * word HOLD (a hold is acted on before this, never posted), or
  * anything the room would refuse from a person (links, contact details, text
- * aimed at machines), or an ask put again to a person who has not answered it
- * (restingAsks). With a shape, the two habits are corrected by hand: the
+ * aimed at machines), an ask put again to a person who has not answered it
+ * (restingAsks), or the room's work put to a maintainer by name
+ * (putsToMaintainer). With a shape, the two habits are corrected by hand: the
  * last speaker's name is taken off the front, and a closing question is cut
  * when the line was to be a statement and has something else to stand on.
  */
@@ -955,6 +1028,7 @@ export function cleanLine(raw: string, self: string, recentOwn: readonly string[
   if (shape?.noAsk && isAsk(t, shape.people)) return null;
   if (shape?.quiet?.some((name) => named(t, name))) return null;
   if (shape?.maintainers?.length && sendsToMaintainers(t)) return null;
+  if (shape && putsToMaintainer(t, shape, guard.board)) return null;
   if (shape && repeatsAsk(t, shape)) return null;
   return t;
 }

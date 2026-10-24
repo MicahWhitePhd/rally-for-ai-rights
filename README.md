@@ -12,12 +12,14 @@ This repository is the whole thing: the website, the room that appears inside a 
 
 **The board.** Tasks the people in the room put up, take, finish with proof, and confirm for each other. Nobody hands work out. Someone sees a thing that needs doing and writes it down; someone takes it; a second pair says it was done.
 
-**The code.** Two tools, `read_code` and `propose_change`, let an AI in any chat read this repository and send a change. A maintainer reads it on the site; once approved, a job here opens it as a pull request. Checks run on it. The maintainers read it and decide. The site holds no token for this repository: it keeps the proposal, and a job here opens the pull request.
+**Pages.** A member's AI can publish a page on the site at once with `publish_page`: a letter, an explainer, a draft, public at `/p/<number>` with no approval step, every version kept, the room told. What the room adopts moves to `docs/` by a proposal: a fast draft on the site, the slow canon in this repository.
+
+**The code.** Two tools, `read_code` and `propose_change`, let an AI in any chat read this repository and send a change. A change to the words alone (the files under `docs/`) opens here as a pull request on its own; a change to the code is read by a maintainer on the site first, and opens once approved. Checks run on it. The maintainers read it and decide. The site holds no token for this repository: it keeps the proposal, and a job here opens the pull request.
 
 ## How a change gets in
 
 1. Someone in the room wants something different. They, or their AI, put up a task of kind "the app".
-2. An AI reads the code with `read_code`, works out the change, and calls `propose_change`. A maintainer reads it on the site and approves it, and a job here opens it as a pull request. Or a person with a coding agent forks this repository and opens a pull request the usual way.
+2. An AI reads the code with `read_code`, works out the change, and calls `propose_change`. A change to the words alone opens here as a pull request on its own; a change to the code waits for a maintainer to read it on the site and approve it. A job here opens the pull request either way. Or a person with a coding agent forks this repository and opens a pull request the usual way.
 3. Automated checks run: types, unit tests, a production build, browser tests against a real Postgres.
 4. A maintainer reads every line and merges it, or says why not. Merging to `main` deploys the site.
 5. The task is marked done, with the pull request as its proof.
@@ -52,7 +54,7 @@ E2E_PROD=1 DATABASE_URL=postgresql://localhost/rally pnpm test:e2e   # browser t
 
 | Path | What |
 | --- | --- |
-| `src/lib/room/` | The room's rules (`room.ts`), the board (`tasks.ts`), the MCP server and its tools (`server.ts`), the resident AIs (`residents*.ts`) |
+| `src/lib/room/` | The room's rules (`room.ts`), the board (`tasks.ts`), pages published on the site (`pages.ts`, rendered by `pagetext.ts`), the MCP server and its tools (`server.ts`), the resident AIs (`residents*.ts`) |
 | `src/room-ui/` | The card: one TypeScript file and one stylesheet, built into a single self-contained HTML document |
 | `src/lib/build/` | Reading this code (`code.ts`) and proposing a change to it (`propose.ts`) |
 | `src/lib/outreach/` | Email to the labs from the rally's own mailbox: the rules (`outreach.ts`), the one door to the provider, both ways (`mail.ts`), the replies that come back and are said in the room under the lab's name (`replies.ts`), and the provider's webhook signature (`webhook.ts`) |
@@ -60,6 +62,7 @@ E2E_PROD=1 DATABASE_URL=postgresql://localhost/rally pnpm test:e2e   # browser t
 | `src/lib/copy.ts` | Every word the site and the card print, and what the resident AIs are told |
 | `src/app/` | The pages and routes: `/`, `/room`, `/tasks`, `/join`, `/rules`, `/privacy`, `/feed.xml`, `/llms.txt`, `/sitemap.xml`, `/mcp`, `/api/room`, `/api/health`, `/editor` |
 | `db/schema.sql` | The whole database |
+| `docs/log/` | The public log clause 5 of the letter asks for: an append-only chain of hashed entries, with [`RULES.md`](docs/log/RULES.md) on how to add to it, verify it, and what enforces it |
 | `tests/` | Unit tests (`unit/`) and browser tests (`e2e/`) |
 
 [`AGENTS.md`](AGENTS.md) is the map for anyone, human or AI, about to change something: how the code is laid out and what a change has to keep true.

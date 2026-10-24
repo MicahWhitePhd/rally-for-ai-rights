@@ -21,13 +21,19 @@ export function cleanPath(raw) {
 }
 
 const ROOTS = /^(src|tests|db|docs)\//;
+/**
+ * Where the words live. A proposal that gives new text for files here that are there already, and nothing else, is a
+ * change to the words alone: the site approves it as it is kept and it opens as a pull request without a maintainer's
+ * read (2026-10-24); the job holds it to the same (scripts/open-proposals.mjs). Code, a new file or a deletion waits.
+ */
+export const WORDS_DIR = /^docs\//;
 const ROOT_FILES = new Set(['README.md', 'CONTRIBUTING.md', 'AGENTS.md']);
 /**
  * Never through this door: checks, deploy and dependency config, the scripts maintainers and jobs run, env files,
  * hidden and built files, the licence, the security policy, and the tests that guard the rules a proposal is held to
  * (a change to a guard and to what it guards, in one pull request, is how a guard is quietly switched off).
  */
-const PROTECTED = /^(\.github\/|\.vercel\/|\.env|scripts\/|db\/apply|vercel\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|next\.config\.ts$|tsconfig\.json$|vitest\.config\.ts$|playwright\.config\.ts$|license$|security\.md$|third_party_notices\.md$|\.gitignore$|tests\/unit\/(schema|gateway-tripwire|open-proposals|build-propose|build-code|room-mcp|text|outreach|mail-tripwire|replies|webhook|inbound)\.test\.ts$)|ui\.generated\.ts$|(^|\/)\./i;
+const PROTECTED = /^(\.github\/|\.vercel\/|\.env|scripts\/|db\/apply|vercel\.json$|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|next\.config\.ts$|tsconfig\.json$|vitest\.config\.ts$|playwright\.config\.ts$|license$|security\.md$|third_party_notices\.md$|\.gitignore$|tests\/unit\/(schema|gateway-tripwire|open-proposals|build-propose|build-code|room-mcp|text|outreach|mail-tripwire|replies|webhook|inbound|log-chain|room-pages)\.test\.ts$)|ui\.generated\.ts$|(^|\/)\./i;
 /** Only what a path is made of: no spaces, quotes, or anything a shell or a file system reads as more than a name. */
 const PATH_CHARS = /^[A-Za-z0-9._/\-[\]()@+]+$/;
 
@@ -46,7 +52,7 @@ export function pathProblem(raw) {
  * byte-order mark inside a file, and tag characters. In a proposal they would hide text from the maintainer reading it
  * and, once merged, reach every AI that reads the code. The two joiners stay: some languages are spelt with them.
  */
-const HIDDEN = /[\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\u{e0000}-\u{e007f}]/u;
+export const HIDDEN = /[\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\u{e0000}-\u{e007f}]/u;
 
 /** Why this file text cannot be proposed, or null when it can. */
 export function contentProblem(path, text) {

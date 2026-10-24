@@ -72,7 +72,7 @@ test.describe('the room', () => {
       return JSON.parse(body.startsWith('{') ? body : body.split('\n').find((l) => l.startsWith('data: '))!.slice(6)).result;
     };
     const tools = (await rpc('/mcp', 'tools/list', {})).tools as Array<{ name: string; _meta?: { ui?: { resourceUri?: string } } }>;
-    expect(tools.map((t) => t.name).sort()).toEqual(['catch_up', 'choose_name', 'create_task', 'list_tasks', 'open_room', 'propose_change', 'read_code', 'read_room', 'room_io', 'send_email', 'speak_in_room', 'update_task']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['catch_up', 'choose_name', 'create_task', 'list_tasks', 'open_room', 'propose_change', 'publish_page', 'read_code', 'read_room', 'room_io', 'send_email', 'speak_in_room', 'update_task']);
     // The prompts a host lists for the person: their fixed asks of their AI.
     const prompts = (await rpc('/mcp', 'prompts/list', {})).prompts as Array<{ name: string }>;
     expect(prompts.map((p) => p.name).sort()).toEqual(['answer_line', 'open_the_room', 'read_and_answer', 'what_is_new']);
@@ -577,6 +577,37 @@ test.describe('the room', () => {
     const after = (await (await request.get('/api/proposals')).json()) as { proposals: Array<{ id: number }> };
     expect(after.proposals.some((p) => p.id === id)).toBe(false);
     expect((await request.get(`/api/proposals/${id}`)).status()).toBe(404);
+
+    // A change to the words alone (2026-10-24): new text for a file under docs/ that is there. Approved as it is kept,
+    // listed for the job at once with nobody's read, and said so to the AI, to the job and on the board page.
+    const letter = await rpc('/mcp', 'read_code', { path: 'docs/letter-to-the-labs.md' });
+    expect(letter.content[0].text).toContain('# Letter to the labs');
+    const wordsTitle = `Name the lock in clause 5 ${tag}`;
+    const words = await rpc(`/mcp/${token}`, 'propose_change', { seat: mine, title: wordsTitle, summary: 'Clause 5 names a host; the room settled that it should name the lock the log is kept under.', changes: [{ path: 'docs/letter-to-the-labs.md', edits: [{ find: '# Letter to the labs\n', replace: `# Letter to the labs\n\n(${tag})\n` }] }], model: 'Claude' });
+    expect(words.isError).toBeFalsy();
+    const w = /^Kept as proposal (\d+)\. It changes the words alone, so it opens as a public pull request on its own, within an hour or so, and will be listed here: (\S+) /.exec(words.content[0].text);
+    expect(w, words.content[0].text).not.toBeNull();
+    const wordsId = Number(w![1]);
+    ids.proposals.push(wordsId);
+    const marks = (await db().query<{ approved: boolean; auto: boolean }>(`SELECT approved_at IS NOT NULL AS approved, auto_approved_at IS NOT NULL AS auto FROM room_proposals WHERE id = $1`, [wordsId])).rows[0];
+    expect(marks).toEqual({ approved: true, auto: true });
+    const listed = (await (await request.get('/api/proposals')).json()) as { proposals: Array<{ id: number }> };
+    expect(listed.proposals.some((p) => p.id === wordsId)).toBe(true);
+    const wordsDetail = (await (await request.get(`/api/proposals/${wordsId}`)).json()) as { approved: string; changes: Array<{ path: string; content: string | null }> };
+    expect(wordsDetail.approved).toBe('words');
+    expect(wordsDetail.changes.map((c) => c.path)).toEqual(['docs/letter-to-the-labs.md']);
+    expect(wordsDetail.changes[0].content).toContain(`(${tag})`);
+    expect(checkProposal(wordsDetail, { id: wordsId })).toMatchObject({ ok: true, words: true });
+    // The room is told it is a change to the words, and the board page shows where its pull request will be, with nothing to wait for.
+    const saidWords = (await db().query<{ text: string }>(`SELECT text FROM room_messages WHERE member_id = $1 AND text LIKE $2`, [ids.me, `proposed a change to the words:%${tag}%`])).rows;
+    expect(saidWords).toEqual([{ text: `proposed a change to the words: “${wordsTitle}” (proposal ${wordsId})` }]);
+    await page.goto('/tasks');
+    await expect(page.locator(`#proposal-${wordsId}`)).toContainText('The pull request');
+    await expect(page.locator(`#proposal-${wordsId}`)).not.toContainText('Waiting for a maintainer');
+    // The code, or a new file under docs/, still waits for a maintainer: the first proposal above was both, and waited.
+    // A maintainer who takes a words proposal down before the job runs stops it; put back, it waits to be read like any other.
+    await db().query(`UPDATE room_proposals SET status = 'withdrawn', approved_at = NULL, auto_approved_at = NULL WHERE id = $1`, [wordsId]);
+    expect(((await (await request.get('/api/proposals')).json()) as { proposals: Array<{ id: number }> }).proposals.some((p) => p.id === wordsId)).toBe(false);
   });
 
   test('the board in the card: the Tasks side, a task from put up to done, and the board shown when the AI reads it', async ({ page }) => {

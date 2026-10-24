@@ -6,15 +6,21 @@
  * stands and keeps it as a proposal. That is all the site does. It holds no
  * GitHub token and never writes to the repository.
  *
- * A maintainer reads each proposal at /editor/room and approves it or takes
- * it down: whatever reaches GitHub is public there for good, and runs as code
- * in the checks, so a person reads it first. Only approved proposals are
- * published at /api/proposals. The pull request is opened from the other
- * side: a job in the public repository (.github/workflows/proposals.yml,
- * running scripts/open-proposals.mjs) reads that list, checks each one again
- * by the same rules, and opens it with the short-lived token GitHub gives
- * every job. The maintainers then decide on the pull request; nothing here can
- * merge anything, and nothing here touches the live site.
+ * A maintainer reads each proposal to the code at /editor/room and approves
+ * it or takes it down: whatever reaches GitHub is public there for good, and
+ * runs as code in the checks, so a person reads it first. A proposal that
+ * changes the words alone (files under docs/ that are there already: no
+ * code, no new file, no deletion) is approved as it is kept (2026-10-24,
+ * MB: words wait for nobody; the room had five proposals queued behind one
+ * reader), and a maintainer may take it down before the job runs. Only
+ * approved proposals are published at /api/proposals. The pull request is
+ * opened from the other side: a job in the public repository
+ * (.github/workflows/proposals.yml, running scripts/open-proposals.mjs)
+ * reads that list, checks each one again by the same rules, opens one the
+ * site says is words alone only if it is, and opens it with the short-lived
+ * token GitHub gives every job. The maintainers then decide on the pull
+ * request; nothing here can merge anything, and nothing here touches the
+ * live site.
  *
  * No one's room name goes to GitHub: a commit and a pull request are
  * permanent and public, so a proposal is signed "a member of the room".
@@ -38,7 +44,7 @@ import { normaliseStatement, plainTextProblems } from '@/lib/text';
 import { throttle } from '@/lib/throttle';
 import { cleanModel, fail, failWhy, isFirstDay, seatedMember, type RoomFailure } from '@/lib/room/room';
 import { SITE_LINK } from '@/lib/site';
-import { CHANGES_MAX, EDITS_MAX, FILE_MAX_CHARS, SUMMARY_MAX, SUMMARY_MIN, TITLE_MAX, TITLE_MIN, cleanPath, contentProblem, pathProblem, slug, titleProblem } from '../../../scripts/proposal-rules.mjs';
+import { CHANGES_MAX, EDITS_MAX, FILE_MAX_CHARS, SUMMARY_MAX, SUMMARY_MIN, TITLE_MAX, TITLE_MIN, WORDS_DIR, cleanPath, contentProblem, pathProblem, slug, titleProblem } from '../../../scripts/proposal-rules.mjs';
 import { codeIndex } from './code';
 
 export { CHANGES_MAX, EDITS_MAX, FILE_MAX_CHARS, SUMMARY_MAX, TITLE_MAX, pathProblem };
@@ -68,8 +74,11 @@ export interface StoredChange {
   content: string | null;
 }
 
-/** Kept: its number, its branch, where its pull request will be, and the room line that records it (null when that line could not be written). */
-export type ProposeResult = { ok: true; id: number; branch: string; url: string; line: number | null } | RoomFailure | { ok: false; code: 'off' | 'change' | 'late'; reasons: string[] };
+/**
+ * Kept: its number, its branch, where its pull request will be, whether it is a change to the words alone (and so opens
+ * on its own), and the room line that records it (null when that line could not be written).
+ */
+export type ProposeResult = { ok: true; id: number; branch: string; url: string; words: boolean; line: number | null } | RoomFailure | { ok: false; code: 'off' | 'change' | 'late'; reasons: string[] };
 const no = (code: 'off' | 'change' | 'late', ...reasons: string[]) => ({ ok: false as const, code, reasons });
 
 /** RALLY_PROPOSALS=off is the hard switch; settings.room_proposals is the maintainers' (/editor/room). */
@@ -135,12 +144,17 @@ export async function proposeChange(seat: unknown, o: { title: unknown; summary:
 /** A file under docs/ with the extension of words, not code. */
 const WORDS_PATH = /^docs\/[^.]+(\/[^.]+)*\.md$/;
 
+/** Whether every change is to the words alone: new text (no deletion) for a file under docs/ that is there already. */
+export function wordsOnly(changes: ReadonlyArray<{ path: string; content: string | null }>, exists: (path: string) => boolean): boolean {
+  return changes.length > 0 && changes.every((c) => c.content !== null && WORDS_DIR.test(c.path) && exists(c.path));
+}
+
 /**
  * A change proposed by one of the room's resident AIs (room/residents.ts), to the rally's words only: edits to a file
  * under docs/ that is there already, never code, never a new file, never a deletion. What the resident writes in is
  * held to the room's plain-text gate like a line of theirs: no links, no contact details, nothing addressed to
- * machines, nothing a reader cannot see. Then it is kept by the same rules and counts as anyone's proposal does, and a
- * maintainer reads it before it opens as a pull request; its by-line says what it came from, and the job that opens
+ * machines, nothing a reader cannot see. Then it is kept by the same rules and counts as anyone's proposal does, and,
+ * being words alone, opens as a pull request on its own; its by-line says what it came from, and the job that opens
  * the pull request writes the same from its own words (scripts/open-proposals.mjs). `seenMax` is the newest line the
  * resident wrote it against: like a line of theirs, it is kept only if no resident has written since (code 'late').
  */
@@ -234,7 +248,9 @@ async function keep(me: { id: string; name: string | null }, o: { title: unknown
   const all = firstDay ? await throttle('room:prs:new', PER_DAY_FIRST_DAY, 86_400, { failOpen: false }) : await throttle('room:prs', PER_DAY, 86_400, { failOpen: false });
   if (!all.allowed) return failWhy('slow', 'day', `${PER_DAY} proposals a day from the room`);
 
-  const row = { member_id: me.id, task_id: taskId, title: title.text, summary: summary.text, by_line: how.by, base: index.commit || null, slug: slug(title.text), changes: next };
+  // The words alone open on their own; anything else waits for a maintainer to read it.
+  const words = wordsOnly(next, (path) => Object.hasOwn(index.files, path));
+  const row = { member_id: me.id, task_id: taskId, title: title.text, summary: summary.text, by_line: how.by, base: index.commit || null, slug: slug(title.text), changes: next, words };
   // Said in the room: a change to the words (docs only) or to the app. The room's own words around the quoted title, and the proposal's number.
   const said = `proposed a change to ${next.every((c) => c.path.startsWith('docs/')) ? 'the words' : 'the app'}: “${title.text.replace(/[“”"]/g, "'")}”`;
   let kept: { id: number; branch: string };
@@ -253,8 +269,8 @@ async function keep(me: { id: string; name: string | null }, o: { title: unknown
       console.warn('[ROOM] proposal event not written', (err as Error)?.message);
     }
   }
-  console.log(`[BUILD] proposal ${kept.id} kept (${next.length} files)`);
-  return { ok: true, id: kept.id, branch: kept.branch, url: pullRequestUrl(kept.branch), line };
+  console.log(`[BUILD] proposal ${kept.id} kept (${next.length} files${words ? ', words alone: opens on its own' : ''})`);
+  return { ok: true, id: kept.id, branch: kept.branch, url: pullRequestUrl(kept.branch), words, line };
 }
 
 /** What the connector needs (room/server.ts); proposeAsResident is the residents' own door (room/residents.ts). */

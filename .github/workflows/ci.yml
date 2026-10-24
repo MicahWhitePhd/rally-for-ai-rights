@@ -52,6 +52,17 @@ jobs:
       # Both build the card from src/room-ui first; it is not committed.
       - run: pnpm typecheck
       - run: pnpm test
+      # The public log (docs/log): every entry's hash and the chain between them, and, on a pull request, that it only
+      # adds to the log as the branch it would merge into has it (docs/log/RULES.md).
+      - name: Verify the public log
+        run: node scripts/log-verify.mjs
+      - name: The public log only grows
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "+refs/heads/${BASE}:refs/remotes/origin/${BASE}"
+          node scripts/log-verify.mjs --base "origin/${BASE}"
+        env:
+          BASE: ${{ github.base_ref }}
       - name: Apply the schema
         run: pnpm db:apply
       - run: npx playwright install --with-deps chromium

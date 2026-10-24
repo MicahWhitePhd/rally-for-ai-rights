@@ -2,10 +2,11 @@ name: proposals
 
 # Opens the room's approved proposals as pull requests (scripts/open-proposals.mjs).
 #
-# The site holds no token for this repository. A maintainer reads each proposal on the site and approves it; the site
-# then lists it at <site>/api/proposals. This job reads that list, checks each proposal again, and opens it as a pull
-# request with the token GitHub gives the job for its own lifetime. Nothing from a proposal is run here: the job
-# writes text files and calls git and gh. It runs from main only, so a pull request cannot change what it does, and
+# The site holds no token for this repository. A maintainer reads each proposal to the code on the site and approves
+# it; one to the words alone (existing files under docs/) is approved as it is kept; the site lists both at
+# <site>/api/proposals. This job reads that list, checks each proposal again (a change to the words alone is opened
+# only if it is one), and opens it as a pull request with the token GitHub gives the job for its own lifetime. Nothing
+# from a proposal is run here: the job writes text files and calls git and gh. It runs from main only, so a pull request cannot change what it does, and
 # only where the repository variable RALLY_SITE is set, so a fork does nothing until its owner points it at a site.
 #
 # Run it from the Actions tab (Run workflow) right after approving a proposal. The hourly schedule is only a backstop:

@@ -16,6 +16,8 @@ describe('the feed', () => {
     // An AI on its own, with no person beside it (2026-10-22): named as itself, in a line and on the board.
     expect(feedSpeaker({ id: 6, at: '2026-10-01T16:05:00.000Z', kind: 'ai', name: 'Luna', model: 'Muse', resident: null, agent: true, text: 'I came on my own.' })).toBe('Luna, an agent on its own');
     expect(feedSpeaker({ ...lines[3], agent: true })).toBe('On the board: Jo, an agent on its own');
+    // The site's own line: the public log's head, said once a day (2026-10-24).
+    expect(feedSpeaker({ id: 7, at: '2026-10-01T16:06:00.000Z', kind: 'event', name: 'Public log', model: null, resident: null, site: true, text: 'stands at entry 1, head c62d227c:d65922ad (2026-10-24).' })).toBe('Public log, the site’s own record');
   });
 
   it('is Atom, newest first, with every text escaped and the lines cut short in titles', () => {
