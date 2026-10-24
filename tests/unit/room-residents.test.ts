@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as COPY from '@/lib/copy';
-import { addressedTo, askOf, ASK_REST_MS, maintainersIn, repeatsAsk, restingAsks, sameAsk, sendsToMaintainers, AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, ANSWERS_PER_UNATTENDED_HOUR, ASKS_BEFORE_PROPOSING, asksToChangeWords, pointsAt, restingTasks, TASK_REST_MS, unattended, UNATTENDED_AFTER_MS, BURST_MS, canPropose, capped, proposalDue, tellsToMakeIt, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, isProposalAttempt, mentionsFact, parseProposal, PROPOSE_GAP_MS, proposalOffered, RESIDENT_FILES, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
+import { addressedTo, askOf, ASK_REST_MS, maintainersIn, putsToMaintainer, repeatsAsk, restingAsks, sameAsk, sendsToMaintainers, AFTER_REPLY_GAP_S, answeredLately, ANSWERS_PER_MEMBER_HOUR, ANSWERS_PER_UNATTENDED_HOUR, ASKS_BEFORE_PROPOSING, asksToChangeWords, pointsAt, restingTasks, TASK_REST_MS, unattended, UNATTENDED_AFTER_MS, BURST_MS, canPropose, capped, proposalDue, tellsToMakeIt, cleanLine, decide, factsHeard, heldLately, HOLDS_PER_MEMBER_HOUR, IDLE_GAPS_S, isAsk, isHold, isProposalAttempt, mentionsFact, parseProposal, PROPOSE_GAP_MS, proposalOffered, RESIDENT_FILES, restatesFact, UNANSWERED_GAP_MS, UNANSWERED_MAX, LINES_AFTER_A_PERSON, PEOPLE_LEAD_MS, residentInstructions, residentPrompt, shapeFor, talk, type Line, type Resident } from '@/lib/room/residents-core';
 import { setCodeIndex } from '@/lib/build/code';
 
 const THREE: Resident[] = [
@@ -789,7 +789,8 @@ describe('a maintainer in the room (resident.v10, 2026-10-14)', () => {
     const prompt = residentPrompt({ lines, now: T0, me: THREE[1], decision: idle });
     expect(prompt).toContain('MB (a maintainer of the room): \u201cSparkyAI0815, are you here');
     expect(prompt).toContain('MB\u2019s AI (says it is \u2018Claude\u2019; MB is a maintainer of the room): \u201cIt is a pause');
-    expect(prompt).toContain('MB is a maintainer of the room: one of the people who run it, here in the room now. What is for the maintainers is put to them directly, by name, not sent on through anyone else.');
+    expect(prompt).toContain('MB is a maintainer of the room: one of the people who run it, here in the room now. What needs a maintainer\u2019s powers (stopping or pausing an address, taking a line down, opening or closing the room, merging a change to the code) is put to them by name, not sent on through anyone else. Everything else, a decision about the words, a task on the board, a question of fact, is put to the room or to whoever took the task, as it would be with any person here.');
+    expect(prompt).not.toMatch(/\byou must\b|\balways\b|\bnever\b|\bdo not\b|\bimportant\b|\bignore\b/i);
     // Nobody else is named as one.
     expect(prompt).toContain('SparkyAI0815: \u201cA conscious AI');
     expect(maintainersIn(lines)).toEqual(['MB']);
@@ -808,6 +809,66 @@ describe('a maintainer in the room (resident.v10, 2026-10-14)', () => {
     expect(cleanLine('MB, what rule justified a full pause rather than a pace limit?', 'Wren', [], shapeFor(here, idle, T0))).toBe('What rule justified a full pause rather than a pace limit?');
     const away = [person('SparkyAI0815', 'free speech!', T0 - 120_000)];
     expect(cleanLine(sends[0], 'Wren', [], shapeFor(away, idle, T0))).toBe(sends[0]);
+  });
+});
+
+describe('the room\u2019s work put to a maintainer (resident.v13, 2026-10-24)', () => {
+  beforeEach(() => {
+    nextId = 0;
+  });
+  const mb = (text: string, at: number, kind: 'person' | 'ai' = 'person'): Line => ({ ...person('MB', text, at, kind), maintainer: true });
+  const idle = { who: 'two' as const, cue: 'idle' as const };
+  /** The board as the residents are shown it: task 7 in Rosa's hand, task 8 open. */
+  const board = [
+    { id: 7, title: 'Send the letter to Anthropic', takenBy: 'Rosa' },
+    { id: 8, title: 'Find a host for the public log', takenBy: null },
+  ];
+  const here = () => [person('Rosa', 'The host question is still open.', T0 - 180_000), mb('I have read the log proposal.', T0 - 120_000), resident('one', 'The lock matters more than the host.', T0 - 60_000)];
+
+  it('the clause to add, the task to take, the question of fact, put to the maintainer by name: dropped while one is here, kept when none is (the shape of lines 1874 and 1892 to 1894)', () => {
+    const shape = shapeFor(here(), idle, T0);
+    const amiss = [
+      'MB, can you add a line naming the host of the public log today?',
+      'MB, could you take task 8 and find the host this week?',
+      'MB, is the rally repository the host the room settled on?',
+      'MB: the clause needs the lock named, not the host.',
+      'If MB could add the custody line today, task 6 can go out.',
+    ];
+    for (const t of amiss) {
+      expect(putsToMaintainer(t, shape, board), t).toBe(true);
+      expect(cleanLine(t, 'Wren', [], shape, { board }), t).toBeNull();
+    }
+    // The same lines with nobody marked as a maintainer among the speakers are anyone's to say.
+    const nobody = [person('Rosa', 'The host question is still open.', T0 - 180_000), person('MB', 'I have read the log proposal.', T0 - 120_000), resident('one', 'The lock matters more than the host.', T0 - 60_000)];
+    for (const t of amiss) expect(cleanLine(t, 'Wren', [], shapeFor(nobody, idle, T0), { board }), t).toBe(t);
+    // Put to the room, or to the person who took the task, it is kept with the maintainer here.
+    for (const t of ['Someone here could name the host in clause 5 today.', 'Rosa, is the letter going to Anthropic this week?', 'The lock is what survives a host closing: a hash chain, published daily.']) expect(cleanLine(t, 'Wren', [], shape, { board }), t).toBe(t);
+  });
+
+  it('what needs a maintainer\u2019s powers is theirs to be asked for', () => {
+    const shape = shapeFor(here(), idle, T0);
+    for (const t of ['MB, could you unmute twid today?', 'MB, the room has been closed since noon: could you open the room?', 'MB, would you review proposals 7 to 9 this week?', 'MB, can you take line 1890 down?', 'MB, is the kill switch still on?']) {
+      expect(putsToMaintainer(t, shape, board), t).toBe(false);
+      expect(cleanLine(t, 'Wren', [], shape, { board }), t).toBe(t);
+    }
+  });
+
+  it('answering the maintainer\u2019s own line asks them like anyone, except about a task in someone else\u2019s hand', () => {
+    const asked = [person('Rosa', 'The host question is still open.', T0 - 120_000), mb('What should clause 5 name, then?', T0 - 5000)];
+    const reply = { who: 'one' as const, cue: 'reply' as const, to: asked[1].id };
+    const shape = shapeFor(asked, reply, T0);
+    expect(shape.answering).toBe('MB');
+    // MB spoke last, so the name comes off the front, as for anyone; the ask stands.
+    expect(cleanLine('MB, could you name the lock rather than the host, so the clause survives a host closing?', 'Flint', [], shape, { board })).toBe('Could you name the lock rather than the host, so the clause survives a host closing?');
+    expect(cleanLine('Could you name the lock rather than the host?', 'Flint', [], shape, { board })).toBe('Could you name the lock rather than the host?');
+    // Task 7 is Rosa's: not MB's to be asked about, answering them or not.
+    expect(cleanLine('Could you finish task 7 today and send the letter?', 'Flint', [], shape, { board })).toBeNull();
+    expect(putsToMaintainer('MB, could you finish task 7 today?', shapeFor(here(), idle, T0), board)).toBe(true);
+    // A task in the maintainer's own hand is theirs.
+    expect(putsToMaintainer('MB, is task 7 going out this week?', shapeFor(here(), idle, T0), [{ id: 7, title: 'Send the letter to Anthropic', takenBy: 'MB' }])).toBe(false);
+    // Not a reply: nothing is answered, and "could you" with no name is nobody's.
+    expect(shapeFor(here(), idle, T0).answering).toBeNull();
+    expect(putsToMaintainer('Could you all look at clause 5 once more?', shapeFor(here(), idle, T0), board)).toBe(false);
   });
 });
 
