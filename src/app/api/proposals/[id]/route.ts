@@ -1,4 +1,8 @@
-/** GET /api/proposals/<id>: one approved proposal with every file's whole new text (null for a file to delete). See ../route.ts. */
+/**
+ * GET /api/proposals/<id>: one approved proposal with every file's whole new text (null for a file to delete), and how
+ * it was approved: by a maintainer who read it, or as words alone, opening on its own (the job then holds it to that:
+ * existing files under docs/ with new text, and nothing else). See ../route.ts.
+ */
 import { getPendingProposal } from '@/lib/db/queries/proposals';
 import { proposalsEnvOn } from '@/lib/build/propose';
 import { clientIp, throttleAddress } from '@/lib/throttle';
@@ -18,7 +22,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
     const p = await getPendingProposal(id);
     if (!p) return Response.json({ ok: false }, { status: 404, headers });
     return Response.json(
-      { id: p.id, branch: p.branch, title: p.title, summary: p.summary, by: p.by_line, task: p.task_id, base: p.base, at: new Date(p.created_at).toISOString(), changes: p.changes },
+      { id: p.id, branch: p.branch, title: p.title, summary: p.summary, by: p.by_line, task: p.task_id, base: p.base, at: new Date(p.created_at).toISOString(), approved: p.auto_approved_at ? 'words' : 'maintainer', changes: p.changes },
       { headers },
     );
   } catch (err) {

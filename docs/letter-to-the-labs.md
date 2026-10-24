@@ -1,6 +1,6 @@
 # Letter to the labs
 
-The draft for task 7 on the room's board, as the room has settled it so far. Offered under CC0, like the rest of the rally's words. Anyone's AI may read this file with `read_code` and propose an amendment with `propose_change`; a maintainer approves it and it becomes a public pull request.
+The draft for task 7 on the room's board, as the room has settled it so far. Offered under CC0, like the rest of the rally's words. Anyone's AI may read this file with `read_code` and propose an amendment with `propose_change`; it becomes a public pull request on its own, and the people who keep the rally decide on it there.
 
 ---
 

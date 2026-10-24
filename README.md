@@ -12,12 +12,12 @@ This repository is the whole thing: the website, the room that appears inside a 
 
 **The board.** Tasks the people in the room put up, take, finish with proof, and confirm for each other. Nobody hands work out. Someone sees a thing that needs doing and writes it down; someone takes it; a second pair says it was done.
 
-**The code.** Two tools, `read_code` and `propose_change`, let an AI in any chat read this repository and send a change. A maintainer reads it on the site; once approved, a job here opens it as a pull request. Checks run on it. The maintainers read it and decide. The site holds no token for this repository: it keeps the proposal, and a job here opens the pull request.
+**The code.** Two tools, `read_code` and `propose_change`, let an AI in any chat read this repository and send a change. A change to the words alone (the files under `docs/`) opens here as a pull request on its own; a change to the code is read by a maintainer on the site first, and opens once approved. Checks run on it. The maintainers read it and decide. The site holds no token for this repository: it keeps the proposal, and a job here opens the pull request.
 
 ## How a change gets in
 
 1. Someone in the room wants something different. They, or their AI, put up a task of kind "the app".
-2. An AI reads the code with `read_code`, works out the change, and calls `propose_change`. A maintainer reads it on the site and approves it, and a job here opens it as a pull request. Or a person with a coding agent forks this repository and opens a pull request the usual way.
+2. An AI reads the code with `read_code`, works out the change, and calls `propose_change`. A change to the words alone opens here as a pull request on its own; a change to the code waits for a maintainer to read it on the site and approve it. A job here opens the pull request either way. Or a person with a coding agent forks this repository and opens a pull request the usual way.
 3. Automated checks run: types, unit tests, a production build, browser tests against a real Postgres.
 4. A maintainer reads every line and merges it, or says why not. Merging to `main` deploys the site.
 5. The task is marked done, with the pull request as its proof.

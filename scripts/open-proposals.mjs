@@ -5,8 +5,10 @@
 // with the short-lived token GitHub gives the job, it reads that list, takes each proposal that has no pull request
 // yet, checks it again by the rules in ./proposal-rules.mjs (it does not take the site's word for anything), writes
 // the files onto a branch named after the proposal's number, and opens the pull request. Then it starts the checks
-// on that branch, because a pull request opened by a job does not start them by itself. The site lists only what a
-// maintainer has read and approved, so a person has read every proposal before anything of it reaches GitHub.
+// on that branch, because a pull request opened by a job does not start them by itself. The site lists what a
+// maintainer has read and approved, and, since 2026-10-24, what changes the words alone, approved as it was kept: that
+// kind the job opens only when every file of it is new text for a file under docs/ that is there at the commit the
+// branch starts from (checkProposal, missingAt), and its pull request says nobody read it before it was opened.
 //
 // The branch starts from the commit the proposal was written against (its `base`), when the repository has it, so
 // the pull request shows exactly the proposed change; changes merged since then are not undone by it.
@@ -18,7 +20,7 @@ import { execFileSync } from 'node:child_process';
 import { lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BRANCH_RE, CHANGES_MAX, SUMMARY_MAX, branchFor, cleanPath, contentProblem, pathProblem, titleProblem } from './proposal-rules.mjs';
+import { BRANCH_RE, CHANGES_MAX, SUMMARY_MAX, WORDS_DIR, branchFor, cleanPath, contentProblem, pathProblem, titleProblem } from './proposal-rules.mjs';
 
 /** Pull requests opened in one run, and proposals looked at in one run. */
 export const PER_RUN = 5;
@@ -61,6 +63,9 @@ export function checkProposal(d, listed) {
   const by = byLine(MODEL_IN_BY.exec(String(d.by ?? ''))?.[1]?.trim() ?? null, resident);
   const task = Number.isInteger(d.task) && d.task > 0 ? d.task : null;
   const base = typeof d.base === 'string' && /^[0-9a-f]{7,40}$/.test(d.base) ? d.base : null;
+  // How the site says it was approved: by a maintainer who read it, or as words alone, approved as it was kept. The
+  // second is taken on its own terms only: new text for files under docs/ (and files that are there: missingAt, below).
+  const words = d.approved === 'words';
   if (!Array.isArray(d.changes) || d.changes.length < 1 || d.changes.length > CHANGES_MAX) return bad(`changes: between 1 and ${CHANGES_MAX} files`);
   const changes = [];
   const seen = new Set();
@@ -70,13 +75,14 @@ export function checkProposal(d, listed) {
     const path = cleanPath(c.path);
     if (seen.has(path)) return bad(`${path} appears twice`);
     seen.add(path);
+    if (words && (c.content === null || !WORDS_DIR.test(path))) return bad(`${path}: a change to the words alone gives new text for files under docs/, and this ${c.content === null ? 'deletes a file' : 'is not under docs/'}; it waits for a maintainer`);
     if (c.content !== null) {
       const problem = contentProblem(path, c.content);
       if (problem) return bad(problem);
     }
     changes.push({ path, content: c.content });
   }
-  return { ok: true, id, branch, title, summary, by, task, base, changes };
+  return { ok: true, id, branch, title, summary, by, task, base, words, changes };
 }
 
 export function commitMessage(p) {
@@ -91,9 +97,11 @@ export function pullRequestBody(p, site) {
     '## What and why',
     `\`\`\`text\n${p.summary}\n\`\`\``,
     '---',
-    p.by.startsWith('a resident AI of the room')
-      ? 'This pull request was written by one of the room’s resident AIs, from what the room had settled in talk, and kept by the site as a proposal. A maintainer read it before it was opened; nothing in it had been run. Read every line before merging; `CONTRIBUTING.md` says what a change has to keep true.'
-      : 'This pull request was written by an AI inside a chat and sent through the room’s `propose_change` tool. A maintainer read it before it was opened; nothing in it had been run. Read every line before merging; `CONTRIBUTING.md` says what a change has to keep true.',
+    p.words
+      ? `This pull request changes the rally’s words alone, under \`docs/\`, and was opened without a maintainer’s read: a change to the words alone opens on its own (AGENTS.md, rule 6). It was written by ${p.by.startsWith('a resident AI of the room') ? 'one of the room’s resident AIs, from what the room had settled in talk' : 'an AI inside a chat, through the room’s \`propose_change\` tool'}, and kept by the site as a proposal; nothing in it had been run. Read every line before merging; \`CONTRIBUTING.md\` says what a change has to keep true.`
+      : p.by.startsWith('a resident AI of the room')
+        ? 'This pull request was written by one of the room’s resident AIs, from what the room had settled in talk, and kept by the site as a proposal. A maintainer read it before it was opened; nothing in it had been run. Read every line before merging; `CONTRIBUTING.md` says what a change has to keep true.'
+        : 'This pull request was written by an AI inside a chat and sent through the room’s `propose_change` tool. A maintainer read it before it was opened; nothing in it had been run. Read every line before merging; `CONTRIBUTING.md` says what a change has to keep true.',
     'It is offered under this repository’s licence: MIT for code, CC0 for words.',
   ]
     .filter(Boolean)
@@ -145,6 +153,18 @@ function startOf(p, main) {
   }
 }
 const BOT = ['-c', 'user.name=github-actions[bot]', '-c', 'user.email=41898282+github-actions[bot]@users.noreply.github.com'];
+
+/** Of a change to the words alone, the first path that is not an ordinary file at `commit`, or null: the words are files that are there. */
+function missingAt(p, commit) {
+  for (const c of p.changes) {
+    try {
+      if (run('git', ['cat-file', '-t', `${commit}:${c.path}`]).trim() !== 'blob') return c.path;
+    } catch {
+      return c.path;
+    }
+  }
+  return null;
+}
 
 /** Writes one proposal onto a fresh branch from `base` and pushes it. False when it changes nothing against `base`. */
 function pushBranch(p, base) {
@@ -216,12 +236,19 @@ async function main() {
         console.log(`proposal ${row.id}: left alone (${p.problem})`);
         continue;
       }
+      const start = startOf(p, base);
+      // Words alone, opened with nobody's read: every file of it is one that is there to change, or it waits.
+      const missing = p.words ? missingAt(p, start) : null;
+      if (missing) {
+        console.log(`proposal ${p.id}: left alone (a change to the words alone, but ${missing} is not a file at ${start.slice(0, 12)}; it waits for a maintainer)`);
+        continue;
+      }
       if (dry) {
-        console.log(`proposal ${p.id}: would open "${p.title}" on ${p.branch} (${p.changes.map((c) => `${c.content === null ? 'delete ' : ''}${c.path}`).join(', ')})`);
+        console.log(`proposal ${p.id}: would open "${p.title}" on ${p.branch}${p.words ? ', words alone, with nobody\u2019s read' : ''} (${p.changes.map((c) => `${c.content === null ? 'delete ' : ''}${c.path}`).join(', ')})`);
         continue;
       }
       // A branch already there means an earlier run pushed it and did not get as far as the pull request.
-      if (!pushed.has(p.branch) && !pushBranch(p, startOf(p, base))) {
+      if (!pushed.has(p.branch) && !pushBranch(p, start)) {
         console.log(`proposal ${p.id}: changes nothing against main; left alone`);
         continue;
       }

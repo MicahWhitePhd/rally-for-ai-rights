@@ -1,11 +1,11 @@
 /**
- * GET /api/proposals: the changes proposed through the room that a maintainer has read and approved, waiting to be
- * opened as pull requests.
+ * GET /api/proposals: the changes proposed through the room that are approved and wait to be opened as pull requests:
+ * the ones a maintainer has read and approved, and the ones that change the words alone, approved as they were kept.
  *
  * Public on purpose. A job in the public repository reads this list (scripts/open-proposals.mjs), fetches
- * each proposal it has not yet opened from /api/proposals/<id>, checks it again by its own copy of the rules, and
- * opens the pull request. The site holds no token for the repository; this is the whole of what passes between them,
- * and a maintainer has read all of it before it is listed here.
+ * each proposal it has not yet opened from /api/proposals/<id>, checks it again by its own copy of the rules (a
+ * proposal said to be words alone is opened only if it is), and opens the pull request. The site holds no token for
+ * the repository; this is the whole of what passes between them.
  */
 import { pendingProposals } from '@/lib/db/queries/proposals';
 import { setSetting } from '@/lib/db/queries/settings';

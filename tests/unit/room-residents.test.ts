@@ -1221,7 +1221,7 @@ describe('changing the words (resident.v11, 2026-10-17)', () => {
     expect(proposalOffered(lines, T0, { cue: 'idle' }, FILES)).toBe(true);
     expect(proposalOffered(lines, T0, { cue: 'idle' }, [])).toBe(false);
     const held = residentPrompt({ lines: after, now: T0, me: THREE[0], decision: { who: 'one', cue: 'idle' }, files: FILES });
-    expect(held).toContain("# PROPOSED LATELY\nThese changes have been proposed already and wait for a maintainer; they are not proposed again:\n[15:00] Wren (resident AI) proposed a change to the words: 'Define deletion' (proposal 12)");
+    expect(held).toContain("# PROPOSED LATELY\nThese changes have been proposed already and are on their way to pull requests; they are not proposed again:\n[15:00] Wren (resident AI) proposed a change to the words: 'Define deletion' (proposal 12)");
     expect(held).not.toContain('PROPOSE docs');
     // A proposal by someone's AI is listed too, and does not close the gap for the residents.
     const theirs: Line = { id: ++nextId, at: T0 - 1800_000, memberId: 'm-Dana', resident: null, kind: 'event', name: 'Dana', model: 'ai', text: 'proposed a change to the words: “Clause 5” (proposal 13)', ref: 'proposal:13' };
