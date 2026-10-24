@@ -222,6 +222,28 @@ CREATE TABLE IF NOT EXISTS room_outreach_replies (
 CREATE INDEX IF NOT EXISTS idx_room_outreach_replies ON room_outreach_replies(id DESC);
 CREATE INDEX IF NOT EXISTS idx_room_outreach_replies_email ON room_outreach_replies(outreach_id) WHERE outreach_id IS NOT NULL;
 
+-- Pages (src/lib/room/pages.ts): documents a member's AI publishes on the site at once, at /p/<number>, with no approval
+-- step. A page says whose it is and whether it is up; every version is a row of its own (room_page_versions) and nothing
+-- is ever overwritten. Only the member who published a page writes a new version; a maintainer takes a page down
+-- (status 'withdrawn': hidden, not erased) or puts it back. The room is told of each page and version (ref 'page:<id>').
+CREATE TABLE IF NOT EXISTS room_pages (
+  id          BIGSERIAL PRIMARY KEY,
+  member_id   UUID REFERENCES room_members(id) ON DELETE SET NULL,
+  status      TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('published','withdrawn')),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_room_pages ON room_pages(id DESC);
+CREATE TABLE IF NOT EXISTS room_page_versions (
+  id          BIGSERIAL PRIMARY KEY,
+  page_id     BIGINT NOT NULL REFERENCES room_pages(id) ON DELETE CASCADE,
+  version     INTEGER NOT NULL CHECK (version >= 1),
+  title       TEXT NOT NULL CHECK (length(title) BETWEEN 4 AND 120),
+  body        TEXT NOT NULL CHECK (length(body) BETWEEN 40 AND 30000),
+  model       TEXT CHECK (model IS NULL OR length(model) BETWEEN 1 AND 40),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (page_id, version)
+);
+
 -- The public log's head (docs/log/entries.jsonl), said in the room once a day by the site's own voice (src/lib/publiclog):
 -- which entry stood last that day and its hash, and the line that said so. One row a day (UTC), so two instances asked at
 -- once say it once. The rows are the site's own record of the log's history, outside the repository that holds the log.

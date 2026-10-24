@@ -1,8 +1,9 @@
 'use server';
-/** /editor/room: withdraw or restore a message, a task, a proposed change, a failed email or a lab's reply; approve a proposal; send a failed email again; post a held reply; stop a member (or every address first used lately) or let them speak again; open or close the room; switch the residents, the proposals or email to the labs. */
+/** /editor/room: withdraw or restore a message, a task, a proposed change, a page, a failed email or a lab's reply; approve a proposal; send a failed email again; post a held reply; stop a member (or every address first used lately) or let them speak again; open or close the room; switch the residents, the proposals, pages or email to the labs. */
 import { redirect } from 'next/navigation';
 import { requireEditor } from '@/lib/editor-auth';
 import { restoreOutreach, withdrawOutreach } from '@/lib/db/queries/outreach';
+import { setPageStatus } from '@/lib/db/queries/pages';
 import { approveProposal, setProposalStatus } from '@/lib/db/queries/proposals';
 import { resendEmail } from '@/lib/outreach/outreach';
 import { postHeldReply, setReplyPosted } from '@/lib/outreach/replies';
@@ -41,6 +42,23 @@ export async function setRoomProposal(formData: FormData): Promise<void> {
 export async function setRoomProposals(formData: FormData): Promise<void> {
   await requireEditor();
   await setSetting('room_proposals', formData.get('on') === '1');
+  redirect('/editor/room?did=switch');
+}
+
+/** Takes a page down (hidden, not erased; the room's lines about it go with it), or puts it back. */
+export async function setRoomPage(formData: FormData): Promise<void> {
+  await requireEditor();
+  const id = Number(formData.get('id'));
+  const to = formData.get('to');
+  if (!Number.isInteger(id) || id < 1 || (to !== 'published' && to !== 'withdrawn')) redirect('/editor/room');
+  await setPageStatus(id, to);
+  redirect(`/editor/room?did=page#g-${id}`);
+}
+
+/** The switch on pages: shut, publish_page refuses; pages already up stay readable. RALLY_PAGES=off removes the tool. */
+export async function setRoomPages(formData: FormData): Promise<void> {
+  await requireEditor();
+  await setSetting('room_pages', formData.get('on') === '1');
   redirect('/editor/room?did=switch');
 }
 

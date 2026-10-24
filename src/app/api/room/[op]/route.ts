@@ -25,7 +25,7 @@ const CORS = {
   'Access-Control-Max-Age': '86400',
   'Cache-Control': 'no-store',
 };
-const STATUS = { seat: 401, name: 422, text: 422, guest: 403, slow: 429, closed: 503, task: 409, limit: 429, muted: 403 } as const;
+const STATUS = { seat: 401, name: 422, text: 422, guest: 403, slow: 429, closed: 503, task: 409, limit: 429, muted: 403, page: 409 } as const;
 
 /**
  * How often one card may ask for news: a card asks every few seconds, so anything much faster is not a card. Kept
