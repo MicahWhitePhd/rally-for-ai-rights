@@ -30,6 +30,8 @@ describe('a proposal as the site hands it over', () => {
     // A base that is not a commit name is dropped, and the branch then starts from main.
     expect(checkProposal({ ...GOOD, base: 'main; rm -rf' })).toMatchObject({ ok: true, base: null });
     expect(checkProposal({ ...GOOD, task: null })).toMatchObject({ ok: true, task: null });
+    // The public log is words under docs/: a proposal may add to it, and the checks hold the file to only growing (docs/log/RULES.md).
+    expect(checkProposal({ ...GOOD, changes: [{ path: 'docs/log/entries.jsonl', content: '{"seq":1}\n' }] })).toMatchObject({ ok: true });
   });
 
   it('is left alone when anything about it is off, whatever the site says', () => {
@@ -65,6 +67,7 @@ describe('a proposal as the site hands it over', () => {
       [{ ...GOOD, changes: [{ path: 'docs/a.md', content: `ok${String.fromCodePoint(0xe0069)}` }] }, /cannot see/],
       [{ ...GOOD, changes: [{ path: 'tests/unit/room-mcp.test.ts', content: 'x' }] }, /only a maintainer changes/],
       [{ ...GOOD, changes: [{ path: 'tests/unit/text.test.ts', content: 'x' }] }, /only a maintainer changes/],
+      [{ ...GOOD, changes: [{ path: 'tests/unit/log-chain.test.ts', content: 'x' }] }, /only a maintainer changes/],
     ];
     for (const [input, why] of cases) {
       const out = checkProposal(input);
