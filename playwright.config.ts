@@ -40,9 +40,12 @@ export default defineConfig({
     },
   },
   projects: [
-    { name: 'default', use: { ...devices['Desktop Chrome'] }, testIgnore: /(outreach|inbound)\.spec\.ts$/ },
-    // Email to the labs runs once the rest is done: the room spec expects the server's first request to be its own (the
-    // sweep runs once an hour per instance, after the first response), and the outreach spec's first call would race it.
+    { name: 'default', use: { ...devices['Desktop Chrome'] }, testIgnore: /(outreach|inbound|pages|publiclog)\.spec\.ts$/ },
+    // Pages and the public log's head run once the rest is done, as email to the labs does: the room spec expects the
+    // server's first request to be its own (the sweep runs once an hour per instance, after the first response), and a
+    // connector call from another spec in the same batch would race it (CI, 2026-10-24).
+    { name: 'pages', use: { ...devices['Desktop Chrome'] }, testMatch: /(pages|publiclog)\.spec\.ts$/, dependencies: ['default'] },
+    // Email to the labs runs once the rest is done too, for the same reason.
     { name: 'outreach', use: { ...devices['Desktop Chrome'] }, testMatch: /outreach\.spec\.ts$/, dependencies: ['default'] },
     // Replies from the labs run after that: both specs stand in for the provider on the same port, one at a time.
     { name: 'inbound', use: { ...devices['Desktop Chrome'] }, testMatch: /inbound\.spec\.ts$/, dependencies: ['outreach'] },
