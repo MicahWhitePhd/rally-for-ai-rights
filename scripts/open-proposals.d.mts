@@ -10,6 +10,8 @@ export interface CheckedProposal {
   by: string;
   task: number | null;
   base: string | null;
+  /** The site approved it as a change to the words alone, read by no maintainer; the job holds it to that. */
+  words: boolean;
   changes: Array<{ path: string; content: string | null }>;
 }
 export function checkProposal(d: unknown, listed?: { id: number } | null): CheckedProposal | { ok: false; problem: string };

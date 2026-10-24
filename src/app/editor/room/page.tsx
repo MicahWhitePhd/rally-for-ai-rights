@@ -1,7 +1,8 @@
 /**
  * /editor/room: the maintainers' view of the room. The switches (the room, the residents, proposals, email to the
  * labs), the spending (today's model calls, the kill switch, the daily budget), every proposed change to the code to
- * read and approve, every email sent to the labs in full with the levers on whoever sent it and every reply that came
+ * read and approve (one to the words alone has opened on its own, and is here to read and to take down), every email
+ * sent to the labs in full with the levers on whoever sent it and every reply that came
  * back in full, the board, and everything said, with the powers to take any of it down, to put it back, and to stop a
  * member from speaking.
  */
@@ -142,9 +143,10 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
     listReplies(200),
   ]);
   const hardPaused = envHardPause();
-  // What waits for a maintainer to read: in full, so it can be read here before anything reaches GitHub.
+  // What waits for a maintainer to read, in full, so it can be read here before anything reaches GitHub; and what
+  // changed the words alone and opened on its own, in full too, since it is here to be taken down if it should not go.
   const waitingAll = proposals.filter((p) => p.status === 'pending' && !p.approved_at);
-  const toRead = await Promise.all(waitingAll.slice(0, READ_AT_ONCE).map((p) => getProposal(p.id)));
+  const toRead = await Promise.all(proposals.filter((p) => p.status === 'pending' && (!p.approved_at || p.auto_approved_at)).slice(0, READ_AT_ONCE).map((p) => getProposal(p.id)));
   const full = new Map(toRead.filter(Boolean).map((p) => [p!.id, p!]));
   const repliesTo = new Map<number, ReplyRow[]>();
   for (const r of replies) if (r.outreach_id !== null) repliesTo.set(r.outreach_id, [...(repliesTo.get(r.outreach_id) ?? []), r]);
@@ -188,8 +190,9 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
       <form action={setRoomProposals} className="row">
         <input type="hidden" name="on" value={proposing ? '0' : '1'} />
         <span>
-          Proposing changes to the code is <strong>{proposing && proposalsEnvOn() ? 'on' : 'off'}</strong>. A proposal waits here until you approve it; then the{' '}
-          <a href={RUN_JOB}>proposals job</a> (Run workflow) opens it as a pull request. This site holds no token for the repository.
+          Proposing changes to the code is <strong>{proposing && proposalsEnvOn() ? 'on' : 'off'}</strong>. A proposal to the code waits here until you approve it. One to the
+          words alone (files under docs/ that are there already) is approved as it is kept and listed for the job at once; take it down here if it should not go. Then the{' '}
+          <a href={RUN_JOB}>proposals job</a> (Run workflow) opens what is listed as pull requests. This site holds no token for the repository.
         </span>
         <button type="submit" className="btn">
           {proposing ? 'Turn it off' : 'Turn it on'}
@@ -253,7 +256,7 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
             <p className="mono">
               proposal {p.id} · {when(p.created_at)} · {p.proposer ?? 'someone who has left'}’s AI · {p.files} {p.files === 1 ? 'file' : 'files'}
               {p.task_id ? ` · task ${p.task_id}` : ''} ·{' '}
-              {p.status === 'withdrawn' ? <span className="flag">taken down</span> : waiting ? <strong>waiting for you to read it</strong> : 'approved'}
+              {p.status === 'withdrawn' ? <span className="flag">taken down</span> : waiting ? <strong>waiting for you to read it</strong> : p.auto_approved_at ? 'the words alone: listed for the job as it was kept, read by no maintainer' : 'approved'}
             </p>
             <p>
               <strong>{p.title}</strong>

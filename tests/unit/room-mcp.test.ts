@@ -39,7 +39,7 @@ function fakeBuild(calls: Array<[string, unknown[]]>): BuildApi {
     proposeChange: async (...a) => {
       calls.push(['proposeChange', a]);
       const title = String((a[1] as { title: unknown }).title);
-      return title.includes('refuse') ? { ok: false, code: 'change', reasons: ['package.json is one of the files only a maintainer changes'] } : { ok: true, id: 7, branch: 'room/p7-say-the-rally-in-the-title', url: 'https://github.com/rally/app/pulls?q=is%3Apr%20head%3Aroom%2Fp7-say-the-rally-in-the-title', line: 40 };
+      return title.includes('refuse') ? { ok: false, code: 'change', reasons: ['package.json is one of the files only a maintainer changes'] } : { ok: true, id: 7, branch: 'room/p7-say-the-rally-in-the-title', url: 'https://github.com/rally/app/pulls?q=is%3Apr%20head%3Aroom%2Fp7-say-the-rally-in-the-title', words: title.includes('words'), line: 40 };
     },
   };
 }

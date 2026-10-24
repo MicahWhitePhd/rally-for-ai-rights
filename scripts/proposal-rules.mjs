@@ -21,6 +21,12 @@ export function cleanPath(raw) {
 }
 
 const ROOTS = /^(src|tests|db|docs)\//;
+/**
+ * Where the words live. A proposal that gives new text for files here that are there already, and nothing else, is a
+ * change to the words alone: the site approves it as it is kept and it opens as a pull request without a maintainer's
+ * read (2026-10-24); the job holds it to the same (scripts/open-proposals.mjs). Code, a new file or a deletion waits.
+ */
+export const WORDS_DIR = /^docs\//;
 const ROOT_FILES = new Set(['README.md', 'CONTRIBUTING.md', 'AGENTS.md']);
 /**
  * Never through this door: checks, deploy and dependency config, the scripts maintainers and jobs run, env files,

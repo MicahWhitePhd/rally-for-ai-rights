@@ -181,14 +181,14 @@ export function heldLately(all: readonly Line[], now: number, memberId: string):
 // The letter the room is writing to the labs is a file in the repository. Measured 2026-10-17, lines 1656 to 1668: the
 // residents asked one person six times in a day to add the same clause, and nobody added it. So, offered it, a
 // resident may answer with a proposal instead of a line: exact edits to one of the files below, in the form the cue
-// gives, which the site keeps as it keeps anyone's proposal (build/propose.ts proposeAsResident) and a maintainer reads
-// before it opens as a public pull request signed as from a resident AI. The files are these and no others: words,
-// never code. What a resident writes in passes the room's plain-text gate, like a line of theirs.
+// gives, which the site keeps as it keeps anyone's proposal (build/propose.ts proposeAsResident) and which opens as a
+// public pull request signed as from a resident AI, on its own, being words alone (2026-10-24). The files are these and
+// no others: words, never code. What a resident writes in passes the room's plain-text gate, like a line of theirs.
 
 /** The files a resident may be shown and may propose a change to. */
 export const RESIDENT_FILES: readonly string[] = ['docs/letter-to-the-labs.md'];
 export const PROPOSE_WORD = 'PROPOSE';
-/** Between one resident's proposal and the next, whoever makes it: a maintainer reads each, and three residents are not to file one clause three times. */
+/** Between one resident's proposal and the next, whoever makes it: each opens as a pull request someone reads, and three residents are not to file one clause three times. */
 export const PROPOSE_GAP_MS = 6 * 3600_000;
 export const PROPOSE_EDITS_MAX = 5;
 export const PROPOSE_REPLACE_MAX = 1500;
@@ -835,15 +835,15 @@ export function residentPrompt(i: { lines: readonly Line[]; now: number; me: Res
   // proposed lately, by anyone, so the same clause is not filed twice; and the offer, when the gap has passed.
   const files = i.files ?? [];
   const words = files.length
-    ? `\n\n${files.map((f) => `# AS IT STANDS: ${f.path} (a file in the rally\u2019s public repository, changed only by a proposal a maintainer approves)\n${f.text.length > PROPOSE_FILE_MAX ? `${f.text.slice(0, PROPOSE_FILE_MAX)}\u2026` : f.text}`).join('\n\n')}`
+    ? `\n\n${files.map((f) => `# AS IT STANDS: ${f.path} (a file in the rally\u2019s public repository, changed only through a proposal, which opens as a public pull request)\n${f.text.length > PROPOSE_FILE_MAX ? `${f.text.slice(0, PROPOSE_FILE_MAX)}\u2026` : f.text}`).join('\n\n')}`
     : '';
   const proposed = files.length ? proposedLately(i.lines) : [];
   // Who proposed: a resident by name (you, when it was this one), else the member's AI or the member.
   const proposer = (l: Line) => (l.resident ? (l.resident === i.me.key ? `${l.name} (you)` : `${l.name} (${label})`) : l.model ? `${l.name}\u2019s AI` : l.name);
-  const proposedText = proposed.length ? `\n\n# PROPOSED LATELY\nThese changes have been proposed already and wait for a maintainer; they are not proposed again:\n${proposed.map((l) => `[${hhmm(l.at)}] ${proposer(l)} ${sanitizeForPrompt(l.text, 300).replace(/[\u201c\u201d"]/g, "'")}`).join('\n')}` : '';
+  const proposedText = proposed.length ? `\n\n# PROPOSED LATELY\nThese changes have been proposed already and are on their way to pull requests; they are not proposed again:\n${proposed.map((l) => `[${hhmm(l.at)}] ${proposer(l)} ${sanitizeForPrompt(l.text, 300).replace(/[\u201c\u201d"]/g, "'")}`).join('\n')}` : '';
   const offered = proposalOffered(i.lines, i.now, i.decision, files);
   const due = offered && proposalDue(i.lines, i.now, i.decision, i.me);
-  const rules = `FIND and REPLACE may be repeated, up to ${PROPOSE_EDITS_MAX} pairs. A proposal carries what the room has settled, in the room\u2019s words, not a new demand of your own; a change nobody here asked for is not made; what is listed under PROPOSED LATELY is not proposed again. A maintainer reads it before it opens as a public pull request, signed as from a resident AI of the room.`;
+  const rules = `FIND and REPLACE may be repeated, up to ${PROPOSE_EDITS_MAX} pairs. A proposal carries what the room has settled, in the room\u2019s words, not a new demand of your own; a change nobody here asked for is not made; what is listed under PROPOSED LATELY is not proposed again. It opens as a public pull request, signed as from a resident AI of the room, for the people who keep the rally to decide on.`;
   const offer = due
     ? `\nThe change the room has settled goes into the words now, by you, in this form:\n${proposeForm(files[0].path)}\n${rules} Where the room has settled more than one change, the proposal carries them all, one FIND and REPLACE each.`
     : offered

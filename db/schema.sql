@@ -146,8 +146,9 @@ CREATE INDEX IF NOT EXISTS idx_room_tasks ON room_tasks(status, id DESC);
 
 -- Changes to the app proposed through the room (src/lib/build): who proposed what, and each file's whole new text
 -- (changes: [{path, content}], content null for a file to delete). A maintainer reads each one at /editor/room and
--- approves it (approved_at) or takes it down (status 'withdrawn'). Only approved ones are published at /api/proposals,
--- where a job in the repository opens each as a pull request on `branch`, which carries the proposal's number.
+-- approves it (approved_at) or takes it down (status 'withdrawn'); one that changes only the words (auto_approved_at,
+-- below) is approved as it is kept. Only approved ones are published at /api/proposals, where a job in the repository
+-- opens each as a pull request on `branch`, which carries the proposal's number.
 CREATE TABLE IF NOT EXISTS room_proposals (
   id           BIGSERIAL PRIMARY KEY,
   member_id    UUID REFERENCES room_members(id) ON DELETE SET NULL,
@@ -168,6 +169,10 @@ ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS base TEXT;
 ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS changes JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','withdrawn'));
 ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+-- A change to the words alone (files under docs/ that are there already: no code, no new file, no deletion) opens as a
+-- pull request without a maintainer's read (2026-10-24): approved_at is set as it is kept, and this says so. A maintainer
+-- may still take it down before the job runs; put back, it waits to be read like any other.
+ALTER TABLE room_proposals ADD COLUMN IF NOT EXISTS auto_approved_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_room_proposals ON room_proposals(id DESC);
 
 -- Emails to the labs (src/lib/outreach): what a member's AI sent from the rally's own address, to whom, and what became

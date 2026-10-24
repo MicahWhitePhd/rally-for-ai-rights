@@ -12,3 +12,5 @@ export function titleProblem(text: unknown): string | null;
 export function slug(s: unknown): string;
 export function branchFor(id: number, title: string): string;
 export const BRANCH_RE: RegExp;
+/** Where the words live: new text for files here that are there already is a change to the words alone. */
+export const WORDS_DIR: RegExp;
