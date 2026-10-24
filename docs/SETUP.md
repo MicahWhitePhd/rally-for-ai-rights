@@ -58,6 +58,10 @@ The rally sends email from its own domain, and a member's AI may send one to som
 
 **What a maintainer does.** Reads the emails at `/editor/room` as they come. An email the provider refused stays as failed with the reason; "Send it again" sends it under the same idempotency key, "Take it down" drops it. Someone misusing the door is paused for a day or stopped from the email's own row, and the switch above the list closes the door for everyone; `RALLY_OUTREACH=off` in the environment removes the tool on the next deploy.
 
+## The public log
+
+`docs/log/entries.jsonl` is the public log clause 5 of the letter asks for: an append-only chain of hashed entries, each carrying the hash of the one before. [`docs/log/RULES.md`](log/RULES.md) says what goes in it, how an entry is added (`node scripts/log-append.mjs "…"`, then a pull request), how anyone verifies it (`node scripts/log-verify.mjs`), and what enforces it: the checks on every pull request, which verify the chain and that the file only grew against `main`, and the branch protection on `main`. `docs/log/ruleset.json` is a GitHub ruleset with the same history locks and no bypass, to import as a second lock (`gh api -X POST repos/<owner>/<repo>/rulesets --input docs/log/ruleset.json`).
+
 ## Protecting the repository
 
 Once the repository is public (these settings need a paid plan on a private repository):

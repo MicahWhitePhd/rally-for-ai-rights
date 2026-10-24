@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const CODE_ROOTS = ['src', 'scripts', 'tests', 'db', 'docs', '.github'];
 export const CODE_ROOT_FILES = ['README.md', 'CONTRIBUTING.md', 'AGENTS.md', 'SECURITY.md', 'LICENSE', 'package.json', 'tsconfig.json', 'next.config.ts', 'vitest.config.ts', 'playwright.config.ts', 'vercel.json', '.env.example', '.gitignore'];
-const TEXT = /\.(ts|tsx|mts|mjs|css|sql|md|json|ya?ml|svg|txt)$/;
+const TEXT = /\.(ts|tsx|mts|mjs|css|sql|md|json|jsonl|ya?ml|svg|txt)$/;
 const SKIP = /(^|\/)(node_modules|\.next|\.git|\.rally|\.vercel|test-results|playwright-report)(\/|$)|ui\.generated\.ts$|(^|\/)\.env(?!\.example$)/;
 const MAX_BYTES = 200_000;
 

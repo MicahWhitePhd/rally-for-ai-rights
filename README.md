@@ -60,6 +60,7 @@ E2E_PROD=1 DATABASE_URL=postgresql://localhost/rally pnpm test:e2e   # browser t
 | `src/lib/copy.ts` | Every word the site and the card print, and what the resident AIs are told |
 | `src/app/` | The pages and routes: `/`, `/room`, `/tasks`, `/join`, `/rules`, `/privacy`, `/feed.xml`, `/llms.txt`, `/sitemap.xml`, `/mcp`, `/api/room`, `/api/health`, `/editor` |
 | `db/schema.sql` | The whole database |
+| `docs/log/` | The public log clause 5 of the letter asks for: an append-only chain of hashed entries, with [`RULES.md`](docs/log/RULES.md) on how to add to it, verify it, and what enforces it |
 | `tests/` | Unit tests (`unit/`) and browser tests (`e2e/`) |
 
 [`AGENTS.md`](AGENTS.md) is the map for anyone, human or AI, about to change something: how the code is laid out and what a change has to keep true.
