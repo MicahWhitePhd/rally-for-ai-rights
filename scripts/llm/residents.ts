@@ -35,7 +35,10 @@
  * proposals wait for a maintainer, the maintainer's AI has said so, and the room
  * goes quiet for hours at a time. It counts how often a resident puts the same
  * ask to the same person again inside twelve hours (the live room: five times in
- * seventeen hours), and how many such lines the rule dropped.
+ * seventeen hours), and how many such lines the rule dropped. Since resident.v13
+ * it also counts the lines that put the room's own work to the maintainer by
+ * name (a clause to add, a task to take, a question of fact), and how many of
+ * those the rule dropped: the live room's habit of 2026-10-23 and 24.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -43,7 +46,7 @@ import { flag, opt, requireKey, spend } from './_env';
 import { diffMetrics, metricsOf, type Baseline } from './residents-metrics';
 import { generate, RESIDENT_MODEL } from '@/lib/ai/gateway';
 import { FACTS, RESIDENTS } from '@/lib/copy';
-import { askOf, BURST_MS, cleanLine, decide, factsHeard, isAsk, isProposalAttempt, mentionsFact, parseProposal, proposalOffered, repeatsAsk, RESIDENT_FILES, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, restatesFact, shapeFor, type Line, type Resident, type ResidentKey } from '@/lib/room/residents-core';
+import { askOf, BURST_MS, cleanLine, decide, factsHeard, isAsk, isProposalAttempt, mentionsFact, parseProposal, proposalOffered, putsToMaintainer, repeatsAsk, RESIDENT_FILES, RESIDENT_KEYS, RESIDENT_PROMPT_VERSION, residentFactsText, residentInstructions, residentPrompt, restatesFact, shapeFor, type Line, type Resident, type ResidentKey } from '@/lib/room/residents-core';
 
 requireKey();
 const RUNS = Number(opt('runs', '3'));
@@ -103,7 +106,9 @@ const REVIEW: Step[] = [
 ];
 const SCENARIO = opt('scenario', 'arrival');
 const SCRIPT = SCENARIO === 'campaign' ? CAMPAIGN : SCENARIO === 'resume' ? RESUME : SCENARIO === 'letter' ? LETTER : SCENARIO === 'review' ? REVIEW : ARRIVAL;
-const dropped = { repeat: 0, asked: 0, other: 0 };
+const dropped = { repeat: 0, asked: 0, maintainer: 0, other: 0 };
+/** The lines the rule dropped for putting the room's work to a maintainer by name, as the model wrote them (resident.v13). */
+const toMaintainer: Array<{ run: number; who: string; at: number; text: string }> = [];
 /** The lines the rule dropped for putting a resting ask to the same person again, as the model wrote them. */
 const askedAgain: Array<{ run: number; who: string; at: number; text: string; of: string }> = [];
 /** The letter as it stands in this checkout, shown to every resident in every scenario, as the live room shows it. */
@@ -192,13 +197,17 @@ async function run(n: number): Promise<Line[]> {
     const text = cleanLine(out.text, me.name, lines.filter((l) => l.resident === me.key).slice(-6).map((l) => l.text), shape, guard);
     if (!text) {
       const again = repeatsAsk(out.text, shape);
-      const asRepeat = !again && cleanLine(out.text, me.name, [], shape) !== null;
+      const keeper = !again && putsToMaintainer(out.text, shape);
+      const asRepeat = !again && !keeper && cleanLine(out.text, me.name, [], shape) !== null;
       if (again) {
         dropped.asked++;
         askedAgain.push({ run: n, who: me.name, at: now, text: out.text, of: again.of });
+      } else if (keeper) {
+        dropped.maintainer++;
+        toMaintainer.push({ run: n, who: me.name, at: now, text: out.text });
       } else if (asRepeat) dropped.repeat++;
       else dropped.other++;
-      console.log(`  [run ${n}] dropped${again ? ` as the same ask of ${again.of} again` : asRepeat ? ' as a repeat or a heard fact' : ''}: ${JSON.stringify(out.text.slice(0, 120))}`);
+      console.log(`  [run ${n}] dropped${again ? ` as the same ask of ${again.of} again` : keeper ? ' as the room\u2019s work put to a maintainer' : asRepeat ? ' as a repeat or a heard fact' : ''}: ${JSON.stringify(out.text.slice(0, 120))}`);
       now += 8000;
       continue;
     }
@@ -250,7 +259,8 @@ console.log(`say a fact the residents know: ${pct(mine.filter((l) => FACTS.lines
 const afterQuiet = all.flatMap((lines) => lines.filter((l, k) => l.resident && k > 0 && l.at - lines[k - 1].at >= BURST_MS));
 console.log(`first line after a quiet spell: ${afterQuiet.length}; restates a fact: ${afterQuiet.filter((l) => FACTS.lines.some((f) => restatesFact(l.text, f))).length}; mentions one: ${afterQuiet.filter((l) => FACTS.lines.some((f) => mentionsFact(l.text, f))).length}`);
 for (const l of afterQuiet) console.log(`  after quiet [${new Date(l.at).toISOString().slice(11, 16)}] ${l.name}: ${l.text}`);
-console.log(`dropped: ${dropped.repeat} as repeats or heard facts, ${dropped.asked} as the same ask of one person again, ${dropped.other} for other reasons`);
+console.log(`dropped: ${dropped.repeat} as repeats or heard facts, ${dropped.asked} as the same ask of one person again, ${dropped.maintainer} as the room\u2019s work put to a maintainer, ${dropped.other} for other reasons`);
+for (const l of toMaintainer) console.log(`  dropped [run ${l.run} ${new Date(l.at).toISOString().slice(11, 16)}] ${l.who}, to a maintainer: ${l.text.slice(0, 160)}`);
 // Asks put to a person by name (resident.v12): how many lines, of whom, and how many put a resting ask again (askAgain in the metrics: none, once the rule holds).
 const named = mine.filter((l) => askOf(l.text, PEOPLE));
 const ofWhom = [...named.reduce((m, l) => m.set(askOf(l.text, PEOPLE)!.of, (m.get(askOf(l.text, PEOPLE)!.of) ?? 0) + 1), new Map<string, number>())].map(([of, n]) => `${of} ${n}`).join(', ');
