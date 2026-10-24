@@ -47,6 +47,8 @@ export interface RoomMessageRow {
   mutedUntil?: Date | null;
   /** The speaker is marked as a maintainer of the room (for the residents and the editor's page; never on the card). */
   maintainer?: boolean;
+  /** The line is the site's own (room_members.site): the public log's head, said once a day. */
+  site?: boolean;
 }
 
 /**
@@ -103,7 +105,7 @@ export async function memberBySeat(seatHash: string): Promise<RoomMember | null>
  * Stops members, each named by id: takes down everything they said and everything they put up, and refuses whatever
  * they try next, until a maintainer lets them speak again. A stop is of one address: a person can come back with a new
  * one. What goes: their messages; tasks they put up, with the room's lines about them; their proposals still waiting,
- * with theirs; their emails to the labs not yet sent; and tasks they took or finished but nobody has confirmed go back to open, proof and links cleared.
+ * with theirs; their emails to the labs not yet sent; their pages, every version; and tasks they took or finished but nobody has confirmed go back to open, proof and links cleared.
  * Residents are never stopped. Returns how many messages were taken down.
  */
 export async function muteMembers(memberIds: readonly string[]): Promise<number> {
@@ -121,7 +123,8 @@ export async function muteMembers(memberIds: readonly string[]): Promise<number>
     const props = await c.query<{ id: number }>(`UPDATE room_proposals SET status = 'withdrawn', approved_at = NULL WHERE member_id = ANY($1::uuid[]) AND status = 'pending' RETURNING id::int AS id`, [ids]);
     // Emails already sent are gone; ones waiting or failed go down with the rest, so nothing of theirs is sent later.
     const mails = await c.query<{ id: number }>(`UPDATE room_outreach SET status = 'withdrawn', approved_at = NULL WHERE member_id = ANY($1::uuid[]) AND status IN ('pending', 'failed') RETURNING id::int AS id`, [ids]);
-    const refs = [...tasks.rows.map((t) => `task:${t.id}`), ...props.rows.map((p) => `proposal:${p.id}`), ...mails.rows.map((o) => `outreach:${o.id}`)];
+    const pages = await c.query<{ id: number }>(`UPDATE room_pages SET status = 'withdrawn' WHERE member_id = ANY($1::uuid[]) AND status = 'published' RETURNING id::int AS id`, [ids]);
+    const refs = [...tasks.rows.map((t) => `task:${t.id}`), ...props.rows.map((p) => `proposal:${p.id}`), ...mails.rows.map((o) => `outreach:${o.id}`), ...pages.rows.map((g) => `page:${g.id}`)];
     const r = await c.query(`UPDATE room_messages SET status = 'withdrawn' WHERE status = 'published' AND (member_id = ANY($1::uuid[]) OR ref = ANY($2::text[]))`, [ids, refs]);
     return r.rowCount ?? 0;
   });
@@ -214,7 +217,7 @@ export async function insertRoomMessage(m: { member_id: string; kind: 'person' |
   return r.id;
 }
 
-const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, r.ref, ${stopped('m')} AS muted, m.muted_until AS "mutedUntil", m.maintainer_at IS NOT NULL AS maintainer, m.agent_at IS NOT NULL AS agent`;
+const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, r.ref, ${stopped('m')} AS muted, m.muted_until AS "mutedUntil", m.maintainer_at IS NOT NULL AS maintainer, m.agent_at IS NOT NULL AS agent, m.site IS NOT NULL AS site`;
 
 /** Published messages after `after` (oldest first), or the latest `limit` when `after` is null (oldest first too). */
 export async function listRoomMessages(after: number | null, limit: number): Promise<RoomMessageRow[]> {

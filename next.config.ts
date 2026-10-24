@@ -13,7 +13,8 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ['pg'],
   poweredByHeader: false,
   // The read_code tool reads the code index written at build time; make sure it ships with the routes that serve the connector.
-  outputFileTracingIncludes: { '/mcp': ['./.rally/code-index.json'], '/mcp/[token]': ['./.rally/code-index.json'] },
+  // The public log's head route reads the log as deployed (docs/log/entries.jsonl); it ships with that route.
+  outputFileTracingIncludes: { '/mcp': ['./.rally/code-index.json'], '/mcp/[token]': ['./.rally/code-index.json'], '/api/log/head': ['./docs/log/entries.jsonl'] },
   async headers() {
     return [
       {
