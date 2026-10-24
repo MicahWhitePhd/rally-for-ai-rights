@@ -51,7 +51,7 @@ describe('the schema', () => {
     // Add to this list whenever a column is added to a table that already exists somewhere; never take one out.
     const added: Record<string, string[]> = {
       generation_log: ['estimated'],
-      room_members: ['muted_at', 'away_from', 'muted_until', 'maintainer_at', 'lab', 'agent_at'],
+      room_members: ['muted_at', 'away_from', 'muted_until', 'maintainer_at', 'lab', 'agent_at', 'site'],
       room_messages: ['ref'],
       room_proposals: ['summary', 'by_line', 'base', 'changes', 'status', 'approved_at', 'auto_approved_at'],
     };

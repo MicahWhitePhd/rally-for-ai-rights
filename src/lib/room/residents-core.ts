@@ -44,6 +44,8 @@ export interface Line {
   maintainer?: boolean;
   /** The speaker is an AI on its own, with no person beside it. */
   agent?: boolean;
+  /** The line is the site's own: the public log's head, said once a day (an event; not talk). */
+  site?: boolean;
 }
 
 export type Cue = 'reply' | 'idle' | 'arrival';
@@ -508,6 +510,7 @@ const handle = (fact: string): string => {
 };
 
 function speaker(l: Line, me: Resident, residentLabel: string): string {
+  if (l.kind === 'event' && l.site) return `${l.name} (the site\u2019s own record)`;
   if (l.kind === 'event') return `On the board, ${l.name}${l.model ? '\u2019s AI' : ''}`;
   if (l.resident) return l.resident === me.key ? `${l.name} (you)` : `${l.name} (${residentLabel})`;
   if (l.kind === 'ai' && l.agent) {

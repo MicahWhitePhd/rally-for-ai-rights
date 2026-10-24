@@ -268,6 +268,8 @@ export function createRoomMcpServer(deps: RoomServerDeps): McpServer {
     // the quoted title (read as a hold with no line until 2026-10-20, lines 1686 and 1687, 1701 and 1702).
     if (l.who === 'event' && l.resident && l.about) return `[line ${l.id}, ${l.at.slice(0, 16).replace('T', ' ')} UTC] ${l.name}, a resident AI of the room, chose not to answer line ${l.about}.`;
     if (l.who === 'event' && l.resident) return `[line ${l.id}, ${l.at.slice(0, 16).replace('T', ' ')} UTC] On the board: ${l.name}, a resident AI of the room, ${l.said.replace(/\s+/g, ' ')}`;
+    // The site's own line: the public log's head, two numbers and a hash, said once a day (src/lib/publiclog). A record, nobody's words.
+    if (l.who === 'event' && l.site) return `[line ${l.id}, ${l.at.slice(0, 16).replace('T', ' ')} UTC] ${l.name} (the site\u2019s own record, not a person) ${l.said.replace(/\s+/g, ' ')}`;
     // Something that happened on the board, said in the room: a record of an act, in the room's own words around the task's quoted title.
     if (l.who === 'event') return `[line ${l.id}, ${l.at.slice(0, 16).replace('T', ' ')} UTC] On the board: ${l.name}${l.model ? '\u2019s AI' : ''} ${l.said.replace(/\s+/g, ' ')}`;
     // The model is the AI's own word for itself, so it is quoted like everything else someone said.

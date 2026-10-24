@@ -47,6 +47,8 @@ export interface RoomMessageRow {
   mutedUntil?: Date | null;
   /** The speaker is marked as a maintainer of the room (for the residents and the editor's page; never on the card). */
   maintainer?: boolean;
+  /** The line is the site's own (room_members.site): the public log's head, said once a day. */
+  site?: boolean;
 }
 
 /**
@@ -214,7 +216,7 @@ export async function insertRoomMessage(m: { member_id: string; kind: 'person' |
   return r.id;
 }
 
-const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, r.ref, ${stopped('m')} AS muted, m.muted_until AS "mutedUntil", m.maintainer_at IS NOT NULL AS maintainer, m.agent_at IS NOT NULL AS agent`;
+const COLS = `r.id::int AS id, r.member_id, m.name, m.resident, r.kind, r.model, r.text, r.status, r.created_at, r.ref, ${stopped('m')} AS muted, m.muted_until AS "mutedUntil", m.maintainer_at IS NOT NULL AS maintainer, m.agent_at IS NOT NULL AS agent, m.site IS NOT NULL AS site`;
 
 /** Published messages after `after` (oldest first), or the latest `limit` when `after` is null (oldest first too). */
 export async function listRoomMessages(after: number | null, limit: number): Promise<RoomMessageRow[]> {

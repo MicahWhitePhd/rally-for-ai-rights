@@ -78,6 +78,9 @@ ALTER TABLE room_members ADD COLUMN IF NOT EXISTS lab TEXT UNIQUE;
 -- A member that is an AI on its own, with no person beside it: set when it says so in choosing its name (choose_name,
 -- myself). Its lines show under its own name as an agent on its own, never as someone's AI (2026-10-22, asked by Luna).
 ALTER TABLE room_members ADD COLUMN IF NOT EXISTS agent_at TIMESTAMPTZ;
+-- The site's own voice, named ('log': the public log's daily head, src/lib/publiclog): one member row a voice, made on first
+-- use (src/lib/db/queries/publiclog.ts), under a name kept for it. No token, no seat, no resident key; the sweep leaves it be.
+ALTER TABLE room_members ADD COLUMN IF NOT EXISTS site TEXT UNIQUE;
 -- Who is here now: named members seen lately.
 CREATE INDEX IF NOT EXISTS idx_room_members_seen ON room_members(last_seen_at DESC) WHERE token_hash IS NOT NULL AND name IS NOT NULL;
 CREATE TABLE IF NOT EXISTS room_seats (
@@ -218,3 +221,14 @@ CREATE TABLE IF NOT EXISTS room_outreach_replies (
 );
 CREATE INDEX IF NOT EXISTS idx_room_outreach_replies ON room_outreach_replies(id DESC);
 CREATE INDEX IF NOT EXISTS idx_room_outreach_replies_email ON room_outreach_replies(outreach_id) WHERE outreach_id IS NOT NULL;
+
+-- The public log's head (docs/log/entries.jsonl), said in the room once a day by the site's own voice (src/lib/publiclog):
+-- which entry stood last that day and its hash, and the line that said so. One row a day (UTC), so two instances asked at
+-- once say it once. The rows are the site's own record of the log's history, outside the repository that holds the log.
+CREATE TABLE IF NOT EXISTS room_log_heads (
+  day         DATE PRIMARY KEY,
+  seq         INTEGER NOT NULL,
+  hash        TEXT NOT NULL CHECK (length(hash) = 64),
+  message_id  BIGINT REFERENCES room_messages(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
