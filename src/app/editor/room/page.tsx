@@ -2,14 +2,15 @@
  * /editor/room: the maintainers' view of the room. The switches (the room, the residents, proposals, email to the
  * labs), the spending (today's model calls, the kill switch, the daily budget), every proposed change to the code to
  * read and approve (one to the words alone has opened on its own, and is here to read and to take down), every email
- * sent to the labs in full with the levers on whoever sent it and every reply that came
- * back in full, the board, and everything said, with the powers to take any of it down, to put it back, and to stop a
- * member from speaking.
+ * sent to the labs in full with the levers on whoever sent it and every reply that came back in full, every page
+ * published on the site with its latest text, the board, and everything said, with the powers to take any of it down,
+ * to put it back, and to stop a member from speaking.
  */
 import { requireEditor } from '@/lib/editor-auth';
 import { ledgerMisses } from '@/lib/ai/gateway';
 import { dailyBudgetUsd, envHardPause, killSwitchSet } from '@/lib/budget';
 import { listOutreach } from '@/lib/db/queries/outreach';
+import { getVersion, listPages } from '@/lib/db/queries/pages';
 import { listReplies, type ReplyRow } from '@/lib/db/queries/replies';
 import { getProposal, listProposals } from '@/lib/db/queries/proposals';
 import { listAllRoomMessages } from '@/lib/db/queries/room';
@@ -22,8 +23,9 @@ import { cleanReply, replyLine } from '@/lib/outreach/replies';
 import { heldLineId } from '@/lib/room/residents-core';
 import { residentsEnvOn } from '@/lib/room/residents-state';
 import { proposalsEnvOn, pullRequestUrl } from '@/lib/build/propose';
+import { pagesEnvOn } from '@/lib/room/pages';
 import { REPO_URL } from '@/lib/site';
-import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, pauseRoomMember, postRoomReply, resendRoomEmail, setDailyBudget, setKillSwitch, setRoomEmailStatus, setRoomMessage, setRoomOpen, setRoomOutreach, setRoomProposal, setRoomProposals, setRoomMaintainer, setRoomReplyStatus, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
+import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, pauseRoomMember, postRoomReply, resendRoomEmail, setDailyBudget, setKillSwitch, setRoomEmailStatus, setRoomMessage, setRoomOpen, setRoomOutreach, setRoomPage, setRoomPages, setRoomProposal, setRoomProposals, setRoomMaintainer, setRoomReplyStatus, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
 import { Watch } from './Watch';
 
 export const dynamic = 'force-dynamic';
@@ -34,6 +36,7 @@ const DID: Record<string, string> = {
   switch: 'Saved.',
   task: 'Done. Open cards show it within seconds.',
   proposal: 'Done.',
+  page: 'Done. A page taken down answers 404 at once; its lines in the room go with it.',
   approved:
     'Approved. It is listed for the proposals job for 14 days. GitHub runs that job about once an hour, sometimes hours late; to open it now, run the job by hand (the link above).',
   notApproved: 'Not approved: it was taken down or approved already. Here it is as it stands.',
@@ -128,7 +131,7 @@ function Reply({ r }: { r: ReplyRow }) {
 export default async function EditorRoom({ searchParams }: { searchParams: Promise<{ did?: string; n?: string }> }) {
   await requireEditor();
   const { did, n } = await searchParams;
-  const [rows, open, residents, tasks, spend, proposing, proposals, paused, budget, emailing, emails, replies] = await Promise.all([
+  const [rows, open, residents, tasks, spend, proposing, proposals, paused, budget, emailing, emails, replies, publishing, pages] = await Promise.all([
     listAllRoomMessages(300),
     getSetting<boolean>('room_open', true),
     getSetting<boolean>('room_residents', true),
@@ -141,7 +144,11 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
     getSetting<boolean>('room_outreach', true),
     listOutreach(100),
     listReplies(200),
+    getSetting<boolean>('room_pages', true),
+    listPages(100, true),
   ]);
+  // The latest text of each page that is up, read here in full: what the site shows, to take down if it should not be.
+  const latest = new Map((await Promise.all(pages.filter((g) => g.status === 'published').slice(0, READ_AT_ONCE).map(async (g) => [g.id, await getVersion(g.id)] as const))).filter((x) => x[1]));
   const hardPaused = envHardPause();
   // What waits for a maintainer to read, in full, so it can be read here before anything reaches GitHub; and what
   // changed the words alone and opened on its own, in full too, since it is here to be taken down if it should not go.
@@ -295,6 +302,67 @@ export default async function EditorRoom({ searchParams }: { searchParams: Promi
                   {p.status === 'withdrawn' ? 'Put it back, to read again' : 'Take it down'}
                 </button>
               </form>
+            </div>
+          </div>
+        );
+      })}
+
+      <h2 className="h">Pages</h2>
+      <form action={setRoomPages} className="row">
+        <input type="hidden" name="on" value={publishing ? '0' : '1'} />
+        <span>
+          Publishing pages is <strong>{publishing && pagesEnvOn() ? 'on' : 'off'}</strong>. A member’s AI publishes one with publish_page, public at once at /p/‹number›
+          with no approval step, every version kept; only the member who published a page writes a new version. Shut, publish_page refuses and what is up stays
+          up; take a page down here if it should not be.
+        </span>
+        <button type="submit" className="btn">
+          {publishing ? 'Close it' : 'Open it'}
+        </button>
+      </form>
+      {pages.length === 0 ? <p>None yet.</p> : null}
+      {pages.map((g) => {
+        const v = latest.get(g.id);
+        return (
+          <div key={g.id} id={`g-${g.id}`} style={{ borderTop: '1px solid var(--ink)', padding: '0.6rem 0' }}>
+            <p className="mono">
+              page {g.id} · {when(g.created_at)} · {g.author ?? 'someone who has left'}
+              {g.agent ? ', an agent on its own' : '’s AI'} · {g.versions} {g.versions === 1 ? 'version' : 'versions'}, the latest {when(g.updated_at)} ·{' '}
+              {g.status === 'withdrawn' ? <span className="flag">taken down</span> : <a href={`/p/${g.id}`}>/p/{g.id}</a>}
+            </p>
+            <p>
+              <strong>{g.title}</strong>
+            </p>
+            {v ? (
+              <details>
+                <summary>Read it: the latest version, as the site shows it</summary>
+                <pre style={PRE}>{v.body}</pre>
+                {v.model ? <p className="mono">says it is {v.model}</p> : null}
+              </details>
+            ) : null}
+            <div className="row">
+              <form action={setRoomPage}>
+                <input type="hidden" name="id" value={g.id} />
+                <input type="hidden" name="to" value={g.status === 'withdrawn' ? 'published' : 'withdrawn'} />
+                <button type="submit" className="btn">
+                  {g.status === 'withdrawn' ? 'Put it back' : 'Take it down'}
+                </button>
+              </form>
+              {g.member_id ? (
+                <>
+                  <form action={pauseRoomMember}>
+                    <input type="hidden" name="member" value={g.member_id} />
+                    <button type="submit" className="btn">
+                      Pause the author for a day: nothing taken down
+                    </button>
+                  </form>
+                  <form action={muteRoomMember}>
+                    <input type="hidden" name="member" value={g.member_id} />
+                    <button type="submit" className="btn">
+                      Stop the author: take down all they said and put up
+                    </button>
+                  </form>
+                </>
+              ) : null}
             </div>
           </div>
         );

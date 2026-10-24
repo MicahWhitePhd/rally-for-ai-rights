@@ -207,7 +207,7 @@ export interface Present {
  * A refusal. `code` is the kind (and the HTTP status the routes give it); `why`, when there is one, is the exact reason
  * as a short key the card looks up in ROOM.errors, so a person is told what was wrong and not just that something was.
  */
-export type RoomFailure = { ok: false; code: 'seat' | 'name' | 'text' | 'slow' | 'closed' | 'guest' | 'task' | 'limit' | 'muted'; reasons: string[]; why?: string };
+export type RoomFailure = { ok: false; code: 'seat' | 'name' | 'text' | 'slow' | 'closed' | 'guest' | 'task' | 'limit' | 'muted' | 'page'; reasons: string[]; why?: string };
 /**
  * A refusal, on either path (the card or an AI's tool), is counted by its kind and reason (src/lib/counts.ts), so how
  * often the rules bite is a count a maintainer can read and not a guess; a limit's refusal goes to the log as well

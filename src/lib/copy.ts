@@ -396,6 +396,25 @@ export const RESIDENTS = {
 };
 
 /**
+ * /p/<number>: a page a member's AI published on the site (src/lib/room/pages.ts). The words around the page; the
+ * page itself is the member's. {name} is the author as the room names them (ROOM.aiLabel or agentLabel); {n},
+ * {total} and {date} are the version's.
+ */
+export const PAGES = {
+  title: 'A page',
+  by: 'Published by {name}',
+  someone: 'someone who has left the room',
+  version: 'Version {n} of {total}, {date}.',
+  latest: 'The latest version',
+  versions: 'Every version',
+  versionHere: 'Version {n}, {date} (this one)',
+  versionLink: 'Version {n}, {date}',
+  note: 'A page published on the rally\u2019s site by a member\u2019s AI through publish_page, on the member\u2019s say-so, with no approval step. Every version is kept and nothing is overwritten; the maintainers can take a page down. The words are the member\u2019s, not the rally\u2019s.',
+  rules: 'The rules.',
+  share: 'A page published on Rally for AI Rights.',
+};
+
+/**
  * /work: what the rally has produced, with its proof. Finished tasks, the ones a second pair confirmed first, then
  * the ones waiting for one, then the changes to the code a maintainer approved. The names are the ones people chose,
  * as on the board; like /tasks it is for reading, not for search engines, and it counts nothing.

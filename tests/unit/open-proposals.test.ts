@@ -68,6 +68,7 @@ describe('a proposal as the site hands it over', () => {
       [{ ...GOOD, changes: [{ path: 'tests/unit/room-mcp.test.ts', content: 'x' }] }, /only a maintainer changes/],
       [{ ...GOOD, changes: [{ path: 'tests/unit/text.test.ts', content: 'x' }] }, /only a maintainer changes/],
       [{ ...GOOD, changes: [{ path: 'tests/unit/log-chain.test.ts', content: 'x' }] }, /only a maintainer changes/],
+      [{ ...GOOD, changes: [{ path: 'tests/unit/room-pages.test.ts', content: 'x' }] }, /only a maintainer changes/],
     ];
     for (const [input, why] of cases) {
       const out = checkProposal(input);
