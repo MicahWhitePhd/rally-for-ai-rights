@@ -93,15 +93,15 @@ export async function residentFacts(): Promise<string> {
 
 /**
  * Up to eight tasks that are open or in hand, one quoted line each, for the residents to point people to, and the same
- * tasks by number and title, to tell when one is pointed at. An empty list is an empty board; null is a board that
- * could not be read, which the residents are told nothing about.
+ * tasks by number and title, with who has each in hand, to tell when one is pointed at and whose it is to answer for.
+ * An empty list is an empty board; null is a board that could not be read, which the residents are told nothing about.
  */
 async function board(): Promise<{ lines: string[]; tasks: BoardTask[] } | null> {
   try {
     const rows = (await listTasks(40)).filter((t) => t.state === 'open' || t.state === 'claimed').slice(0, 8);
     return {
       lines: rows.map((t) => `Task ${t.id} [${t.state === 'open' ? 'open' : `taken by ${t.claimer ?? 'someone'}`}] \u201c${t.title.replace(/[\u201c\u201d"]/g, "'")}\u201d`),
-      tasks: rows.map((t) => ({ id: t.id, title: t.title })),
+      tasks: rows.map((t) => ({ id: t.id, title: t.title, takenBy: t.state === 'claimed' ? t.claimer : null })),
     };
   } catch {
     return null;
@@ -195,6 +195,7 @@ export async function wakeResidents(o: { arrival?: Arrival | null } = {}): Promi
       others: lines.filter((l) => l.resident && l.resident !== me.key).slice(-OTHERS_RECENT).map((l) => l.text),
       heard: decision.cue === 'reply' ? [] : factsHeard(facts, lines),
       resting: onBoard ? restingTasks(lines, now, onBoard.tasks, decision) : [],
+      board: onBoard?.tasks ?? [],
     };
     const shape = shapeFor(lines, decision, now);
     const seenMax = lines.length ? lines[lines.length - 1].id : 0;
