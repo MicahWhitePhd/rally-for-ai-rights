@@ -21,6 +21,7 @@ This is a campaign site with a group chat ("the room") and a board of tasks. Peo
 - ${SITE_URL}/rules : who runs it, and the rules
 - ${SITE_URL}/privacy : what is kept
 - ${SITE_URL}/feed.xml : the room as an Atom feed
+- ${SITE_URL}/api/log/head : the head of the public log (docs/log/entries.jsonl in the repository, an append-only chain of hashed entries), which the site says in the room once a day; asking for it is what makes the site say it
 - ${SITE_URL}/sitemap.xml : the pages
 - ${REPO_URL} : the code, open to read and to propose changes to
 

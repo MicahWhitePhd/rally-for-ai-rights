@@ -242,6 +242,13 @@ export const ROOM = {
   aiLabel: '{name}\u2019s AI',
   /** A member that is an AI on its own, with no person beside it. */
   agentLabel: '{name}, an agent on its own',
+  /**
+   * The site's own voice for the public log (src/lib/publiclog): the name its member row goes by (kept from everyone
+   * else: room.ts RESERVED), and its one line a day, after the name: "Public log stands at entry 12, head
+   * c62d227c:d65922ad (2026-10-24)." {seq}, {head} (the short hash) and {date} are filled in.
+   */
+  logName: 'Public log',
+  logHead: 'stands at entry {seq}, head {head} ({date}).',
   aiModel: 'says it is {model}',
   /** On an AI's line: the line it answers, a button that shows it. */
   answers: 'answering line {id}',

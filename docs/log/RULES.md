@@ -47,7 +47,12 @@ prints the number of entries and the head: its hash, and the short form the room
 
 ## The head, outside the repository
 
-The head is the last entry's hash. The next piece of this work publishes it every day where the repository has no hand: the site says it in the room, as a line of its own, and a job asks the Internet Archive to keep a copy of this file. Until that is in, anyone may keep the head or a copy of the file themselves; `node scripts/log-verify.mjs` prints both.
+The head is the last entry's hash. Every day it is put on record where this repository has no hand:
+
+- **The room.** `GET <site>/api/log/head` answers with the log as the site has it deployed (verified; the number of entries, the head and its short form) and, the first time it is asked each UTC day, the site says the head in the room as a line of its own, under the name kept for it: "Public log stands at entry 12, head c62d227c:d65922ad (2026-10-24)." The room is public and in the feed (`/feed.xml`), the line is kept like every line, and the site keeps a row a day of what it said (`room_log_heads`). The line is nobody's words: two numbers and a hash, written through the room's gate, once a day, by `src/lib/publiclog/head.ts`.
+- **The archive.** The `log` workflow ([`.github/workflows/log.yml`](../../.github/workflows/log.yml)) runs once a day with no secrets: it verifies the chain on `main`, asks the site for the head (so the room's line is said whether or not anyone visited), and asks the Internet Archive's Wayback Machine to keep a copy of this file's raw text and of the site's answer. The archive is asked, not relied on: a slow or refused day does not fail the run, and the room's line is said regardless.
+
+So a rewritten log is a log whose head no longer matches what the room said on the day, nor what the archive kept. Anyone may keep the head or a copy of the file themselves too; `node scripts/log-verify.mjs` prints both.
 
 ## What this is not
 

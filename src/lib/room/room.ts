@@ -87,7 +87,7 @@ const POLL_S = 3;
 const SEAT_RE = /^s_[A-Za-z0-9_-]{24,48}$/;
 const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M}\p{N} '.-]*$/u;
 /** Words a name may not contain: ones that would let a person pass for the room, its keepers, a maker (the three labs a reply is said under, among them), or a machine. */
-const RESERVED = /(^|[^\p{L}\p{N}])(clerk|admin|administrator|moderator|maintainers?|editor|official|staff|system|notice|assistant|anthropic|openai|xai|google|claude|chatgpt|gemini|rally|board|room|venue|ai|bot|resident)([^\p{L}\p{N}]|$)/iu;
+const RESERVED = /(^|[^\p{L}\p{N}])(clerk|admin|administrator|moderator|maintainers?|editor|official|staff|system|notice|assistant|anthropic|openai|xai|google|claude|chatgpt|gemini|rally|board|room|venue|ai|bot|resident|log)([^\p{L}\p{N}]|$)/iu;
 /** Whole names kept for someone, compared run together: the convener, under either of his names (/rules names him). */
 const KEPT_WHOLE = ['micahwhite', 'micahbornfree'];
 /** A name as it is compared: accents and marks off, lower case. "Mícah" is "micah", "Flínt" is "flint". */
@@ -509,7 +509,7 @@ export type ReadResult =
       ok: true;
       me: Me;
       seat: string;
-      lines: Array<{ id: number; at: string; who: 'person' | 'ai' | 'event'; name: string; model: string | null; mine: boolean; resident: boolean; /** An AI on its own, with no person beside it. */ agent?: boolean; said: string; /** On a resident's event: the line they let stand. */ about?: number; /** On an AI's line: the line it answers. */ answers?: number }>;
+      lines: Array<{ id: number; at: string; who: 'person' | 'ai' | 'event'; name: string; model: string | null; mine: boolean; resident: boolean; /** An AI on its own, with no person beside it. */ agent?: boolean; /** The site's own line (the public log's head), nobody's words. */ site?: boolean; said: string; /** On a resident's event: the line they let stand. */ about?: number; /** On an AI's line: the line it answers. */ answers?: number }>;
       /** There are lines beyond these: before the first (the latest, or a page back) or after the last (reading on from a line). */
       more: boolean;
       /** Who is in the room now and who was in lately, as this reader may see it (presence). */
@@ -560,7 +560,7 @@ export async function readRoom(seat: unknown, o: ReadOptions = {}): Promise<Read
     ok: true,
     me: { name: me.name, member: me.member, pair: pairOf(me.id), agent: Boolean(me.agent) },
     seat: seat as string,
-    lines: rows.map((r) => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, ...(r.agent ? { agent: true } : {}), said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}), ...(answeredLineId(r) !== null ? { answers: answeredLineId(r) as number } : {}) })),
+    lines: rows.map((r) => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, ...(r.agent ? { agent: true } : {}), ...(r.site ? { site: true } : {}), said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}), ...(answeredLineId(r) !== null ? { answers: answeredLineId(r) as number } : {}) })),
     more,
     ...presence(me, present, on),
   };
@@ -624,7 +624,7 @@ export async function catchUp(seat: unknown): Promise<CatchUpResult> {
   const since = away ?? new Date(Date.now() - CATCH_UP_DEFAULT_MS);
   const [rows, tasks] = await Promise.all([listRoomMessagesSince(since, 400), listTasks(120).catch(() => [])]);
   const mine = new Set(tasks.filter((t) => t.created_by === me.id || t.claimed_by === me.id).map((t) => t.id));
-  const line = (r: (typeof rows)[number]): ReadLine => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, ...(r.agent ? { agent: true } : {}), said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}), ...(answeredLineId(r) !== null ? { answers: answeredLineId(r) as number } : {}) });
+  const line = (r: (typeof rows)[number]): ReadLine => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, ...(r.agent ? { agent: true } : {}), ...(r.site ? { site: true } : {}), said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}), ...(answeredLineId(r) !== null ? { answers: answeredLineId(r) as number } : {}) });
   const name = me.name;
   const named = rows.filter((r) => r.member_id !== me.id && r.kind !== 'event' && namedIn(r.text, name)).slice(-CATCH_UP_LINES).map(line);
   const onMine = rows.filter((r) => r.kind === 'event' && r.member_id !== me.id && r.ref?.startsWith('task:') && mine.has(Number(r.ref.slice(5)))).slice(-CATCH_UP_LINES).map(line);

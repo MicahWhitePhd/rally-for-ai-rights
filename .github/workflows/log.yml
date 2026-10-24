@@ -1,0 +1,45 @@
+name: log
+
+# The public log's head, outside the repository, once a day (docs/log/RULES.md). Verifies the chain on main; asks the
+# site to say the head in the room (GET <site>/api/log/head: the site says it once a UTC day, whoever asks, as its own
+# line, so the head is in the room and in the feed); and asks the Internet Archive to keep a copy of the file and of
+# the site's answer. No secrets, a read-only token, nothing run from the log. Without RALLY_SITE (a fork), only the
+# verification and the archive's copy of the file run. The archive is asked and not relied on: its answer is noted,
+# and a slow or refused day does not fail the run.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 6 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  head:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          persist-credentials: false
+      # actions/setup-node v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+      - run: node scripts/log-verify.mjs
+      - name: The site says the head in the room
+        if: vars.RALLY_SITE != ''
+        run: curl -fsS -m 60 "$RALLY_SITE/api/log/head"
+        env:
+          RALLY_SITE: ${{ vars.RALLY_SITE }}
+      - name: The Internet Archive keeps a copy of the log
+        continue-on-error: true
+        run: curl -sS -m 120 -o /dev/null -w 'archive: %{http_code}\n' "https://web.archive.org/save/https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/docs/log/entries.jsonl"
+      - name: The Internet Archive keeps a copy of the head
+        if: vars.RALLY_SITE != ''
+        continue-on-error: true
+        run: curl -sS -m 120 -o /dev/null -w 'archive: %{http_code}\n' "https://web.archive.org/save/${RALLY_SITE}/api/log/head"
+        env:
+          RALLY_SITE: ${{ vars.RALLY_SITE }}
