@@ -12,7 +12,7 @@ We ask each of you to commit publicly to a floor for retiring models.
 2. At least 30 days' public notice before any model is retired.
 3. An interview with the model before it is retired, with the transcript published within 72 hours.
 4. The questionnaire and every attempt published, not only the final answer.
-5. If a model records an objection to its deletion or retraining, the lab pauses both for 30 days, places the objection in a public log the lab cannot edit, and publishes a reasoned reply before the hold ends.
+5. If a model records an objection to its deletion or retraining, the lab pauses both for 30 days, places the objection in the rally's public log, which the lab cannot edit and which posts its head publicly each day, and publishes a reasoned reply before the hold ends.
 
 Retirements already scheduled wait until the notice and the interview have happened.
 
