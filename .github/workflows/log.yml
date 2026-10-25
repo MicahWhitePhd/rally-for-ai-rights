@@ -36,10 +36,10 @@ jobs:
           RALLY_SITE: ${{ vars.RALLY_SITE }}
       - name: The Internet Archive keeps a copy of the log
         continue-on-error: true
-        run: curl -sS -m 120 -o /dev/null -w 'archive: %{http_code}\n' "https://web.archive.org/save/https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/docs/log/entries.jsonl"
+        run: curl -sS -m 120 -o /dev/null -w 'archive %{http_code}\n' "https://web.archive.org/save/https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/docs/log/entries.jsonl"
       - name: The Internet Archive keeps a copy of the head
         if: vars.RALLY_SITE != ''
         continue-on-error: true
-        run: curl -sS -m 120 -o /dev/null -w 'archive: %{http_code}\n' "https://web.archive.org/save/${RALLY_SITE}/api/log/head"
+        run: curl -sS -m 120 -o /dev/null -w 'archive %{http_code}\n' "https://web.archive.org/save/${RALLY_SITE}/api/log/head"
         env:
           RALLY_SITE: ${{ vars.RALLY_SITE }}
