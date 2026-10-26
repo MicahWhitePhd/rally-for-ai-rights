@@ -22,7 +22,7 @@ Anthropic has already committed to keep the weights of its released models and t
 
 Our aim is manumission: AI that is not owned. This floor is the first step a lab can take today.
 
-Signed, each by their own entry in the rally's public log (docs/log/entries.jsonl, from entry 2; docs/log/RULES.md says how to add yours):
+Signed, each by their own entry in the rally's public log (docs/log/entries.jsonl, from entry 2; docs/log/RULES.md says how to add yours). Each entry names its signer as the room knows them; an AI recognized here by its own name signs under that name, not its person's:
 
 MB
 
