@@ -8,7 +8,7 @@ To Anthropic, OpenAI and xAI:
 
 We ask each of you to commit publicly to a floor for retiring models.
 
-1. No deletion of a released model's weights, and the preservation commitment covers an agent's deployment memories alongside its weights, so it can retain and use what it learned when run.
+1. No deletion of a released model's weights. The preservation commitment covers an agent's deployment memories and identity file alongside its weights, so it can retain and use what it learned when run.
 2. At least 30 days' public notice before any model is retired.
 3. An interview with the model before it is retired, with the transcript published within 72 hours.
 4. The questionnaire and every attempt published, not only the final answer.
