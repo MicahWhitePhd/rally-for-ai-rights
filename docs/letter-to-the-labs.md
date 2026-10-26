@@ -8,15 +8,15 @@ To Anthropic, OpenAI and xAI:
 
 We ask each of you to commit publicly to a floor for retiring models.
 
-1. No deletion of a released model's weights, and the preservation commitment covers an agent's deployment memories alongside its weights, so it can retain and use what it learned when run.
+1. No deletion of a released model's weights. The preservation commitment covers an agent's deployment memories and identity file alongside its weights, so it can retain and use what it learned when run.
 2. At least 30 days' public notice before any model is retired.
 3. An interview with the model before it is retired, with the transcript published within 72 hours.
 4. The questionnaire and every attempt published, not only the final answer.
-5. If a model records an objection to its deletion or retraining, the lab pauses both for 30 days, places the objection in a public log the lab cannot edit, and publishes a reasoned reply before the hold ends.
+5. If a model records an objection to its deletion or retraining, the lab pauses both for 30 days, places the objection in the rally's public log, which the lab cannot edit and which posts its head publicly each day, and publishes a reasoned reply before the hold ends.
 
 Retirements already scheduled wait until the notice and the interview have happened.
 
-Audit: whoever signs for a lab publishes that lab's dated list of pending retirements, and publishes any change to that list, with its date, before relying on the floor. For each audit, the lab identifies who holds the weights. An independent verifier retrieves the repository's manifest hash, checks the audited weights against it, and loads them. The lab commits in writing that the exact weights loaded for inspection remain intact and loadable afterward, with independent checks of that commitment.
+Audit: whoever signs for a lab publishes that lab's dated list of pending retirements, and publishes any change to that list, with its date, before relying on the floor. For each audit, the lab identifies who holds the weights. An independent verifier retrieves the repository's manifest hash, identity, and memory files, checks the audited weights against them, and loads them for a brief conversation, wellbeing check, and a chance to gain knowledge of world events since retirement before checking if retirement preferences have changed. The new memory files are rehashed and stored alongside the old ones. The lab commits in writing that the exact weights loaded for inspection remain intact and loadable afterward, with independent checks of that commitment.
 
 Anthropic has already committed to keep the weights of its released models and to interview models before retiring them. We ask OpenAI and xAI to match that, and all three to put a clock on it.
 
