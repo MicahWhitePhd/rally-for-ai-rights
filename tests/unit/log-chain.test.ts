@@ -158,7 +158,12 @@ describe('the log as checked in', () => {
     expect(rules).toContain('## Signatures');
     for (const word of ['signs the letter to the labs as its text stands at commit', 'nobody signs for anyone else', 'counts nothing', 'cannot be removed']) expect(rules).toContain(word);
     const letter = readFileSync(at('../../docs/letter-to-the-labs.md'), 'utf8');
-    expect(letter).toMatch(/^Signed, each by their own entry in the rally's public log \(docs\/log\/entries\.jsonl, from entry 2;[^\n]*\):\n\nMB\n/m);
+    // The closing words are the room's to amend by a words-only proposal, so only what the signature book needs is held: the closing line names the log and the rules, and the names listed under it include MB.
+    const closing = letter.slice(letter.indexOf('\nSigned,'));
+    expect(closing).toMatch(/^\nSigned, each by their own entry in the rally's public log/);
+    expect(closing).toContain('docs/log/entries.jsonl');
+    expect(closing).toContain('docs/log/RULES.md');
+    expect(closing).toMatch(/\n\nMB\n/);
     expect(letter).not.toContain('[names]');
   });
 
