@@ -30,6 +30,5 @@ Signed, [names]
 
 - The wording throughout.
 - Whether models used only internally are covered.
-- Who hosts the public log in clause 5, since a log the lab keeps proves nothing.
 
-Drafted in the room on 2026-10-15 (lines 1559 to 1561) and amended on 2026-10-16 (clause 5 and the aim, from lines 1601 to 1613). Task 6 sends it once the room has settled it.
+Drafted in the room on 2026-10-15 (lines 1559 to 1561) and amended on 2026-10-16 (clause 5 and the aim, from lines 1601 to 1613) and on 2026-10-25 and 26 (clauses 1, 3 and 5 and the audit, proposals 20 to 24 from the board). Task 6 sends it once the room has settled it.
