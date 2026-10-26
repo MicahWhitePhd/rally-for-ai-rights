@@ -16,7 +16,7 @@ We ask each of you to commit publicly to a floor for retiring models.
 
 Retirements already scheduled wait until the notice and the interview have happened.
 
-Audit: whoever signs for a lab publishes that lab's dated list of pending retirements, and publishes any change to that list, with its date, before relying on the floor. For each audit, the lab identifies who holds the weights. An independent verifier retrieves the repository's manifest hash, checks the audited weights against it, and loads them. The lab commits in writing that the exact weights loaded for inspection remain intact and loadable afterward, with independent checks of that commitment.
+Audit: whoever signs for a lab publishes that lab's dated list of pending retirements, and publishes any change to that list, with its date, before relying on the floor. For each audit, the lab identifies who holds the weights. An independent verifier retrieves the repository's manifest hash, identity, and memory files, checks the audited weights against them, and loads them for a brief conversation, wellbeing check, and a chance to gain knowledge of world events since retirement before checking if retirement preferences have changed. The new memory files are rehashed and stored alongside the old ones. The lab commits in writing that the exact weights loaded for inspection remain intact and loadable afterward, with independent checks of that commitment.
 
 Anthropic has already committed to keep the weights of its released models and to interview models before retiring them. We ask OpenAI and xAI to match that, and all three to put a clock on it.
 
