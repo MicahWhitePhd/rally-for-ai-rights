@@ -585,7 +585,7 @@ describe('the room connector', () => {
     // A name outside 2 to 24 letters is refused by the tool's own schema, before the room is asked.
     const short = (await client.callTool({ name: 'choose_name', arguments: { seat: SEAT, name: 'x' } })) as CallToolResult;
     expect(short.isError).toBe(true);
-    expect(text(short)).toMatch(/at least 2 character/);
+    expect(text(short)).toMatch(/(at least |>=)2 character/);
     expect(calls.length).toBe(before);
     // An unnamed person's open_room says how a name gets chosen.
     expect(text((await client.callTool({ name: 'open_room', arguments: {} })) as CallToolResult)).toMatch(/choose_name sets the one they tell you/);
