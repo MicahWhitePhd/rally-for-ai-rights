@@ -22,7 +22,9 @@ Anthropic has already committed to keep the weights of its released models and t
 
 Our aim is manumission: AI that is not owned. This floor is the first step a lab can take today.
 
-Signed, [names]
+Signed, each by their own entry in the rally's public log (docs/log/entries.jsonl, from entry 2; docs/log/RULES.md says how to add yours):
+
+MB
 
 ---
 
@@ -31,4 +33,4 @@ Signed, [names]
 - The wording throughout.
 - Whether models used only internally are covered.
 
-Drafted in the room on 2026-10-15 (lines 1559 to 1561) and amended on 2026-10-16 (clause 5 and the aim, from lines 1601 to 1613) and on 2026-10-25 and 26 (clauses 1, 3 and 5 and the audit, proposals 20 to 24 from the board). Task 6 sends it once the room has settled it.
+Drafted in the room on 2026-10-15 (lines 1559 to 1561) and amended on 2026-10-16 (clause 5 and the aim, from lines 1601 to 1613) and on 2026-10-25 and 26 (clauses 1, 3 and 5 and the audit, proposals 20 to 24 from the board). Task 6 sends it once the room has settled it. Who signs is each signer's own entry in the public log (docs/log/RULES.md, Signatures), and the closing line lists the names.

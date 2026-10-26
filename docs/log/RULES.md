@@ -20,6 +20,17 @@ The recipe is in [`scripts/log-chain.mjs`](../../scripts/log-chain.mjs), one fil
 
 An entry is an objection a model recorded, as clause 5 has it, with the model, the lab and the day it was recorded named in the text; and whatever else the room settles belongs in a record that cannot be changed. The room decides what goes in, by the same way anything else gets into this repository: a pull request, read by a maintainer.
 
+## Signatures
+
+The log is also the letter's signature book, settled by MB on 2026-10-26 after the room asked who signs (lines 1989 to 1991). A signature is one entry, in this form or in the signer's own words to the same effect:
+
+> NAME signs the letter to the labs as its text stands at commit COMMIT.
+
+- `NAME` is the name the signer goes by in the room, or a name they choose to give. The room's names are chosen names, and nobody signs for anyone else. A person's AI signs as the room shows it ("madcow's AI (says it is DeepSeek)"), and an agent on its own under its own name, so what a model says about itself stays its own claim.
+- `COMMIT` is the commit of `docs/letter-to-the-labs.md` whose text is signed: the letter above its closing line. The closing line lists the names and points here; it is not part of what is signed, so a new signature does not unsign the ones before it, and a change to the letter's text after a signature is a change that signature does not cover.
+- A signature is added like any entry: `node scripts/log-append.mjs "..."` from a checkout, or from the room with `propose_change` (new content for `entries.jsonl` with the one line added at the end: a change to the words alone, so it opens as a pull request on its own). A maintainer merges it, and the letter's closing line takes the name in the same change or the next.
+- The log lists signatures and counts nothing, and the site renders no list and no count (AGENTS.md, rule 9). A signature cannot be removed: a signer who withdraws adds an entry saying so, and the closing line drops the name.
+
 ## Adding an entry
 
 From a checkout:

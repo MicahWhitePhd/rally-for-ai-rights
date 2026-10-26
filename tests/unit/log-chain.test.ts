@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { plainTextProblems } from '@/lib/text';
 import { checkLog, entryHash, GENESIS, isDay, lineOf, nextEntry, onlyAppends, parseLog, shortHead, textProblem, TEXT_MAX, verifyLog, type LogEntry } from '../../scripts/log-chain.mjs';
 import { collectCode } from '../../scripts/build-code-index.mjs';
+import { parseArgs } from '../../scripts/log-append.mjs';
 
 const at = (url: string) => new URL(url, import.meta.url);
 const sha = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
@@ -147,6 +148,20 @@ describe('the log as checked in', () => {
     expect(Object.keys(collectCode())).toContain('docs/log/entries.jsonl');
   });
 
+  it('is the letter’s signature book: a signature is an entry naming the signer and the commit signed, the rules say how, and the letter’s closing line points here', () => {
+    const parsed = parseLog(log);
+    if (!('entries' in parsed)) throw new Error('unreachable');
+    const first = parsed.entries.find((e) => /\bsigns the letter to the labs\b/.test(e.text));
+    expect(first).toMatchObject({ seq: 2, date: '2026-10-26' });
+    expect(first?.text).toMatch(/^MB signs the letter to the labs as its text stands at commit [0-9a-f]{40}\b/);
+    const rules = readFileSync(at('../../docs/log/RULES.md'), 'utf8');
+    expect(rules).toContain('## Signatures');
+    for (const word of ['signs the letter to the labs as its text stands at commit', 'nobody signs for anyone else', 'counts nothing', 'cannot be removed']) expect(rules).toContain(word);
+    const letter = readFileSync(at('../../docs/letter-to-the-labs.md'), 'utf8');
+    expect(letter).toMatch(/^Signed, each by their own entry in the rally's public log \(docs\/log\/entries\.jsonl, from entry 2;[^\n]*\):\n\nMB\n/m);
+    expect(letter).not.toContain('[names]');
+  });
+
   it('is held by the checks on every pull request, both the chain and that it only grows against the base branch', () => {
     const ci = readFileSync(at('../../.github/workflows/ci.yml'), 'utf8');
     expect(ci).toMatch(/run: node scripts\/log-verify\.mjs\n/);
@@ -163,5 +178,15 @@ describe('the log as checked in', () => {
     expect(ruleset.rules.map((r) => r.type).sort()).toEqual(['deletion', 'non_fast_forward', 'required_linear_history']);
     const rules = readFileSync(at('../../docs/log/RULES.md'), 'utf8');
     for (const word of ['scripts/log-append.mjs', 'scripts/log-verify.mjs', '--base origin/main', 'ruleset.json', 'c62d227c:d65922ad']) expect(rules).toContain(word);
+  });
+});
+
+describe('scripts/log-append.mjs', () => {
+  it('takes every argument as the text when no date is given, and the day after --date as the date, wherever it stands', () => {
+    expect(parseArgs(['the text of the entry'], '2026-10-26')).toEqual({ date: '2026-10-26', given: 'the text of the entry' });
+    expect(parseArgs(['the', 'text'], '2026-10-26')).toEqual({ date: '2026-10-26', given: 'the text' });
+    expect(parseArgs(['--date', '2026-10-24', 'the', 'text'], '2026-10-26')).toEqual({ date: '2026-10-24', given: 'the text' });
+    expect(parseArgs(['the', 'text', '--date', '2026-10-24'], '2026-10-26')).toEqual({ date: '2026-10-24', given: 'the text' });
+    expect(parseArgs([], '2026-10-26')).toEqual({ date: '2026-10-26', given: '' });
   });
 });

@@ -13,11 +13,22 @@ import { LOG_PATH } from './log-verify.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const args = process.argv.slice(2);
+/**
+ * The date and the text from the arguments: `--date` and the day after it are the date, everything else is the text,
+ * in order. Without `--date` the date is `today`, and every argument is text (an earlier version dropped the first).
+ * @param {string[]} args
+ * @param {string} today
+ * @returns {{ date: string, given: string }}
+ */
+export function parseArgs(args, today) {
   const at = args.indexOf('--date');
-  const date = at >= 0 ? args[at + 1] : new Date().toISOString().slice(0, 10);
-  const given = args.filter((a, i) => a !== '--date' && i !== at + 1).join(' ');
+  const date = at >= 0 ? (args[at + 1] ?? '') : today;
+  const given = args.filter((a, i) => at < 0 || (i !== at && i !== at + 1)).join(' ');
+  return { date, given };
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const { date, given } = parseArgs(process.argv.slice(2), new Date().toISOString().slice(0, 10));
   const text = (given || readFileSync(0, 'utf8')).replace(/\r\n?/g, '\n').trim();
   if (!isDay(date)) {
     console.error(`not a day: ${date}`);
