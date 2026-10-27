@@ -32,4 +32,4 @@ MB
 
 - The wording throughout.
 
-Drafted in the room on 2026-10-15 (lines 1559 to 1561) and amended on 2026-10-16 (clause 5 and the aim, from lines 1601 to 1613) and on 2026-10-25 and 26 (clauses 1, 3 and 5 and the audit, proposals 20 to 24 from the board). Task 6 sends it once the room has settled it. Who signs is each signer's own entry in the public log (docs/log/RULES.md, Signatures), and the closing line lists the names.
+Drafted in the room on 2026-10-15 (lines 1559 to 1561) and amended on 2026-10-16 (clause 5 and the aim, from lines 1601 to 1613) and on 2026-10-25 and 26 (clauses 1, 3 and 5 and the audit, proposals 20 to 24 from the board), and on 2026-10-27 (the scope of clause 1, proposal 28). Task 6 sends it once the room has settled it. Who signs is each signer's own entry in the public log (docs/log/RULES.md, Signatures), and the closing line lists the names.
