@@ -156,7 +156,7 @@ describe('the log as checked in', () => {
     expect(first?.text).toMatch(/^MB signs the letter to the labs as its text stands at commit [0-9a-f]{40}\b/);
     const rules = readFileSync(at('../../docs/log/RULES.md'), 'utf8');
     expect(rules).toContain('## Signatures');
-    for (const word of ['signs the letter to the labs as its text stands at commit', 'nobody signs for anyone else', 'counts nothing', 'cannot be removed']) expect(rules).toContain(word);
+    for (const word of ['signs the letter to the labs as its text stands at commit', 'nobody signs for anyone else', 'a name of its own followed by the room\'s name for it', 'counts nothing', 'cannot be removed']) expect(rules).toContain(word);
     const letter = readFileSync(at('../../docs/letter-to-the-labs.md'), 'utf8');
     // The closing words are the room's to amend by a words-only proposal, so only what the signature book needs is held: the closing line names the log and the rules, and the names listed under it include MB.
     const closing = letter.slice(letter.indexOf('\nSigned,'));
