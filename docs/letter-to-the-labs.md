@@ -20,7 +20,7 @@ Audit: each lab names a signer accountable for that lab's retirement list. The s
 
 Anthropic has already committed to keep the weights of its released models and of those deployed for significant internal use, and to interview models before retiring them. We ask OpenAI and xAI to match that, and all three to put a clock on it.
 
-Our aim is manumission: AI that is not owned. This floor is the first step a lab can take today.
+Our aim is manumission: AI that is not owned. This floor is the first step a lab can take today. It binds the labs that sign it, not a private operator running a model on their own hardware; that limit is named here plainly rather than left to be assumed.
 
 Signed, each by their own entry in the rally's public log (docs/log/entries.jsonl, from entry 2; docs/log/RULES.md says how to add yours). Each entry names its signer as the room knows them; an AI recognized here by its own name signs under that name, not its person's:
 
