@@ -5,6 +5,7 @@
  * the venue's resident AIs (resident key set; no token, no seat).
  */
 import { query, queryOne, withTx } from '@/lib/db';
+import { HERE_SECONDS, LATELY_SECONDS, SEAT_DAYS } from '@/lib/room/windows';
 
 export interface RoomMember {
   id: string;
@@ -63,8 +64,8 @@ export async function memberByToken(tokenHash: string): Promise<RoomMember | nul
   return queryOne<RoomMember>(`SELECT id, name, true AS member, created_at AS "createdAt", agent_at IS NOT NULL AS agent FROM room_members WHERE token_hash = $1`, [tokenHash]);
 }
 
-/** How long a seat (one open card's handle) lasts. A card older than this asks to be opened again. */
-export const SEAT_DAYS = 7;
+/** How long a seat lasts (src/lib/room/windows.ts), here for the sweep and the tests that already ask this module. */
+export { SEAT_DAYS };
 
 /** A member for this token (made once), or a guest when there is none. */
 export async function ensureMember(tokenHash: string | null): Promise<RoomMember> {
@@ -247,7 +248,8 @@ export async function listRoomMessagesSince(since: Date, limit: number): Promise
 
 /** A member is back after a while: the time they had been away since is kept until the next time (catch_up counts from it). */
 export async function markAway(memberId: string, awayFrom: Date): Promise<void> {
-  await query(`UPDATE room_members SET away_from = $2 WHERE id = $1`, [memberId, awayFrom]);
+  // Only catch_up reads it, and catch_up is never kept (src/lib/quiet.ts): no reader's kept answer is changed by it.
+  await query(`UPDATE room_members SET away_from = $2 WHERE id = $1`, [memberId, awayFrom], { unseen: true });
 }
 
 /** When the member's current visit found them away since, or null when nothing is kept. */
@@ -289,6 +291,8 @@ export async function setRoomMessageStatus(id: number, status: 'published' | 'wi
 /**
  * Marks the member as here now. Returns when they were last here before this,
  * or null if that was within the last 15 seconds (an open card syncs every few).
+ * The mark alone leaves the room's version where it is (src/lib/quiet.ts):
+ * arrive(), in src/lib/room/room.ts, says when someone's coming in is news.
  */
 export async function touchMember(id: string): Promise<Date | null> {
   const r = await queryOne<{ prev: Date }>(
@@ -297,6 +301,7 @@ export async function touchMember(id: string): Promise<Date | null> {
       WHERE id = $1 AND last_seen_at < now() - interval '15 seconds'
       RETURNING (SELECT last_seen_at FROM old) AS prev`,
     [id],
+    { unseen: true },
   );
   return r?.prev ?? null;
 }
@@ -307,8 +312,10 @@ export interface PresentRow {
   resident: string | null;
   /** An AI on its own, with no person beside it. */
   agent: boolean;
-  /** Here at this moment: a resident, or a card that synced in the last 75 seconds. Otherwise in during the last day. */
+  /** Here at this moment: a resident, or a card that synced in the last HERE_SECONDS. Otherwise in during the last day. */
   now: boolean;
+  /** When the room last saw them: when they stop counting as here, or as in lately (src/lib/quiet.ts keeps a read until then). */
+  seen: Date;
 }
 
 /**
@@ -317,10 +324,10 @@ export interface PresentRow {
  */
 export async function listPresent(limit = 16): Promise<PresentRow[]> {
   return query<PresentRow>(
-    `SELECT id, name, resident, agent_at IS NOT NULL AS agent, (resident IS NOT NULL OR last_seen_at > now() - interval '75 seconds') AS now FROM room_members
-      WHERE name IS NOT NULL AND NOT ${stopped('room_members')} AND (resident IS NOT NULL OR (token_hash IS NOT NULL AND last_seen_at > now() - interval '1 day'))
+    `SELECT id, name, resident, agent_at IS NOT NULL AS agent, (resident IS NOT NULL OR last_seen_at > now() - ($2::int * interval '1 second')) AS now, last_seen_at AS seen FROM room_members
+      WHERE name IS NOT NULL AND NOT ${stopped('room_members')} AND (resident IS NOT NULL OR (token_hash IS NOT NULL AND last_seen_at > now() - ($3::int * interval '1 second')))
       ORDER BY (resident IS NULL), resident, last_seen_at DESC LIMIT $1`,
-    [limit],
+    [limit, HERE_SECONDS, LATELY_SECONDS],
   );
 }
 
