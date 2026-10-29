@@ -228,6 +228,50 @@ describe('read_room in a quiet room', () => {
   });
 });
 
+describe('the Runtime Cache, as Vercel hands it to a request', () => {
+  const CONTEXT = Symbol.for('@vercel/request-context');
+  const g = globalThis as unknown as Record<symbol, unknown>;
+  const inRequest = (cache: unknown) => {
+    g[CONTEXT] = { get: () => ({ cache }) };
+  };
+  afterEach(() => {
+    delete g[CONTEXT];
+  });
+
+  it('is found in the request context, with no variables set (2026-10-29: checking RUNTIME_CACHE_* kept nothing on the site)', async () => {
+    useQuietStore(undefined);
+    expect(process.env.RUNTIME_CACHE_ENDPOINT).toBeUndefined();
+    inRequest(store);
+    const { seat: s } = seat();
+    await readRoom(s);
+    expect((await asked(() => readRoom(s))).calls).toEqual([]);
+    expect([...kept.keys()].every((k) => k.startsWith('rally-quiet:'))).toBe(true);
+  });
+
+  it('keeps nothing in a request that has no cache', async () => {
+    useQuietStore(undefined);
+    inRequest(undefined);
+    const { seat: s } = seat();
+    await readRoom(s);
+    expect((await asked(() => readRoom(s))).calls).toContain('messages');
+    expect(kept.size).toBe(0);
+  });
+
+  it('a write with no request in reach still moves the version, in the cache this instance last saw', async () => {
+    useQuietStore(undefined);
+    inRequest(store);
+    const { seat: s } = seat();
+    await readRoom(s);
+    delete g[CONTEXT];
+    say('m9', 'written after the response went out');
+    await roomChanged();
+    inRequest(store);
+    const after = await asked(() => readRoom(s));
+    expect(after.calls).toContain('messages');
+    expect(after.out.ok && after.out.lines.at(-1)?.said).toBe('written after the response went out');
+  });
+});
+
 describe('kept reads and deployments', () => {
   it('an answer kept by one deployment is never handed out by the next, while one write still moves the version for both', async () => {
     const { seat: s } = seat();
