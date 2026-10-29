@@ -1,5 +1,4 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { getCache } from '@vercel/functions';
 
 /**
  * Quiet reads: a read that would find the room just as it was is answered again without the database, so a database
@@ -13,10 +12,14 @@ import { getCache } from '@vercel/functions';
  * a mark is news). A kept answer is given again only while the version is the one it was read under, and never past
  * its own time (the seat's days, someone's presence running out) or QUIET_MAX_MS, whichever comes first.
  *
- * Not marked server-only: src/lib/db.ts imports it, and scripts run with tsx import that. With no Runtime Cache (a
- * script, a test, a local server) nothing is kept: a version held in one process would never
- * hear of a write made by another. A write made from outside the deployment (a script against the live database) does
- * not move the version, so a kept answer can be QUIET_MAX_MS behind it at most. RALLY_QUIET=off turns it all off.
+ * On Vercel the Runtime Cache is handed to each request in its context (the global Symbol.for('@vercel/request-context'),
+ * which @vercel/functions reads the same way); the RUNTIME_CACHE_* variables are only for builds, and checking them
+ * kept nothing on the site at all (2026-10-29, the first deploy). A write made where no request is in reach uses the
+ * cache this instance last saw, and says so once in the log if it has none. Not marked server-only: src/lib/db.ts
+ * imports it, and scripts run with tsx import that. With no Runtime Cache (a script, a test, a local server) nothing is
+ * kept: a version held in one process would never hear of a write made by another. A write made from outside the
+ * deployment (a script against the live database) does not move the version, so a kept answer can be QUIET_MAX_MS
+ * behind it at most. RALLY_QUIET=off turns it all off.
  */
 
 /** What the version and the kept answers are kept in: the Runtime Cache, or what a test hands in. */
@@ -27,24 +30,49 @@ export interface QuietStore {
 
 /** The longest a kept answer is given again, however quiet the room. Each time it runs out, a read wakes the database. */
 export const QUIET_MAX_MS = 30 * 60_000;
-const VERSION_KEY = 'room:version';
+/** Every key this keeps is under this, apart from anything else the project keeps in its Runtime Cache. */
+const NAMESPACE = 'rally-quiet:';
+const VERSION_KEY = `${NAMESPACE}room:version`;
 /** The version outlives any answer kept under it; once it is gone, answers kept under it are never matched again. */
 const VERSION_TTL_S = 86_400;
 
-let store: QuietStore | null | undefined;
-function quietStore(): QuietStore | null {
-  if (store === undefined) {
-    const there = Boolean(process.env.RUNTIME_CACHE_ENDPOINT && process.env.RUNTIME_CACHE_HEADERS) && process.env.RALLY_QUIET !== 'off';
-    store = there ? getCache({ namespace: 'rally-quiet' }) : null;
-    // Once per instance, for the maintainers' logs: whether reads are kept here at all.
-    if (process.env.VERCEL) console.log(`[QUIET] ${store ? 'keeping reads in the Runtime Cache' : process.env.RALLY_QUIET === 'off' ? 'off (RALLY_QUIET)' : 'no Runtime Cache here: nothing is kept'}`);
-  }
-  return store;
+const REQUEST_CONTEXT = Symbol.for('@vercel/request-context');
+
+/** The Runtime Cache of the request in progress, when there is one. */
+function requestCache(): QuietStore | null {
+  const ctx = (globalThis as Record<symbol, { get?: () => { cache?: Partial<QuietStore> } | undefined } | undefined>)[REQUEST_CONTEXT];
+  const cache = ctx?.get?.()?.cache;
+  return cache && typeof cache.get === 'function' && typeof cache.set === 'function' ? (cache as QuietStore) : null;
 }
 
-/** Test hook: the store to keep things in (null keeps nothing); undefined goes back to looking for the Runtime Cache. */
+let given: QuietStore | null | undefined;
+let lastSeen: QuietStore | null = null;
+const told = new Set<string>();
+/** Once per instance and per outcome, for the maintainers' logs: whether reads are kept here at all. */
+function tellOnce(what: string): void {
+  if (told.has(what) || !process.env.VERCEL) return;
+  told.add(what);
+  console.log(`[QUIET] ${what}`);
+}
+/**
+ * Where the version and the kept answers are: what a test handed in, else the current request's Runtime Cache. A
+ * write (`writing`) with no request in reach uses the one this instance last saw. Null: nothing is kept.
+ */
+function quietStore(o: { writing?: boolean } = {}): QuietStore | null {
+  if (given !== undefined) return given;
+  if (process.env.RALLY_QUIET === 'off') return null;
+  const now = requestCache();
+  if (now) lastSeen = now;
+  tellOnce(now ? 'keeping reads in the Runtime Cache' : o.writing ? 'a write with no request in reach' : 'no Runtime Cache in this request: nothing is kept');
+  if (now || !o.writing) return now;
+  if (!lastSeen && process.env.VERCEL) warnOnce('moving the version', new Error('a write with no Runtime Cache in reach'));
+  return lastSeen;
+}
+
+/** Test hook: the store to keep things in (null keeps nothing); undefined goes back to the request's Runtime Cache. */
 export function useQuietStore(s: QuietStore | null | undefined): void {
-  store = s;
+  given = s;
+  lastSeen = null;
 }
 
 let warned = false;
@@ -63,6 +91,7 @@ const freshVersion = (): string => randomBytes(12).toString('base64url');
  * through the old deployment while the new one takes over still moves it for both.
  */
 export const quietKey = (...parts: ReadonlyArray<string | number | null>): string =>
+  NAMESPACE +
   createHash('sha256')
     .update([process.env.VERCEL_DEPLOYMENT_ID ?? '', ...parts].map(String).join('\u0000'))
     .digest('hex');
@@ -72,7 +101,7 @@ export const quietKey = (...parts: ReadonlyArray<string | number | null>): strin
  * it. Never throws: a write that went through is not failed for this.
  */
 export async function roomChanged(): Promise<void> {
-  const s = quietStore();
+  const s = quietStore({ writing: true });
   if (!s) return;
   try {
     await s.set(VERSION_KEY, freshVersion(), { name: 'room-version', ttl: VERSION_TTL_S });
