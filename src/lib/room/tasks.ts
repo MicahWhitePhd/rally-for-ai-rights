@@ -28,7 +28,9 @@ import { countNow } from '@/lib/counts';
 import { SITE_LINK } from '@/lib/site';
 import { mentionsIgnoringInstructions, normaliseStatement, plainTextProblems, textIssues, visible } from '@/lib/text';
 import { throttle } from '@/lib/throttle';
-import { fail, failWhy, isFirstDay, pairOf, seatedMember, type Me, type RoomFailure } from './room';
+import { fail, failWhy, isFirstDay, isSeat, pairOf, seatedMember, type Me, type RoomFailure } from './room';
+import { quietKeep, quietKey, quietRead, quietVersion } from '@/lib/quiet';
+import { SEAT_DAYS } from './windows';
 
 export const TASK_TITLE_MIN = 4;
 export const TASK_TITLE_MAX = 120;
@@ -202,24 +204,50 @@ async function say(memberId: string, via: 'person' | 'ai', what: string, t: { id
   }
 }
 
+/**
+ * Until when a look at the board stays true, if nothing is written: the seat's last day, and the moment a task that is
+ * taken goes back to open because its time ran out (the only change the board makes on its own).
+ */
+function boardTrueUntil(me: { seatAt?: Date | string | null }, rows: readonly TaskRow[]): number {
+  const seatAt = me.seatAt ? new Date(me.seatAt).getTime() : NaN;
+  let until = Number.isFinite(seatAt) ? seatAt + SEAT_DAYS * 86_400_000 : 0;
+  for (const t of rows) if (t.state === 'claimed' && t.claim_until) until = Math.min(until, new Date(t.claim_until).getTime());
+  return until;
+}
+
 /** The board as this seat sees it. A guest may read it. */
 /**
  * The board as this reader may see it: every task, the tasks in one state, or one task by its number. A state the
  * words do not name is no filter. One that was taken down is not there, by number either: hidden is hidden.
+ *
+ * The same look on the same seat, with nothing written since, is answered again from what was kept (src/lib/quiet.ts)
+ * without asking the database, as read_room is: an agent that reads the board every few minutes then lets it sleep
+ * while the room is quiet.
  */
 export async function listBoard(seat: unknown, o: { state?: unknown; id?: unknown } = {}): Promise<BoardResult> {
+  const id = typeof o.id === 'number' && Number.isInteger(o.id) && o.id > 0 ? o.id : null;
+  const state = id === null && typeof o.state === 'string' && (TASK_STATES as readonly string[]).includes(o.state) ? (o.state as TaskState) : null;
+  const key = isSeat(seat) ? quietKey('room-board', seat, id, state) : null;
+  if (key) {
+    const kept = await quietRead<BoardResult>(key);
+    if (kept) return kept;
+  }
+  // Taken before the database is asked: anything written from here on moves it, and what this look keeps is never given again.
+  const v = key ? await quietVersion() : null;
   const me = await seatedMember(seat);
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
   const who = { name: me.name, member: me.member, pair: pairOf(me.id) };
-  const id = typeof o.id === 'number' && Number.isInteger(o.id) && o.id > 0 ? o.id : null;
   if (id !== null) {
     const t = await getTask(id);
     if (!t || t.state === 'withdrawn') return fail('task', `there is no task ${id} on the board`);
-    return { ok: true, me: who, tasks: [toPublic(t, me)] };
+    const one: BoardResult = { ok: true, me: who, tasks: [toPublic(t, me)] };
+    if (key && v) await quietKeep(key, v, boardTrueUntil(me, [t]), one);
+    return one;
   }
-  const state = typeof o.state === 'string' && (TASK_STATES as readonly string[]).includes(o.state) ? (o.state as TaskState) : null;
   const rows = await listTasks();
-  return { ok: true, me: who, tasks: rows.map((t) => toPublic(t, me)).filter((t) => state === null || t.state === state) };
+  const all: BoardResult = { ok: true, me: who, tasks: rows.map((t) => toPublic(t, me)).filter((t) => state === null || t.state === state) };
+  if (key && v) await quietKeep(key, v, boardTrueUntil(me, rows), all);
+  return all;
 }
 
 export async function createTask(seat: unknown, o: { title: unknown; detail?: unknown; kind?: unknown; via: 'person' | 'ai' }): Promise<TaskResult> {

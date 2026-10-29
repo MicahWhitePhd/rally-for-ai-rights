@@ -31,6 +31,7 @@
     "@modelcontextprotocol/ext-apps": "^1.7.5",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@vercel/analytics": "^2.0.1",
+    "@vercel/functions": "3.10.1",
     "ai": "7.0.148",
     "next": "16.4.2",
     "pg": "8.23.1",

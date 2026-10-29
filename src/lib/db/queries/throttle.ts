@@ -12,6 +12,8 @@ export async function bumpThrottle(bucket: string, windowSec: number): Promise<n
      ON CONFLICT (bucket, win) DO UPDATE SET n = throttle.n + 1
      RETURNING n`,
     [bucket, windowSec],
+    // A count of tries is no news to anyone reading the room (src/lib/quiet.ts).
+    { unseen: true },
   );
   return row?.n ?? 0;
 }
@@ -21,6 +23,7 @@ export async function cleanupThrottle(olderThanSec = 86_400): Promise<number> {
   const rows = await query<{ bucket: string }>(
     `DELETE FROM throttle WHERE win < now() - ($1::int * interval '1 second') RETURNING bucket`,
     [olderThanSec],
+    { unseen: true },
   );
   return rows.length;
 }

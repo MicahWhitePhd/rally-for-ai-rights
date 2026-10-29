@@ -6,6 +6,7 @@
  * or a script run with tsx. Timestamps come back as JS Date (pg default).
  */
 import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from 'pg';
+import { roomChanged } from '@/lib/quiet';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -58,14 +59,28 @@ function isConnectAcquireError(e: unknown): boolean {
   );
 }
 
-/** Parameterised query; retries ONCE on a connect-acquire failure (Neon cold start). */
+/** A statement that may change something: anything but a plain read (a lock in a read counts too; that only costs a reread). */
+const WRITES = /\b(INSERT|UPDATE|DELETE|TRUNCATE|MERGE|ALTER|CREATE|DROP)\b/i;
+
+export interface QueryOptions {
+  /** A write that changes nothing anyone reading the room is shown (the throttle's counts): the room's version stays (src/lib/quiet.ts). */
+  unseen?: boolean;
+}
+
+/**
+ * Parameterised query; retries ONCE on a connect-acquire failure (Neon cold start). A write that changed a row moves
+ * the room's version (src/lib/quiet.ts) before it returns, so no read kept from before it is given again; one that
+ * changed none changed nothing (every write here that wraps another in WITH returns the rows it changed).
+ */
 export async function query<T extends QueryResultRow>(
   text: string,
   params: ReadonlyArray<unknown> = [],
+  options: QueryOptions = {},
 ): Promise<T[]> {
   for (let attempt = 1; ; attempt++) {
     try {
       const res = await getPool().query<T>(text, params as unknown[]);
+      if (!options.unseen && res.rowCount !== 0 && WRITES.test(text)) await roomChanged();
       return res.rows;
     } catch (e) {
       if (attempt < 2 && isConnectAcquireError(e)) {
@@ -80,18 +95,20 @@ export async function query<T extends QueryResultRow>(
 export async function queryOne<T extends QueryResultRow>(
   text: string,
   params: ReadonlyArray<unknown> = [],
+  options: QueryOptions = {},
 ): Promise<T | null> {
-  const rows = await query<T>(text, params);
+  const rows = await query<T>(text, params, options);
   return rows[0] ?? null;
 }
 
-/** Several statements in ONE transaction on one checked-out client. */
+/** Several statements in ONE transaction on one checked-out client. Once committed, the room's version moves (src/lib/quiet.ts). */
 export async function withTx<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
     const result = await fn(client);
     await client.query('COMMIT');
+    await roomChanged();
     return result;
   } catch (err) {
     try {

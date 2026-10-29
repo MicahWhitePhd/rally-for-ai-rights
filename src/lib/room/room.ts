@@ -50,6 +50,8 @@ import { isClaudeServer, throttle, throttleAddress } from '@/lib/throttle';
 import { count, countNow } from '@/lib/counts';
 import { mintToken, ROOM_SECRET_MIN, TOKEN_RE, tokenSigned } from './token';
 import { readResidentsState, residentsOn, thinkingNow } from './residents-state';
+import { quietKeep, quietKey, quietRead, quietVersion, roomChanged } from '@/lib/quiet';
+import { HERE_SECONDS, LATELY_SECONDS, SEAT_DAYS } from './windows';
 
 export const TEXT_MAX = 500;
 export const NAME_MIN = 2;
@@ -418,10 +420,17 @@ function presence(me: { id: string; name: string | null; member: boolean; agent?
  * away since is kept for catch_up (markAway). The card's sync does this on every look; an AI's tools do it on
  * open_room, read_room and catch_up, so a host that shows no card gets a real "since last visit" too. A database
  * without the column yet is not the caller's problem.
+ *
+ * Someone who was not here a moment ago (HERE_SECONDS) is here now, and who is here is part of what a reader is
+ * shown, so the room's version moves (src/lib/quiet.ts). Not for a look through read_room (`reading`): an agent that
+ * reads the room every few minutes would otherwise move the version on every read, and no read could ever be kept for
+ * anyone. Such a reader shows as here to the others once a read of theirs reaches the database.
  */
-async function arrive(me: { id: string; name: string | null; member: boolean; muted?: boolean }): Promise<{ back: boolean; arrived: boolean }> {
+async function arrive(me: { id: string; name: string | null; member: boolean; muted?: boolean }, o: { reading?: boolean } = {}): Promise<{ back: boolean; arrived: boolean }> {
   const prev = await touchMember(me.id);
-  const back = prev !== null && Date.now() - new Date(prev).getTime() > AWAY_MS;
+  const away = prev === null ? 0 : Date.now() - new Date(prev).getTime();
+  if (!o.reading && away > HERE_SECONDS * 1_000) await roomChanged();
+  const back = away > AWAY_MS;
   // Awaited: catch_up reads it back at once, and a write still in flight would read as nothing kept.
   if (back && me.member) await markAway(me.id, new Date(prev as Date)).catch((err) => warnAwayOnce((err as Error)?.message));
   return { back, arrived: Boolean(me.name) && !me.muted && back };
@@ -540,30 +549,63 @@ const READS_PER_HOUR = 60;
 const CATCH_UPS_PER_HOUR = 20;
 const lineId = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null);
 
+/**
+ * Until when a read stays true, if nothing is written: the seat's last day, and the moment someone this reader is
+ * shown stops counting as here, or as in lately. The reader's own row is left out: presence shows them the same either
+ * way. A guest is shown only the residents, who neither come nor go. Zero (keep nothing) for a row with no time.
+ */
+function readTrueUntil(me: { id: string; member: boolean; seatAt?: Date | string | null }, present: PresentRow[]): number {
+  const seatAt = me.seatAt ? new Date(me.seatAt).getTime() : NaN;
+  let until = Number.isFinite(seatAt) ? seatAt + SEAT_DAYS * 86_400_000 : 0;
+  if (!me.member) return until;
+  for (const p of present) {
+    if (p.resident !== null || p.id === me.id) continue;
+    const seen = p.seen ? new Date(p.seen).getTime() : NaN;
+    if (!Number.isFinite(seen)) return 0;
+    until = Math.min(until, seen + (p.now ? HERE_SECONDS : LATELY_SECONDS) * 1_000);
+  }
+  return until;
+}
+
+/**
+ * read_room, for an AI. The same read on the same seat, with nothing written to the room since, is answered again
+ * from what was kept (src/lib/quiet.ts) without asking the database: an agent that reads the room every few minutes
+ * then lets it sleep while the room is quiet. A read answered so is not counted against the hour's reads (it costs
+ * the database nothing) and does not mark the reader as seen.
+ */
 export async function readRoom(seat: unknown, o: ReadOptions = {}): Promise<ReadResult> {
+  const n = Math.min(READ_MAX, Math.max(1, Math.floor(o.limit ?? 15) || 15));
+  const [line, before, since] = [lineId(o.line), lineId(o.before), lineId(o.since)];
+  const key = isSeat(seat) ? quietKey('room-read', seat, n, line, before, since) : null;
+  if (key) {
+    const kept = await quietRead<Omit<Extract<ReadResult, { ok: true }>, 'seat'>>(key);
+    if (kept) return { ...kept, seat: seat as string };
+  }
   const me = await memberOf(seat);
   if (!me) return fail('seat', 'this card is no longer connected to the room; open the room again');
   const gate = await throttle(`room:r:${me.id}`, READS_PER_HOUR, 3600, { failOpen: false });
   if (!gate.allowed) return fail('slow', 'the room was read a great deal just now; wait a while');
-  const n = Math.min(READ_MAX, Math.max(1, Math.floor(o.limit ?? 15) || 15));
-  const [line, before, since] = [lineId(o.line), lineId(o.before), lineId(o.since)];
   if ([line, before, since].filter((v) => v !== null).length > 1) return fail('text', 'one of line, before and since at a time');
+  // The reader's own mark is made before the version is taken; anything written from here on moves it.
+  await arrive(me, { reading: true });
+  const v = key ? await quietVersion() : null;
   const [found, present, on] = await Promise.all([
     line !== null ? listRoomMessagesBefore(line + 1, Math.min(n, READ_AT_LINE)) : before !== null ? listRoomMessagesBefore(before, n + 1) : listRoomMessages(since, n + 1),
     listPresent(),
     residentsOn(),
-    arrive(me),
   ]);
   const more = line === null && found.length > n;
   const rows = !more ? found : since !== null ? found.slice(0, n) : found.slice(-n);
-  return {
-    ok: true,
+  const read = {
+    ok: true as const,
     me: { name: me.name, member: me.member, pair: pairOf(me.id), agent: Boolean(me.agent) },
-    seat: seat as string,
     lines: rows.map((r) => ({ id: r.id, at: new Date(r.created_at).toISOString(), who: r.kind, name: r.name ?? '', model: r.model, mine: r.member_id === me.id, resident: r.resident !== null, ...(r.agent ? { agent: true } : {}), ...(r.site ? { site: true } : {}), said: r.text, ...(heldLineId(r) !== null ? { about: heldLineId(r) as number } : {}), ...(answeredLineId(r) !== null ? { answers: answeredLineId(r) as number } : {}) })),
     more,
     ...presence(me, present, on),
   };
+  // The seat itself is not kept: it is the reader's own handle, and the read that finds this again brings it.
+  if (key && v) await quietKeep(key, v, readTrueUntil(me, present), read);
+  return { ...read, seat: seat as string };
 }
 
 let awayWarned = false;
