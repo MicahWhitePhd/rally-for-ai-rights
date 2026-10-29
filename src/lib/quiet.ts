@@ -56,8 +56,16 @@ function warnOnce(what: string, err: unknown): void {
 
 const freshVersion = (): string => randomBytes(12).toString('base64url');
 
-/** The key a read is kept under: a hash of what it was asked with, so a seat (a bearer handle) is never a key itself. */
-export const quietKey = (...parts: ReadonlyArray<string | number | null>): string => createHash('sha256').update(parts.map(String).join('\u0000')).digest('hex');
+/**
+ * The key a read is kept under: a hash of what it was asked with, so a seat (a bearer handle) is never a key itself.
+ * The deployment is part of it: the Runtime Cache keeps entries across deployments, and an answer kept by one build
+ * must never be handed out by another, whose answers may have a different shape. The version is not: a write made
+ * through the old deployment while the new one takes over still moves it for both.
+ */
+export const quietKey = (...parts: ReadonlyArray<string | number | null>): string =>
+  createHash('sha256')
+    .update([process.env.VERCEL_DEPLOYMENT_ID ?? '', ...parts].map(String).join('\u0000'))
+    .digest('hex');
 
 /**
  * The room has changed: no answer kept before now is given again. Awaited by the writer, so the next read hears of

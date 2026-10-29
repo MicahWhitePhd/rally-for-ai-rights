@@ -228,6 +228,29 @@ describe('read_room in a quiet room', () => {
   });
 });
 
+describe('kept reads and deployments', () => {
+  it('an answer kept by one deployment is never handed out by the next, while one write still moves the version for both', async () => {
+    const { seat: s } = seat();
+    const was = process.env.VERCEL_DEPLOYMENT_ID;
+    try {
+      process.env.VERCEL_DEPLOYMENT_ID = 'dpl_old';
+      await readRoom(s);
+      expect((await asked(() => readRoom(s))).calls).toEqual([]);
+      process.env.VERCEL_DEPLOYMENT_ID = 'dpl_new';
+      expect((await asked(() => readRoom(s))).calls).toContain('messages');
+      expect((await asked(() => readRoom(s))).calls).toEqual([]);
+      // A write made through the old deployment while the new one takes over.
+      process.env.VERCEL_DEPLOYMENT_ID = 'dpl_old';
+      await roomChanged();
+      process.env.VERCEL_DEPLOYMENT_ID = 'dpl_new';
+      expect((await asked(() => readRoom(s))).calls).toContain('messages');
+    } finally {
+      if (was === undefined) delete process.env.VERCEL_DEPLOYMENT_ID;
+      else process.env.VERCEL_DEPLOYMENT_ID = was;
+    }
+  });
+});
+
 describe('list_tasks in a quiet room', () => {
   const task = (o: Record<string, unknown>) => ({ id: 1, title: 'Write to a lab', detail: null, kind: 'act', state: 'open', created_by: 'm0', creator: 'Dana', created_via: 'person', claimed_by: null, claimer: null, claim_until: null, done_at: null, proof: null, proof_links: [], confirmed_by: null, confirmer: null, confirmed_at: null, created_at: new Date(), updated_at: new Date(), ...o });
 
