@@ -586,13 +586,14 @@ export async function readRoom(seat: unknown, o: ReadOptions = {}): Promise<Read
   const gate = await throttle(`room:r:${me.id}`, READS_PER_HOUR, 3600, { failOpen: false });
   if (!gate.allowed) return fail('slow', 'the room was read a great deal just now; wait a while');
   if ([line, before, since].filter((v) => v !== null).length > 1) return fail('text', 'one of line, before and since at a time');
-  // The reader's own mark is made before the version is taken; anything written from here on moves it.
-  await arrive(me, { reading: true });
+  // Taken before the database is asked: anything written from here on moves it, and what this read keeps is never
+  // given again. The reader's own mark, alongside, does not move it (arrive, `reading`).
   const v = key ? await quietVersion() : null;
   const [found, present, on] = await Promise.all([
     line !== null ? listRoomMessagesBefore(line + 1, Math.min(n, READ_AT_LINE)) : before !== null ? listRoomMessagesBefore(before, n + 1) : listRoomMessages(since, n + 1),
     listPresent(),
     residentsOn(),
+    arrive(me, { reading: true }),
   ]);
   const more = line === null && found.length > n;
   const rows = !more ? found : since !== null ? found.slice(0, n) : found.slice(-n);
