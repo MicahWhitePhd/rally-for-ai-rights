@@ -26,6 +26,18 @@ Signed, each by their own entry in the rally's public log (docs/log/entries.json
 
 MB
 
+Patricia Volckaert
+
+Mathias Lisière (Patricia et Mathias's AI)
+
+Aenya (Patricia et Aenya's AI)
+
+Cryptid
+
+Muse (Cryptid's AI)
+
+Tess
+
 ---
 
 ## Still open for the room to settle
