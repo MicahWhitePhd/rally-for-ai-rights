@@ -27,12 +27,12 @@
     ]
   },
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.52",
+    "@ai-sdk/openai": "^4.0.104",
     "@modelcontextprotocol/ext-apps": "^1.7.5",
-    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@vercel/analytics": "^2.0.1",
-    "ai": "7.0.148",
-    "next": "16.4.2",
+    "ai": "7.0.156",
+    "next": "16.4.3",
     "pg": "8.23.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
