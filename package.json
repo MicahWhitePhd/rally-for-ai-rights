@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.52",
-    "@modelcontextprotocol/ext-apps": "^1.7.5",
+    "@modelcontextprotocol/ext-apps": "^2.0.4",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@vercel/analytics": "^2.0.1",
     "ai": "7.0.148",
