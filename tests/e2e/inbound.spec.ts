@@ -3,7 +3,8 @@
  * a stub of the provider on this machine (playwright.config.ts points RESEND_BASE_URL at it), keeps it whole, and says
  * it in the room under the lab's name, where a member's AI hears it as quoted speech; an unsigned request is refused;
  * a reply that reads as an instruction to a machine is held, the room told only that one came, and the maintainer
- * reads it in full at /editor/room, posts its cleaned words, and takes a line down.
+ * reads it in full at /editor/room, posts its cleaned words, and takes a line down; an email the provider will not
+ * hand over is kept by its id and read again from there.
  */
 import { createHash, createHmac } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
@@ -27,6 +28,8 @@ test.describe('replies from the labs', () => {
   const ids: { member?: string; email?: number; replies: number[] } = { replies: [] };
   const mails = new Map<string, Record<string, unknown>>();
   const got: string[] = [];
+  /** Ids the stub will not hand over, as a key that cannot read received email is answered: 401. */
+  const refused = new Set<string>();
   let stub: Server;
 
   const reply = (id: string, o: { from?: string; text: string; inReplyTo?: string }) => {
@@ -62,6 +65,11 @@ test.describe('replies from the labs', () => {
       got.push(`${req.method} ${req.url} ${req.headers.authorization ?? ''}`);
       req.on('data', () => undefined);
       req.on('end', () => {
+        if (m && refused.has(m[1])) {
+          res.writeHead(401, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ statusCode: 401, name: 'restricted_api_key', message: 'nope' }));
+          return;
+        }
         res.writeHead(mail ? 200 : 404, { 'content-type': 'application/json' });
         res.end(JSON.stringify(mail ?? { statusCode: 404, name: 'not_found', message: 'nope' }));
       });
@@ -221,5 +229,29 @@ test.describe('replies from the labs', () => {
     await page.locator(`#r-${held.id}`).getByRole('button', { name: 'Post its cleaned words under Anthropic’s name' }).click();
     await expect(page.locator('p.warn[role="status"]')).toContainText('Posted under the lab’s name');
     expect((await row(shut)).status).toBe('posted');
+  });
+
+  test('an email the provider will not hand over is kept by its id, held and said nowhere; the maintainer reads it again at /editor/room once it does, and it is said as the webhook would have', async ({ page, request }) => {
+    const providerId = `rcv-${tag}-6`;
+    reply(providerId, { text: 'Read at the second asking.', inReplyTo: `<${sentProviderId}@rally.test>` });
+    refused.add(providerId);
+    expect((await request.post('/api/outreach/inbound', webhook(providerId))).status()).toBe(200);
+    await expect.poll(async () => (await row(providerId))?.held_why, { timeout: 15_000 }).toBe('not read yet (401)');
+    const r = await row(providerId);
+    ids.replies.push(r.id);
+    expect(r).toMatchObject({ outreach_id: null, from_address: 'unknown', text: '', status: 'held', message_id: null });
+    expect((await db().query(`SELECT 1 FROM room_messages WHERE ref = $1`, [`reply:${r.id}`])).rowCount).toBe(0);
+    await login(page);
+    await expect(page.locator(`#r-${r.id}`)).toContainText('held: not read yet (401)');
+    await page.locator(`#r-${r.id}`).getByRole('button', { name: 'Read it again from the provider' }).click();
+    await expect(page.locator('p.warn[role="status"]')).toContainText('Still not read');
+    refused.delete(providerId);
+    await page.locator(`#r-${r.id}`).getByRole('button', { name: 'Read it again from the provider' }).click();
+    await expect(page.locator('p.warn[role="status"]')).toContainText('Read from the provider and kept');
+    const read = await row(providerId);
+    expect(read).toMatchObject({ id: r.id, outreach_id: ids.email, from_address: lab, text: 'Read at the second asking.', status: 'posted', held_why: null });
+    expect(await line(read.message_id!)).toMatchObject({ kind: 'person', status: 'published', name: 'Anthropic' });
+    await expect(page.locator(`#r-${r.id}`)).toContainText(`posted as line ${read.message_id}`);
+    await expect(page.locator(`#r-${r.id}`).getByRole('button', { name: 'Read it again from the provider' })).toHaveCount(0);
   });
 });

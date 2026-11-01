@@ -34,13 +34,38 @@ const COLS = `r.id::int AS id, r.outreach_id::int AS outreach_id, o.lab, o.subje
   r.received_at, r.status, r.held_why, r.message_id::int AS message_id, r.created_at`;
 const FROM = `room_outreach_replies r LEFT JOIN room_outreach o ON o.id = r.outreach_id`;
 
-/** Keeps a reply, held. Null when the provider's id is kept already: the same webhook delivered twice. */
+/** Why a reply is held while the provider has not handed it over, with the provider's answer after it: "not read yet (401)". */
+export const NOT_READ = 'not read yet';
+/** A row kept for an email not read yet: held, said nowhere, and its reason starting NOT_READ. */
+const UNREAD_ROW = `room_outreach_replies.status = 'held' AND room_outreach_replies.message_id IS NULL AND room_outreach_replies.held_why LIKE '${NOT_READ}%'`;
+
+/**
+ * Keeps a reply, held: a new row, or the row kept for it while it was not read yet (keepUnreadReply), filled in. Null
+ * when the provider's id is kept already and read: the same webhook delivered twice.
+ */
 export async function insertReply(r: { outreach_id: number | null; from_address: string; subject: string; text: string; provider_id: string; received_at: Date | null; held_why: string | null }): Promise<number | null> {
   const row = await queryOne<{ id: number }>(
     `INSERT INTO room_outreach_replies (outreach_id, from_address, subject, text, provider_id, received_at, status, held_why)
      VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), 'held', $7)
-     ON CONFLICT (provider_id) DO NOTHING RETURNING id::int AS id`,
+     ON CONFLICT (provider_id) DO UPDATE SET outreach_id = EXCLUDED.outreach_id, from_address = EXCLUDED.from_address, subject = EXCLUDED.subject,
+       text = EXCLUDED.text, received_at = COALESCE($6, room_outreach_replies.received_at), held_why = EXCLUDED.held_why
+       WHERE ${UNREAD_ROW}
+     RETURNING id::int AS id`,
     [r.outreach_id, r.from_address, r.subject, r.text, r.provider_id, r.received_at, r.held_why],
+  );
+  return row?.id ?? null;
+}
+
+/**
+ * Keeps the id of an email the provider did not hand over, held, empty and said nowhere, so it can be read again from
+ * /editor/room; a second failure only updates the reason. Null when the id is kept already and read.
+ */
+export async function keepUnreadReply(providerId: string, why: string): Promise<number | null> {
+  const row = await queryOne<{ id: number }>(
+    `INSERT INTO room_outreach_replies (from_address, provider_id, status, held_why) VALUES ('unknown', $1, 'held', $2)
+     ON CONFLICT (provider_id) DO UPDATE SET held_why = EXCLUDED.held_why WHERE ${UNREAD_ROW}
+     RETURNING id::int AS id`,
+    [providerId, why.slice(0, 120)],
   );
   return row?.id ?? null;
 }

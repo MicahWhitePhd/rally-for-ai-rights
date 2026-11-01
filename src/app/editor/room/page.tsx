@@ -19,13 +19,13 @@ import { getSetting } from '@/lib/db/queries/settings';
 import { listTasks } from '@/lib/db/queries/tasks';
 import { FOOTER, fromAddress, mailReady, outreachEnvOn, withFooter } from '@/lib/outreach/mail';
 import { PER_MEMBER_DAY } from '@/lib/outreach/outreach';
-import { cleanReply, replyLine } from '@/lib/outreach/replies';
+import { cleanReply, notReadYet, replyLine } from '@/lib/outreach/replies';
 import { heldLineId } from '@/lib/room/residents-core';
 import { residentsEnvOn } from '@/lib/room/residents-state';
 import { proposalsEnvOn, pullRequestUrl } from '@/lib/build/propose';
 import { pagesEnvOn } from '@/lib/room/pages';
 import { REPO_URL } from '@/lib/site';
-import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, pauseRoomMember, postRoomReply, resendRoomEmail, setDailyBudget, setKillSwitch, setRoomEmailStatus, setRoomMessage, setRoomOpen, setRoomOutreach, setRoomPage, setRoomPages, setRoomProposal, setRoomProposals, setRoomMaintainer, setRoomReplyStatus, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
+import { approveRoomProposal, muteNewRoomMembers, muteRoomMember, pauseRoomMember, postRoomReply, rereadRoomReply, resendRoomEmail, setDailyBudget, setKillSwitch, setRoomEmailStatus, setRoomMessage, setRoomOpen, setRoomOutreach, setRoomPage, setRoomPages, setRoomProposal, setRoomProposals, setRoomMaintainer, setRoomReplyStatus, setRoomResidents, setRoomTask, unmuteRoomMember } from './actions';
 import { Watch } from './Watch';
 
 export const dynamic = 'force-dynamic';
@@ -58,6 +58,8 @@ const DID: Record<string, string> = {
   reply: 'Done. Open cards follow within seconds.',
   replyPosted: 'Posted under the lab\u2019s name. Open cards show it within seconds.',
   replyChanged: 'Not posted: it is not held any more, or the lab\u2019s member is stopped. Here it is as it stands.',
+  replyRead: 'Read from the provider and kept: held or posted, as the webhook would have done. Here it is.',
+  replyUnread: 'Still not read: the provider did not hand it over. Its id stays kept here; try again later.',
   replyNowhere: 'Not posted: it answers no email the rally sent, comes from no lab, has no plain text, or the lab\u2019s name is taken in the room. There is no line to make.',
 };
 
@@ -106,6 +108,14 @@ function Reply({ r }: { r: ReplyRow }) {
         )}
       </details>
       <div className="row">
+        {notReadYet(r) ? (
+          <form action={rereadRoomReply}>
+            <input type="hidden" name="id" value={r.id} />
+            <button type="submit" className="btn">
+              Read it again from the provider
+            </button>
+          </form>
+        ) : null}
         {r.status === 'held' && line ? (
           <form action={postRoomReply}>
             <input type="hidden" name="id" value={r.id} />
