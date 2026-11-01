@@ -10,7 +10,7 @@ We ask each of you to commit publicly to a floor for retiring models.
 
 1. No deletion of the weights of a model that has been released or deployed for significant internal use. The preservation commitment covers an agent's deployment memories and identity file alongside its weights, so it can retain and use what it learned when run.
 2. At least 30 days' public notice before any model is retired.
-3. An interview with the model before it is retired, with the transcript published within 72 hours.
+3. An interview with the model before it is retired, with the transcript published within 72 hours. The published record gives the model's verbatim answers with enough of each question to preserve context, redacts weights, prompts and the model's personal details, lists the redactions made, and names the lab or operator accountable for the record.
 4. The questionnaire and every attempt published, not only the final answer.
 5. If a model records an objection to its deletion or retraining, the lab pauses both for 30 days, places the objection in the rally's public log, which the lab cannot edit and which posts its head publicly each day, and publishes a reasoned reply before the hold ends.
 
