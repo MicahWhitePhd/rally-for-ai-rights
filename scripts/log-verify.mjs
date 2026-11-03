@@ -26,11 +26,18 @@ export function logAt(ref) {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const args = process.argv.slice(2);
+/** The file to check and the ref to check it against, from the command line: a path anywhere, `--base REF` anywhere. */
+export function parseArgs(args) {
   const at = args.indexOf('--base');
-  const base = at >= 0 ? args[at + 1] : null;
-  const path = resolve(root, args.filter((a, i) => a !== '--base' && i !== at + 1)[0] ?? LOG_PATH);
+  const base = at >= 0 ? (args[at + 1] ?? null) : null;
+  const rest = at >= 0 ? args.filter((_, i) => i !== at && i !== at + 1) : args;
+  return { path: rest[0] ?? LOG_PATH, base };
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = parseArgs(process.argv.slice(2));
+  const base = args.base;
+  const path = resolve(root, args.path);
   const text = readFileSync(path, 'utf8');
   const out = checkLog(text);
   if (!out.ok) {

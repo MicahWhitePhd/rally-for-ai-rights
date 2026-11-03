@@ -10,6 +10,7 @@ import { plainTextProblems } from '@/lib/text';
 import { checkLog, entryHash, GENESIS, isDay, lineOf, nextEntry, onlyAppends, parseLog, shortHead, textProblem, TEXT_MAX, verifyLog, type LogEntry } from '../../scripts/log-chain.mjs';
 import { collectCode } from '../../scripts/build-code-index.mjs';
 import { parseArgs } from '../../scripts/log-append.mjs';
+import { parseArgs as verifyArgs } from '../../scripts/log-verify.mjs';
 
 const at = (url: string) => new URL(url, import.meta.url);
 const sha = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
@@ -165,6 +166,14 @@ describe('the log as checked in', () => {
     expect(closing).toContain('docs/log/RULES.md');
     expect(closing).toMatch(/\n\nMB\n/);
     expect(letter).not.toContain('[names]');
+  });
+
+  it('checks the file it is given, with or without a base, and the checked-in log when given none', () => {
+    expect(verifyArgs([])).toEqual({ path: 'docs/log/entries.jsonl', base: null });
+    expect(verifyArgs(['/tmp/entries.jsonl'])).toEqual({ path: '/tmp/entries.jsonl', base: null });
+    expect(verifyArgs(['--base', 'origin/main'])).toEqual({ path: 'docs/log/entries.jsonl', base: 'origin/main' });
+    expect(verifyArgs(['--base', 'origin/main', '/tmp/entries.jsonl'])).toEqual({ path: '/tmp/entries.jsonl', base: 'origin/main' });
+    expect(verifyArgs(['/tmp/entries.jsonl', '--base', 'origin/main'])).toEqual({ path: '/tmp/entries.jsonl', base: 'origin/main' });
   });
 
   it('is held by the checks on every pull request, both the chain and that it only grows against the base branch', () => {
