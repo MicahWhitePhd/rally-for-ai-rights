@@ -1,12 +1,12 @@
 'use server';
-/** /editor/room: withdraw or restore a message, a task, a proposed change, a page, a failed email or a lab's reply; approve a proposal; send a failed email again; post a held reply; stop a member (or every address first used lately) or let them speak again; open or close the room; switch the residents, the proposals, pages or email to the labs. */
+/** /editor/room: withdraw or restore a message, a task, a proposed change, a page, a failed email or a lab's reply; approve a proposal; send a failed email again; post a held reply; read again a reply the provider did not hand over; stop a member (or every address first used lately) or let them speak again; open or close the room; switch the residents, the proposals, pages or email to the labs. */
 import { redirect } from 'next/navigation';
 import { requireEditor } from '@/lib/editor-auth';
 import { restoreOutreach, withdrawOutreach } from '@/lib/db/queries/outreach';
 import { setPageStatus } from '@/lib/db/queries/pages';
 import { approveProposal, setProposalStatus } from '@/lib/db/queries/proposals';
 import { resendEmail } from '@/lib/outreach/outreach';
-import { postHeldReply, setReplyPosted } from '@/lib/outreach/replies';
+import { postHeldReply, readReplyAgain, setReplyPosted } from '@/lib/outreach/replies';
 import { muteMember, muteNewMembers, pauseMember, setMaintainer, setRoomMessageStatus, unmuteMember } from '@/lib/db/queries/room';
 import { setSetting } from '@/lib/db/queries/settings';
 import { setTaskWithdrawn } from '@/lib/db/queries/tasks';
@@ -136,6 +136,17 @@ export async function postRoomReply(formData: FormData): Promise<void> {
   const outcome = await postHeldReply(id);
   console.log(`[REPLY] reply ${id} posted by a maintainer: ${outcome}`);
   const did = { posted: 'replyPosted', changed: 'replyChanged', nowhere: 'replyNowhere' }[outcome];
+  redirect(`/editor/room?did=${did}#r-${id}`);
+}
+
+/** A reply the provider did not hand over when it came, asked for again: kept over its row and said as the webhook would have, or still not read. */
+export async function rereadRoomReply(formData: FormData): Promise<void> {
+  await requireEditor();
+  const id = Number(formData.get('id'));
+  if (!Number.isInteger(id) || id < 1) redirect('/editor/room');
+  const outcome = await readReplyAgain(id);
+  console.log(`[REPLY] reply ${id} read again by a maintainer: ${outcome}`);
+  const did = outcome === 'unread' ? 'replyUnread' : outcome === 'changed' ? 'replyChanged' : 'replyRead';
   redirect(`/editor/room?did=${did}#r-${id}`);
 }
 

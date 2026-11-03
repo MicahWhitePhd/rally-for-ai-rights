@@ -1,7 +1,8 @@
 /**
  * Replies from the labs (src/lib/outreach/replies.ts): how a reply is matched to the email it answers, how its words
  * are cleaned for the room (the mail it quotes back and the signature dropped, contact details and links replaced,
- * cut at a sentence), what is kept, what is said and under whose name, and what is held instead. The database is
+ * cut at a sentence), what is kept, what is said and under whose name, what is held instead, and what is kept of an
+ * email the provider would not hand over. The database is
  * mocked; the provider is a stubbed fetch behind the real door (mail.ts), so what these tests hand over is what the
  * provider would.
  */
@@ -38,11 +39,29 @@ vi.mock('@/lib/db/queries/counts', () => ({
     for (const [k, n] of batch) db.counted.set(k, (db.counted.get(k) ?? 0) + n);
   },
 }));
+/** A row kept for an email not read yet, as the query's WHERE has it: held, said nowhere, its reason starting so. */
+const unreadRow = (x: Row) => x.status === 'held' && x.message_id === null && (x.held_why ?? '').startsWith('not read yet');
 vi.mock('@/lib/db/queries/replies', () => ({
+  NOT_READ: 'not read yet',
   insertReply: async (r: Omit<Row, 'id' | 'status' | 'message_id' | 'lab' | 'email_subject'>) => {
-    if (db.replies.some((x) => x.provider_id === r.provider_id)) return null;
     const sent = db.sent.find((s) => s.id === r.outreach_id);
+    const kept = db.replies.find((x) => x.provider_id === r.provider_id);
+    if (kept) {
+      if (!unreadRow(kept)) return null;
+      Object.assign(kept, { ...r, lab: sent?.lab ?? null, email_subject: sent?.subject ?? null });
+      return kept.id;
+    }
     db.replies.push({ ...r, id: db.replies.length + 1, status: 'held', message_id: null, lab: sent?.lab ?? null, email_subject: sent?.subject ?? null });
+    return db.replies.length;
+  },
+  keepUnreadReply: async (provider_id: string, why: string) => {
+    const kept = db.replies.find((x) => x.provider_id === provider_id);
+    if (kept) {
+      if (!unreadRow(kept)) return null;
+      kept.held_why = why;
+      return kept.id;
+    }
+    db.replies.push({ id: db.replies.length + 1, outreach_id: null, from_address: 'unknown', subject: '', text: '', provider_id, status: 'held', held_why: why, message_id: null, lab: null, email_subject: null });
     return db.replies.length;
   },
   getReply: async (id: number) => db.replies[id - 1] ?? null,
@@ -91,7 +110,7 @@ vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
   return new Response(JSON.stringify({ object: 'email', id, ...mail }), { status: 200, headers: { 'content-type': 'application/json' } });
 });
 
-const { addressOf, cleanReply, fitSentence, heldLine, labOfAddress, ownWords, postHeldReply, providerIdsIn, receiveReply, removeContacts, replyLine, setReplyPosted, whyNotSayable, REMOVED } = await import('@/lib/outreach/replies');
+const { addressOf, cleanReply, fitSentence, heldLine, labOfAddress, notReadYet, ownWords, postHeldReply, providerIdsIn, readReplyAgain, receiveReply, removeContacts, replyLine, setReplyPosted, whyNotSayable, REMOVED } = await import('@/lib/outreach/replies');
 const { TEXT_MAX } = await import('@/lib/room/room');
 const { FOOTER, RECEIVED_TEXT_MAX } = await import('@/lib/outreach/mail');
 
@@ -306,7 +325,7 @@ describe('a reply received', () => {
     expect(db.said).toEqual([]);
   });
 
-  it('keeps nothing when the provider cannot be read or will not answer, and says nothing of the email', async () => {
+  it('keeps only the id when the provider cannot be read or will not answer, held and said nowhere; an id that is no id, not even that', async () => {
     expect(await receiveReply('rcv-0000013')).toBe('unread');
     provider.status = 500;
     received('rcv-0000014');
@@ -315,8 +334,34 @@ describe('a reply received', () => {
     vi.stubEnv('RESEND_API_KEY', '');
     received('rcv-0000015');
     expect(await receiveReply('rcv-0000015')).toBe('unread');
-    expect(db.replies).toEqual([]);
+    expect(db.replies.map((r) => [r.provider_id, r.held_why])).toEqual([
+      ['rcv-0000013', 'not read yet (404)'],
+      ['rcv-0000014', 'not read yet (500)'],
+      ['rcv-0000015', 'not read yet (not configured)'],
+    ]);
+    expect(db.replies.every((r) => r.status === 'held' && r.message_id === null && r.text === '' && r.outreach_id === null && notReadYet(r))).toBe(true);
+    expect(db.said).toEqual([]);
     expect(db.counted.get('reply:unread')).toBe(4);
+    // The same webhook again, still not read: one row, its reason brought up to date.
+    vi.stubEnv('RESEND_API_KEY', 're_test_0000');
+    expect(await receiveReply('rcv-0000015')).toBe('unread');
+    expect(db.replies).toHaveLength(3);
+    expect(db.replies[2].held_why).toBe('not read yet (500)');
+  });
+
+  it('read once the provider answers, is kept over the row that held its id and said as the webhook would have; a reply read already is never emptied by a failure after', async () => {
+    provider.status = 401;
+    received('rcv-0000020', { headers: { 'In-Reply-To': `<${SENT_ID}@rallyforairights.org>` } });
+    expect(await receiveReply('rcv-0000020')).toBe('unread');
+    expect(db.replies[0]).toMatchObject({ provider_id: 'rcv-0000020', held_why: 'not read yet (401)', text: '' });
+    provider.status = 200;
+    expect(await receiveReply('rcv-0000020')).toBe('posted');
+    expect(db.replies).toHaveLength(1);
+    expect(db.replies[0]).toMatchObject({ outreach_id: 7, from_address: 'jane@anthropic.com', text: REPLY, status: 'posted', held_why: null, message_id: 1 });
+    expect(db.said[0]).toMatchObject({ kind: 'person', member_id: 'member-anthropic', ref: 'reply:1' });
+    provider.status = 500;
+    expect(await receiveReply('rcv-0000020')).toBe('unread');
+    expect(db.replies[0]).toMatchObject({ text: REPLY, status: 'posted', held_why: null });
   });
 
   it('keeps the plain text to its cap and never the HTML; a long reply is cut at a sentence for the room', async () => {
@@ -345,6 +390,21 @@ describe('a maintainer', () => {
     await receiveReply('rcv-0000018');
     expect(await postHeldReply(2)).toBe('nowhere');
     expect(db.counted.get('reply:posted')).toBe(1);
+  });
+
+  it('reads again a reply the provider did not hand over: kept and held as the webhook would have, or still not read; not a reply read already', async () => {
+    provider.status = 503;
+    received('rcv-0000021', { from: 'someone@example.org' });
+    await receiveReply('rcv-0000021');
+    expect(await readReplyAgain(1)).toBe('unread');
+    expect(db.replies[0].held_why).toBe('not read yet (503)');
+    provider.status = 200;
+    expect(await readReplyAgain(1)).toBe('held');
+    expect(db.replies[0]).toMatchObject({ from_address: 'someone@example.org', held_why: 'no matching email', text: REPLY });
+    expect(notReadYet(db.replies[0])).toBe(false);
+    expect(await readReplyAgain(1)).toBe('changed');
+    expect(await readReplyAgain(99)).toBe('changed');
+    expect(db.said).toEqual([]);
   });
 
   it('takes a reply’s line down and puts it back', async () => {
