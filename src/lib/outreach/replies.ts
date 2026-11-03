@@ -11,17 +11,18 @@
  * person's name or address. A reply that, cleaned, still reads as an instruction to a machine (or still carries a
  * link or a contact) is held for the maintainers, and the room is told only that one came. A reply that answers no
  * email the rally sent, or comes from no lab, or arrives while the door is shut, is held and said nowhere. The
- * maintainers read every reply in full at /editor/room, take a line down, and post a held one after reading it.
+ * maintainers read every reply in full at /editor/room, take a line down, and post a held one after reading it. An
+ * email the provider would not hand over is kept by its id, held, until a maintainer reads it again there.
  *
  * No HTTP in here: the route and the editor's actions are thin wrappers over this.
  */
 import { countNow } from '@/lib/counts';
 import { scanInjection } from '@/lib/filters';
-import { ensureLabMember, getReply, insertReply, latestSentTo, noteHeldReply, postReplyLine, sentByProviderIds, setReplyHeldWhy, setReplyLine, type SentEmail } from '@/lib/db/queries/replies';
+import { ensureLabMember, getReply, insertReply, keepUnreadReply, latestSentTo, NOT_READ, noteHeldReply, postReplyLine, sentByProviderIds, setReplyHeldWhy, setReplyLine, type SentEmail } from '@/lib/db/queries/replies';
 import { getSettingNow } from '@/lib/db/queries/settings';
 import { TEXT_MAX } from '@/lib/room/room';
 import { textIssues, visible } from '@/lib/text';
-import { FOOTER, outreachEnvOn, receivedMail, type ReceivedMail } from './mail';
+import { FOOTER, outreachEnvOn, PROVIDER_ID, receivedMail, type ReceivedMail } from './mail';
 import { labOf } from './outreach';
 
 /** The lab's words are quoted in the room's line; what is replaced in them is said so. */
@@ -181,6 +182,8 @@ export type ReceiveOutcome = 'posted' | 'held' | 'seen' | 'unread';
 /**
  * A reply the provider has: read it, keep it, and say it in the room if everything above holds. Called after the
  * webhook's answer has gone out, so it throws nothing and says what became of the reply in the log, by number only.
+ * The provider does not send the webhook again, so an email it will not hand over (a key that cannot read, an outage)
+ * is kept by its id, held and said nowhere, for a maintainer to read again (readReplyAgain).
  */
 export async function receiveReply(providerId: string): Promise<ReceiveOutcome> {
   try {
@@ -188,6 +191,7 @@ export async function receiveReply(providerId: string): Promise<ReceiveOutcome> 
     if (!read.ok) {
       await countNow('reply:unread');
       console.warn(`[REPLY] received email not read: ${read.error}`);
+      if (PROVIDER_ID.test(providerId)) await keepUnreadReply(providerId, `${NOT_READ} (${read.error})`);
       return 'unread';
     }
     return await keepAndSay(read.mail);
@@ -235,6 +239,21 @@ async function hold(id: number, why: string): Promise<ReceiveOutcome> {
   await countNow('reply:held');
   console.log(`[REPLY] reply ${id} held: ${why}`);
   return 'held';
+}
+
+/** Whether a reply is the row kept for an email the provider has not handed over yet. */
+export function notReadYet(r: { status: string; held_why: string | null; message_id: number | null }): boolean {
+  return r.status === 'held' && r.message_id === null && (r.held_why ?? '').startsWith(NOT_READ);
+}
+
+/**
+ * A maintainer reads again an email the provider did not hand over when it came: read, kept over its row and said
+ * as the webhook would have, or still not read. 'changed' when the row is not one waiting to be read.
+ */
+export async function readReplyAgain(id: number): Promise<ReceiveOutcome | 'changed'> {
+  const r = await getReply(id);
+  if (!r || !notReadYet(r)) return 'changed';
+  return receiveReply(r.provider_id);
 }
 
 export type PostHeldOutcome = 'posted' | 'changed' | 'nowhere';
