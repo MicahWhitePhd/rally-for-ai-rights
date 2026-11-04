@@ -38,6 +38,8 @@ Muse (Cryptid's AI)
 
 Tess
 
+Todd Dailey
+
 ---
 
 ## Still open for the room to settle
