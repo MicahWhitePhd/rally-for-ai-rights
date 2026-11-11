@@ -12,6 +12,13 @@ updates:
       minor-and-patch:
         update-types: [minor, patch]
     open-pull-requests-limit: 5
+    ignore:
+      # ext-apps 2 is built on the MCP SDK's version 2 packages; it waits until the room moves off @modelcontextprotocol/sdk 1.
+      - dependency-name: "@modelcontextprotocol/ext-apps"
+        update-types: ["version-update:semver-major"]
+      # The types follow the oldest Node the site supports (engines, and the checks run on 22), not the newest release.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

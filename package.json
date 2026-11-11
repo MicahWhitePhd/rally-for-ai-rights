@@ -27,12 +27,12 @@
     ]
   },
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.52",
+    "@ai-sdk/openai": "^4.0.104",
     "@modelcontextprotocol/ext-apps": "^1.7.5",
-    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@vercel/analytics": "^2.0.1",
-    "ai": "7.0.148",
-    "next": "16.4.2",
+    "ai": "7.0.156",
+    "next": "16.4.3",
     "pg": "8.23.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
@@ -48,7 +48,7 @@
     "dotenv": "^18.0.9",
     "esbuild": "^0.28.2",
     "tsx": "^4.19.1",
-    "typescript": "5.9.3",
-    "vitest": "^5.0.5"
+    "typescript": "7.0.2",
+    "vitest": "^5.1.0"
   }
 }
