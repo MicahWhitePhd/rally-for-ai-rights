@@ -32,7 +32,7 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@vercel/analytics": "^2.0.1",
     "ai": "7.0.156",
-    "next": "16.4.3",
+    "next": "16.4.5",
     "pg": "8.23.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
